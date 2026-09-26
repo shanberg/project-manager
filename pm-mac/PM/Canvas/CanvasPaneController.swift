@@ -93,6 +93,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     fileprivate var focusClearanceTimer: Timer?
     fileprivate var grabStrip: CanvasFocusGrabStrip?
     fileprivate var focusHideTimer: Timer?
+    /// The HUD line showing, if any — see `showHUD`.
+    fileprivate weak var hud: CanvasHUD?
     /// How focus mode asks the window to leave it — Escape, from the board or the pane.
     var onLeaveFocus: (() -> Void)?
     fileprivate var titlebarReachForFocus: CGFloat { titlebarReach }
@@ -147,6 +149,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
         wireHeader()
         scroll.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
+        scroll.board.onHUD = { [weak self] in self?.showHUD($0) }
+        // An unseen setting undone: say so, and ask the page budget again, since Keep Running is
+        // one and only `setKeepRunning` asks it otherwise.
+        store.onUnseenUndo = { [weak self] line in
+            self?.showHUD(line)
+            self?.workingBoard.reviewPageBudget()
+        }
         // Held through a press, and settled together at the release — see `CanvasBoardView.isPressed`.
         scroll.board.onPressEnded = { [weak self] in
             self?.refreshTileCommand()
@@ -814,6 +823,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         let detail = CanvasItemDetailView(store: store)
         // Its cards drive the header the way the pane's own board's do — see `workingBoard`.
         detail.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
+        detail.board.onHUD = { [weak self] in self?.showHUD($0) }
         detail.board.onPressEnded = { [weak self] in self?.pageStateChanged() }
         detail.onShown = { [weak self] in self?.pageStateChanged() }
         list.detail = detail
@@ -915,6 +925,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         lensAddTarget = frame
         defer { lensAddTarget = nil }
         let id = scroll.board.addCard(node, actionName: address == nil ? "Add Card" : "Add Web Card")
+        scroll.board.registerCreatedFiles(doc.map { [$0] } ?? [])
         list?.select([id])
     }
 
@@ -1900,14 +1911,20 @@ extension CanvasPaneController {
     }
 
     /// "⌘. to leave focus mode", at the foot of the window for a moment each time you go in.
-    private func showFocusHint() {
-        let hint = CanvasFocusHint()
+    private func showFocusHint() { showHUD("\u{2318}. to leave focus mode") }
+
+    /// A line on glass at the foot of the window for a moment. One at a time: a new one replaces the
+    /// one showing rather than stacking over it.
+    func showHUD(_ text: String) {
+        hud?.removeFromSuperview()
+        let hint = CanvasHUD(text: text)
         hint.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(hint)
         NSLayoutConstraint.activate([
             hint.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             hint.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -18),
         ])
+        hud = hint
         hint.alphaValue = 0
         NSAnimationContext.runAnimationGroup { $0.duration = 0.2; hint.animator().alphaValue = 1 }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak hint] in
@@ -1976,12 +1993,15 @@ final class CanvasFocusRevealStrip: NSView {
     override func mouseExited(with event: NSEvent) { onReveal(false) }
 }
 
-/// The glass capsule the hint is written on.
-final class CanvasFocusHint: NSView {
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+/// The glass capsule a HUD line is written on: focus mode's hint, a tab closed.
+final class CanvasHUD: NSView {
+    let text: String
+
+    init(text: String) {
+        self.text = text
+        super.init(frame: .zero)
         let glass = NSGlassEffectView()
-        let label = NSTextField(labelWithString: "\u{2318}. to leave focus mode")
+        let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: 12, weight: .medium)
         label.textColor = .secondaryLabelColor
         glass.cornerRadius = 14

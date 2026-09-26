@@ -558,6 +558,8 @@ extension CanvasBoardView {
     }
 
     func setArrangement(_ arrangement: CanvasTiling.Arrangement) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Change Arrangement", from: undoFrom) }
         guard var session = tiling else { return }
         CanvasTiling.savedArrangement = arrangement
         session.columns = CanvasTiling.columns(arrangement, of: session.readingOrder, in: session.area,
@@ -635,6 +637,82 @@ extension CanvasBoardView {
         setLayout(session.layout, animated: true)
         onTilingChanged?()
         announceTiling()
+    }
+
+    /// Close tabs or tiles on purpose — the ×, and the menus' Close and Remove — as one step ⌘Z takes
+    /// back. A close is one click from a tab you meant to show, and what it takes away is an
+    /// arrangement, which you can't rebuild from memory once it's gone.
+    ///
+    /// Not for the last card, which leaves the tiling (`removeFromTiling`): the workspace is kept, and
+    /// its tab brings it back.
+    func closeInTiling(_ ids: [String]) {
+        guard let before = tiling else { return }
+        let closing = ids.filter(before.cards.contains)
+        guard !closing.isEmpty else { return }
+        let tabbed = closing.allSatisfy { before.tabs(of: $0).count > 1 }
+        let noun = tabbed ? (closing.count == 1 ? "Tab" : "Tabs") : (closing.count == 1 ? "Tile" : "Tiles")
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Close \(noun)", from: undoFrom) }
+        restoringMaximized { removeFromTiling(closing) }
+    }
+
+    // MARK: Undo
+
+    /// Open a step of arrangement undo: what the workspace is now, to put back. Steps nest — a command
+    /// made of other commands is one step, the outermost — so every `begin` is paired with an `end`
+    /// in a `defer`.
+    func beginTilingUndo() -> CanvasTileSession? {
+        tilingUndoDepth += 1
+        return tiling
+    }
+
+    /// Close the step: if the arrangement changed, ⌘Z puts `before` back.
+    ///
+    /// `shows` is whether the change can be seen. Most can — a tile moves, a tab goes — and undoing
+    /// those needs no word. One that can't (a pin, which changes nothing until the window does) says
+    /// on the HUD what ⌘Z and ⇧⌘Z did, or they would look like they did nothing.
+    func endTilingUndo(_ name: String, from before: CanvasTileSession?, shows: Bool = true) {
+        tilingUndoDepth -= 1
+        guard tilingUndoDepth == 0, let before else { return }
+        registerTilingUndo(name, from: before, shows: shows)
+    }
+
+    /// Put `before` back on ⌘Z, and what replaced it on ⇧⌘Z.
+    ///
+    /// Only onto the arrangement it replaced — the same cards: a workspace changed since by some other
+    /// path, or a different workspace up, is not the one this step belongs to, and forcing the old one
+    /// over it would lose that change instead.
+    func registerTilingUndo(_ name: String, from before: CanvasTileSession, shows: Bool = true) {
+        guard let after = tiling, !Self.sameArrangement(after, before) else { return }
+        let undo = store.undoManager
+        undo.registerUndo(withTarget: self) { board in
+            let undoing = undo.isUndoing
+            guard let now = board.tiling, now.cards == after.cards else { return NSSound.beep() }
+            var restored = before
+            // Measured for the window as it is now, and returning to the board as it is now.
+            restored.area = now.area
+            restored.restoreVisible = now.restoreVisible
+            restored.restoreZoom = now.restoreZoom
+            board.tiling = restored
+            let back = Set(restored.ids).subtracting(now.cards)
+            if !back.isEmpty { board.selection = back }
+            board.setLayout(restored.layout, animated: true)
+            board.onTilingChanged?()
+            board.announceTiling()
+            board.registerTilingUndo(name, from: now, shows: shows)
+            if !shows { board.onHUD?("\(undoing ? "Undo" : "Redo") \(name)") }
+        }
+        undo.setActionName(name)
+    }
+
+    /// Whether two sessions are the same arrangement, whatever window they were measured for.
+    static func sameArrangement(_ a: CanvasTileSession, _ b: CanvasTileSession) -> Bool {
+        var a = a
+        a.area = b.area
+        a.restoreVisible = b.restoreVisible
+        a.restoreZoom = b.restoreZoom
+        a.preselection = b.preselection
+        return a == b
     }
 
     /// A card that has gone takes its tile with it.
@@ -741,6 +819,8 @@ extension CanvasBoardView {
     /// Put a card from the board where `id` is showing, and take `id` out — back to its place on the
     /// board, untouched. Focused, as a card you went looking for is (`addExistingCard`).
     func replaceInTiling(_ id: String, with other: String) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Replace Tile", from: undoFrom) }
         guard var session = tiling, document.node(id: other).map({ !$0.isGroup }) ?? false,
               session.replace(id, with: other) else { return NSSound.beep() }
         tiling = session
@@ -763,6 +843,8 @@ extension CanvasBoardView {
     /// underneath one, which is right for a card you have just made — it shows up in its place when you
     /// restore — and wrong for one you went looking for, which would be added somewhere you can't see.
     func addExistingCard(withID id: String) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Add to Workspace", from: undoFrom) }
         guard let tiling, !tiling.cards.contains(id),
               document.node(id: id).map({ !$0.isGroup }) ?? false else { return }
         restoringMaximized { addToTiling(id) }
@@ -899,6 +981,8 @@ extension CanvasBoardView {
     /// order they sit, or takes them all out when they all are — the same reading of a frame as
     /// ⌘Return on one (`tileTargets`). Never the last card out: a workspace of nothing is not a state.
     func pick(_ id: String) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Change Workspace", from: undoFrom) }
         guard let session = tiling, let node = document.node(id: id) else { return }
         var ids = [id]
         if node.isGroup {
@@ -1025,6 +1109,8 @@ extension CanvasBoardView {
     /// ⌥T: take the card showing in a tile of several out into a tile of its own, beside the one it
     /// came from — along that tile's longer side, as any new card would go.
     func pullTabOut(_ id: String) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Pull Out of Tabs", from: undoFrom) }
         guard var session = tiling, session.hasTabs(id),
               let placement = session.automaticPlacement(beside: id) else { return NSSound.beep() }
         restoringMaximized {
@@ -1102,6 +1188,8 @@ extension CanvasBoardView {
 
     /// Let go of a tab slid along its strip: it takes the place it was dropped in.
     func moveTab(_ card: String, to index: Int) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Move Tab", from: undoFrom) }
         guard var session = tiling, session.moveTab(card, to: index) else { return }
         tiling = session
         setLayout(session.layout, animated: false)
@@ -1114,6 +1202,8 @@ extension CanvasBoardView {
     /// Tabs on the Side: a tile's tabs down its leading side, or back across its top (backlog 36). The
     /// card beside them moves over as the layout does, so it animates like any other change of shape.
     func toggleTabsOnSide(_ id: String) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Move Tabs", from: undoFrom) }
         guard var session = tiling else { return }
         session.setTabsOnSide(id, !session.tabsOnSide(id))
         hoveredTab = nil
@@ -1164,6 +1254,8 @@ extension CanvasBoardView {
 
     /// ⌥⇧ arrows: move the focused tile — across into the next column, or up and down its own.
     func moveTile(_ direction: CanvasNavigation.Direction) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Move Tile", from: undoFrom) }
         guard let id = focusedTile else { return NSSound.beep() }
         restoringMaximized {
             guard var session = tiling else { return }
@@ -1181,6 +1273,8 @@ extension CanvasBoardView {
 
     /// ⌥= and ⌥−: the focused tile's column wider or narrower — or, with ⇧, the tile taller or shorter.
     func growTile(vertically: Bool, by delta: Double) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Resize Tile", from: undoFrom) }
         guard let id = focusedTile, var session = tiling, session.maximized == nil,
               session.grow(id, vertically: vertically, by: delta) else { return NSSound.beep() }
         commitTiling(session)
@@ -1188,6 +1282,8 @@ extension CanvasBoardView {
 
     /// ⌥0: every column and tile back to sharing equally.
     func balanceTiles() {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Balance Tiles", from: undoFrom) }
         guard var session = tiling else { return }
         session.balance()
         guard session != tiling else { return }
@@ -1202,6 +1298,8 @@ extension CanvasBoardView {
     /// while it is on — fight the drag, or quietly switch itself off at the first one — and either way
     /// the widths would no longer be what you last did. Done once, it is one more way to set them.
     func sizeTilesToContent() {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Size Tiles to Content", from: undoFrom) }
         guard var session = tiling else { return }
         session.sizeToContent { [document] id in
             document.node(id: id).map(CanvasTileSession.contentWidth) ?? 320
@@ -1293,6 +1391,8 @@ extension CanvasBoardView {
     /// Let go of a carried tile: what the preview showed happens, and the card settles into its place.
     func finishDrop(of id: String, _ drop: (target: String, drop: CanvasTileSession.Drop)?,
                     pulling: Bool) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Move Tile", from: undoFrom) }
         dropMark = nil
         guard var session = tiling else { return }
         if let drop { session.land(id, on: drop.target, drop.drop, pulling: pulling) }
@@ -1339,6 +1439,9 @@ extension CanvasBoardView {
     /// if dragging pinned things, every tile you ever adjusted would stop responding to the window and
     /// the arrangement would gradually turn into a fixed layout without anyone asking for it.
     func togglePinTile(_ id: String) {
+        let undoName = (isTilePinned(id) ? "Unpin Tile" : "Pin Tile")
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo(undoName, from: undoFrom, shows: false) }
         guard var session = tiling else { return }
         session.togglePin(id)
         commitTiling(session)
@@ -1347,6 +1450,8 @@ extension CanvasBoardView {
     /// A pin on one side of a boundary — the boundary's own menu, which is about the column or the tile
     /// either side of it rather than about a card.
     func togglePin(_ run: CanvasTileDivider.Run, at index: Int) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Pin", from: undoFrom, shows: false) }
         guard var session = tiling else { return }
         session.togglePin(run, at: index)
         commitTiling(session)
@@ -1354,6 +1459,8 @@ extension CanvasBoardView {
 
     /// Put a run back to sharing equally. See `CanvasTileSession.evenOut`.
     func evenOut(_ run: CanvasTileDivider.Run) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Even Out", from: undoFrom) }
         guard var session = tiling else { return }
         session.evenOut(run)
         commitTiling(session)
@@ -1380,6 +1487,8 @@ extension CanvasBoardView {
     /// was written on a contextual-menu item, which is drawn and never searched. Both are real now,
     /// and the double-click is gone rather than fixed — see `CanvasBoardView.mouseDown`.
     func promoteInTiling(_ id: String) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Make Master Tile", from: undoFrom) }
         guard var session = tiling else { return }
         session.promote(id)
         tiling = session
@@ -1391,6 +1500,8 @@ extension CanvasBoardView {
 
     /// A drag inside a tiled view: the two cards change places.
     func swapInTiling(_ id: String, with other: String) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Swap Tiles", from: undoFrom) }
         guard var session = tiling else { return }
         session.swap(id, with: other)
         tiling = session

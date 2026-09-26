@@ -336,6 +336,8 @@ re-add it by hand. That is survivable at this scale (nothing is destroyed but a 
 are all still on the board) and it is what makes the ⌘↩ carve-out load-bearing rather than tidy: it
 keeps the one destructive-feeling act off the named thing.
 
+*Superseded 2026-09-26: a tiling has undo now. See §7l.*
+
 ### What it needs that does not exist
 
 **One field.** `CanvasViewState.workspaceName: String?` — which named workspace the tiling that is up
@@ -1503,6 +1505,33 @@ Each step ships on its own once the first is in.
 - **A strip that scrolls past the window.** Every workspace fits its window, for now.
 - **Workspaces that fill themselves** from a frame or a search. A workspace stays a list you control.
 - **Rules that place a card by its kind.** Size by Content is as far as that goes.
+
+## 7l. Undo for tiles, workspaces, and the files cards brought — **built**
+
+Built 2026-09-26.
+
+- **Tiling edits undo.** ⌘Z goes back one step on the board's stack (`store.undoManager`), beside document edits.
+  - Covered: closing a tab or tile, moving, resizing, balancing, swapping, promoting, tabs in and out, arrangement, pinning, adding a card, changing workspace.
+  - Covered: a divider drag, as one step from mouse-down to mouse-up.
+  - Each step is the tiling before and after (`registerTilingUndo`). Steps nest; only the outermost registers.
+  - The step restores the tiling, not the window: the current area, restore-visible and restore-zoom are kept.
+  - Undo beeps if the tiled cards have changed since the step, rather than overwriting them.
+- **Workspace delete, rename and duplicate undo.** On the board's stack, so ⌘Z works from any tab.
+  - Undoing a delete brings back the workspace and its chip.
+  - Undoing a rename or duplicate also puts back the workspace that its new name replaced.
+  - Delete still asks first.
+- **Undo of a new card also offers to remove its file.**
+  - Covered: new cards, pasted text and images, Copy In, Convert to Document, the list lens's add row.
+  - A written file: "Also move 'X' to the Trash?" with Move to Trash / Keep.
+  - An empty file: removed without asking.
+  - Redo brings the file back from the Trash.
+  - A file renamed after its first line is followed (`createdFileMoved`).
+  - Not covered: a text card that becomes a document when you click out of it.
+- **The HUD says so only when the change can't be seen.** `CanvasHUD`, the focus-mode hint's view.
+  - Shown for: Pin Tile, Pin, Autoplay, Mute, Keep Running, Pin Address.
+  - Not shown for: anything that moves, closes or restores a tile. You see it happen.
+  - Opting in: `shows: false` on `store.change`, `setAddress`, or a tiling step.
+- **Still no undo:** prose text size, line width and font, site settings, the refresh interval, satellite windows, page navigation.
 
 ## 8. What this does to the backlog
 

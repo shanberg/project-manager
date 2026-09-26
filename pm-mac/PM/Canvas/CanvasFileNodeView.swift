@@ -520,6 +520,7 @@ final class CanvasFileNodeView: CanvasNodeView {
         do {
             if named.standardizedFileURL != session.url.standardizedFileURL {
                 try FileManager.default.moveItem(at: session.url, to: named)
+                board.createdFileMoved(from: session.url, to: named)
             }
         } catch {
             Log.write("naming a card's file failed: \(error)")

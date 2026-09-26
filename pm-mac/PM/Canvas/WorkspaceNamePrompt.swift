@@ -46,7 +46,7 @@ enum WorkspaceNamePrompt {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "A workspace named “\(name)” already exists."
-        alert.informativeText = "Replacing it keeps its name and forgets its tiles. This cannot be undone."
+        alert.informativeText = "Replacing it keeps its name and forgets its tiles, until you undo."
         alert.addButton(withTitle: "Replace")
         alert.addButton(withTitle: "Cancel")
         alert.buttons[0].hasDestructiveAction = true
@@ -64,13 +64,17 @@ enum WorkspaceNamePrompt {
     ///
     /// Said in terms of what survives, because the fear the word "delete" raises here is about the
     /// cards, and the cards are fine.
+    /// Answers `confirmDelete` without the alert, for tests.
+    static var answersDelete: ((String) -> Bool)?
+
     static func confirmDelete(_ name: String) -> Bool {
+        if let answer = answersDelete { return answer(name) }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Delete the workspace “\(name)”?"
         alert.informativeText = """
             Its cards stay on the board and the tiles stay on screen. The workspace and its name are \
-            forgotten, and this cannot be undone.
+            forgotten until you undo.
             """
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")

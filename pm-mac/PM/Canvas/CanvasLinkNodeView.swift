@@ -1369,19 +1369,20 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         // the next time something loaded it, having been looking at the answer the whole time.
         if let title = web?.title { CanvasPageTitles.remember(title, for: live.absoluteString) }
         pinned = (home: address, page: live.absoluteString)
-        setAddress(live.absoluteString, as: "Pin Address")
+        // Unseen: the page stays as it is, and only the header's Home changes.
+        setAddress(live.absoluteString, as: "Pin Address", shows: false)
         capturingTitle = true
     }
 
     /// Point this card somewhere else. Undoable, and named for what the Edit menu should say.
-    func setAddress(_ next: String, as actionName: String = "Change Address") {
+    func setAddress(_ next: String, as actionName: String = "Change Address", shows: Bool = true) {
         let trimmed = next.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != address else { return }
         // Set before the store's change lands, because the change comes back through `update(node:)`
         // and then `contentChanged`, which is the teardown this exists to skip.
         alreadyShowing = web?.url?.absoluteString == trimmed
         let id = node.id
-        board.store.change(actionName) { doc in
+        board.store.change(actionName, shows: shows) { doc in
             guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
             doc.nodes[index].content = .link(url: trimmed)
         }

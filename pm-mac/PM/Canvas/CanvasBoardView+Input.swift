@@ -150,7 +150,7 @@ extension CanvasBoardView {
             if let tile = newTabButton(at: where_) { return popUpNewTabMenu(for: tile) }
             if let closing = tabClose(at: where_) {
                 hoveredTab = nil
-                return restoringMaximized { removeFromTiling(closing) }
+                return closeInTiling([closing])
             }
             let chip = tabChip(at: where_)
             let id = chip?.card ?? owner
@@ -174,6 +174,7 @@ extension CanvasBoardView {
             return
         }
         if let divider = tileDivider(at: where_) {
+            tileResizeBaseline = tiling
             gesture = .resizeTiles(divider, from: where_, lengths: lengths(of: divider))
             return
         }
@@ -455,6 +456,8 @@ extension CanvasBoardView {
             }
         case .resizeTiles(let divider, _, _):
             rememberTileSizes(divider)
+            if let before = tileResizeBaseline { registerTilingUndo("Resize Tiles", from: before) }
+            tileResizeBaseline = nil
             overlay.needsDisplay = true
 
         case .slideTab(let card, _):
@@ -1368,6 +1371,80 @@ extension CanvasBoardView {
         trash(trashing)
         store.undoManager.endUndoGrouping()
         selection = []
+    }
+
+    // MARK: Files a card was made with
+
+    /// Tie files a new card was made with to the card's undo step: ⌘Z that takes the card away asks to
+    /// take its file too — to the Trash, so ⇧⌘Z can bring it back. Call in the same event as the
+    /// card's `store.change`, which is what makes the two one step (`UndoManager.groupsByEvent`).
+    func registerCreatedFiles(_ files: [URL]) {
+        guard !files.isEmpty else { return }
+        store.undoManager.registerUndo(withTarget: self) { board in
+            MainActor.assumeIsolated { board.takeBackCreatedFiles(files) }
+        }
+    }
+
+    /// A file made for a card has been renamed since — an Untitled named after its first line — so
+    /// taking it back has to look for it under its new name.
+    func createdFileMoved(from old: URL, to new: URL) {
+        createdFileMoves[old.standardizedFileURL] = new.standardizedFileURL
+    }
+
+    private func currentLocation(of file: URL) -> URL {
+        var url = file.standardizedFileURL
+        var seen: Set<URL> = []
+        while let next = createdFileMoves[url], seen.insert(url).inserted { url = next }
+        return url
+    }
+
+    /// Undo's half. **A file with nothing in it goes without asking**, and is removed rather than
+    /// trashed, the way an Untitled you never wrote in is (`CanvasFileNodeView.finish`). One with
+    /// something in it is asked about, and kept unless you say otherwise.
+    private func takeBackCreatedFiles(_ files: [URL]) {
+        let fm = FileManager.default
+        let present = files.map(currentLocation(of:)).filter { fm.fileExists(atPath: $0.path) }
+        let isEmpty = { (url: URL) in (try? Data(contentsOf: url))?.isEmpty == true }
+        let blank = present.filter(isEmpty)
+        let written = present.filter { !isEmpty($0) }
+        var trashed: [(from: URL, to: URL)] = []
+        if !written.isEmpty, askTrashingCreated(written) {
+            for file in written {
+                var landed: NSURL?
+                do {
+                    try fm.trashItem(at: file, resultingItemURL: &landed)
+                    if let landed { trashed.append((file, landed as URL)) }
+                } catch {
+                    Log.write("couldn't move \(file.lastPathComponent) to the Trash: \(error)")
+                }
+            }
+        }
+        for file in blank { try? fm.removeItem(at: file) }
+        // Redo: the files back where they were, and the next undo asks again.
+        store.undoManager.registerUndo(withTarget: self) { board in
+            MainActor.assumeIsolated {
+                for file in blank where !fm.fileExists(atPath: file.path) { fm.createFile(atPath: file.path, contents: Data()) }
+                for move in trashed { try? fm.moveItem(at: move.to, to: move.from) }
+                board.registerCreatedFiles(present)
+            }
+        }
+    }
+
+    /// Answers `askTrashingCreated` without the alert, for tests.
+    static var answersTrashingCreated: (([URL]) -> Bool)?
+
+    private func askTrashingCreated(_ files: [URL]) -> Bool {
+        if let answer = Self.answersTrashingCreated { return answer(files) }
+        let alert = NSAlert()
+        alert.messageText = files.count == 1
+            ? "Also move \u{201C}\(files[0].lastPathComponent)\u{201D} to the Trash?"
+            : "Also move \(files.count) files to the Trash?"
+        alert.informativeText = files.count == 1
+            ? "Undo takes the card off the board. This is the file it was made with."
+            : "Undo takes the cards off the board. These are the files they were made with."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Keep")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// Move documents to the Trash, and register putting them back — which registers trashing them

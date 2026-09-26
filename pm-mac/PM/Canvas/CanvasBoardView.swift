@@ -577,6 +577,14 @@ final class CanvasBoardView: NSView {
     var onPageStateChanged: (() -> Void)?
     /// Escape with nothing smaller to cancel on the board; true if it was taken. Focus mode's.
     var onEscape: (() -> Bool)?
+    /// A line for the HUD at the foot of the window: something happened that you might not have meant.
+    var onHUD: ((String) -> Void)?
+    /// Files made for cards that have since been renamed, old → new — see `createdFileMoved`.
+    var createdFileMoves: [URL: URL] = [:]
+    /// How deep in a step of arrangement undo the board is — see `beginTilingUndo`.
+    var tilingUndoDepth = 0
+    /// The arrangement as it was when a divider drag began, for the drag's one undo step.
+    var tileResizeBaseline: CanvasTileSession?
     /// Set while focus mode is on: no tile shows a grip or can be picked up by one.
     var tileGripsHeld = false {
         didSet { if tileGripsHeld != oldValue { refreshTileHandles() } }

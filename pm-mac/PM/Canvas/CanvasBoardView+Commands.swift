@@ -186,8 +186,13 @@ extension CanvasBoardView {
             switch alert.runModal() {
             case .alertFirstButtonReturn:
                 let moved = Set(outsiders)
-                commit(.files(files.map { moved.contains($0) ? self.copyIn($0) ?? $0 : $0 }),
-                       frames: frames, asking: false, into: destination)
+                var copies: [URL] = []
+                commit(.files(files.map { file in
+                    guard moved.contains(file), let copy = self.copyIn(file) else { return file }
+                    copies.append(copy)
+                    return copy
+                }), frames: frames, asking: false, into: destination)
+                registerCreatedFiles(copies)
             case .alertSecondButtonReturn:
                 commit(.files(files), frames: frames, asking: false, into: destination)
             default:
@@ -252,6 +257,7 @@ extension CanvasBoardView {
         case .image(let data, let ext):
             guard let saved = save((data: data, ext: ext)) else { return false }
             insert(cards([file(saved)]), at: nil, actionName: "Add File", into: landing)
+            registerCreatedFiles([saved])
         case .links(let links):
             // The name the browser dropped beside the address, before the cards are built — so a card
             // is named on the way up rather than after its page has loaded. Remembered where every
@@ -266,6 +272,7 @@ extension CanvasBoardView {
             // or text on the board when `docs` can't be written.
             let doc = try? CanvasDocCards.write(text, in: CanvasDocCards.folder(forCanvasAt: store.url))
             insert(cards([doc.map(file) ?? .text(text)]), at: nil, actionName: "Paste", into: landing)
+            registerCreatedFiles(doc.map { [$0] } ?? [])
         }
         // `insert` selects what it made. In document order, so several go up in the order they were
         // dropped. Not while a lens is up: there is no tiled view in front of you to put them in, and
@@ -1013,15 +1020,17 @@ extension CanvasBoardView {
     /// after its first line, and point the card at it — what a card made today already is. See
     /// `CanvasDocCards`.
     ///
-    /// One step to undo, which puts the text back on the board. The files stay: undo is about the
-    /// board, and a note somebody may already have linked to is not the board's to delete.
+    /// One step to undo, which puts the text back on the board and asks whether the files go too — a
+    /// note somebody may already have linked to is not the board's to delete without asking.
     @objc func convertToDocuments(_ sender: Any?) {
         let folder = CanvasDocCards.folder(forCanvasAt: store.url)
         var paths: [String: String] = [:]
+        var made: [URL] = []
         for id in selectedTypedCards {
             guard let node = document.node(id: id), case .text(let text) = node.content else { continue }
             do {
                 let url = try CanvasDocCards.write(text, in: folder)
+                made.append(url)
                 paths[id] = store.resolver.storablePath(for: url) ?? url.path
             } catch {
                 Log.write("converting a card to a document failed: \(error)")
@@ -1034,6 +1043,7 @@ extension CanvasBoardView {
                 doc.nodes[index].content = .file(path: path, subpath: nil)
             }
         }
+        registerCreatedFiles(made)
     }
 
     @objc func makeProseBigger(_ sender: Any?) { stepProseZoom(by: 1) }
@@ -1514,13 +1524,13 @@ extension CanvasBoardView {
     /// Every tab in the right-clicked one's tile but it.
     @objc func closeOtherMenuTabs(_ sender: Any?) {
         guard let id = menuTile, let tiling else { return }
-        restoringMaximized { removeFromTiling(tiling.tabs(of: id).filter { $0 != id }) }
+        closeInTiling(tiling.tabs(of: id).filter { $0 != id })
     }
 
     /// The right-clicked strip's whole tile, every tab of it, out of the view.
     @objc func removeMenuTileWithTabs(_ sender: Any?) {
         guard let id = menuTile, let tiling else { return }
-        restoringMaximized { removeFromTiling(tiling.tabs(of: id)) }
+        closeInTiling(tiling.tabs(of: id))
     }
 
     /// Make the right-clicked tile the master. `promoteTile` is the same command with no pointer
@@ -1621,17 +1631,16 @@ extension CanvasBoardView {
     /// Take the focused tile out of the view — the menu bar's half of `removeMenuTile`.
     @objc func removeTile(_ sender: Any?) {
         guard let id = focusedTile else { return NSSound.beep() }
-        restoringMaximized { removeFromTiling(id) }
+        closeInTiling([id])
     }
 
     /// Take the right-clicked tile out of the view. Like `promoteMenuTile`, it acts on the tile you
     /// pointed at rather than on the selection: right-clicking one of four selected tiles has to be
     /// able to mean that one, and a bulk "remove these four" from a menu whose other items act on all
-    /// four is a mistake waiting to be made with no undo behind it (a tiling is a view, so ⌘Z has
-    /// nothing to say about it).
+    /// four is a mistake waiting to be made, even with ⌘Z behind it (`closeInTiling`).
     @objc func removeMenuTile(_ sender: Any?) {
         guard let id = menuTile else { return }
-        restoringMaximized { removeFromTiling(id) }
+        closeInTiling([id])
     }
 
 
@@ -1922,6 +1931,8 @@ extension CanvasBoardView {
                                                  subpath: nil),
                                   frame: frame)
             node.extra[CanvasDocCards.untitledKey] = .bool(true)
+            // Every caller adds the card in this same event, so the file joins its undo step.
+            registerCreatedFiles([url])
             return node
         } catch {
             Log.write("new card's file couldn't be made, so it is text on the board: \(error)")
@@ -2413,11 +2424,12 @@ extension CanvasBoardView {
     }
 
     /// Write a media setting to every one of these cards, as one undoable change — the same shape as
-    /// `setSession`, and undoable for the same reason: it is an edit to the document.
+    /// `setSession`, and undoable for the same reason: it is an edit to the document. None of the three
+    /// is drawn, so undoing one says so on the HUD (`shows: false`).
     private func setMedia(_ cards: [CanvasLinkNodeView], actionName: String,
                           _ change: (inout CanvasNode) -> Void) {
         let ids = Set(cards.map(\.node.id))
-        store.change(actionName) { doc in
+        store.change(actionName, shows: false) { doc in
             for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {
                 change(&doc.nodes[index])
             }

@@ -102,13 +102,16 @@ final class CanvasDocumentStore {
     /// edit cannot arrive with a subtly wrong inverse. `actionName` is what the Edit menu says.
     ///
     /// **During a gesture this registers nothing.** See `beginInteraction`.
-    func change(_ actionName: String, _ mutate: (inout CanvasDocument) -> Void) {
+    ///
+    /// `shows` is whether the change can be seen: false for a setting nothing on screen draws (Mute,
+    /// Keep Running), whose undo and redo then say on the HUD what they did — see `onUnseenUndo`.
+    func change(_ actionName: String, shows: Bool = true, _ mutate: (inout CanvasDocument) -> Void) {
         var next = document
         mutate(&next)
         guard next != document else { return }
 
         if interaction == nil {
-            registerUndo(restoring: document, actionName: actionName)
+            registerUndo(restoring: document, actionName: actionName, shows: shows)
         }
         document = next
         documentChanged()
@@ -169,20 +172,26 @@ final class CanvasDocumentStore {
     /// True while a drag or resize is in flight — the board draws itself more cheaply.
     var isInteracting: Bool { interaction != nil }
 
-    private func registerUndo(restoring previous: CanvasDocument, actionName: String) {
+    private func registerUndo(restoring previous: CanvasDocument, actionName: String, shows: Bool = true) {
         undoManager.registerUndo(withTarget: self) { store in
-            MainActor.assumeIsolated { store.replace(with: previous, actionName: actionName) }
+            MainActor.assumeIsolated { store.replace(with: previous, actionName: actionName, shows: shows) }
         }
         undoManager.setActionName(actionName)
     }
 
+    /// Undo or redo of a change nothing on screen shows, as a line for the HUD: "Undo Mute Card".
+    /// Without it ⌘Z on one looks like a beep that didn't happen.
+    var onUnseenUndo: ((String) -> Void)?
+
     /// Undo and redo both land here, each registering the other.
-    private func replace(with next: CanvasDocument, actionName: String) {
+    private func replace(with next: CanvasDocument, actionName: String, shows: Bool) {
+        let undoing = undoManager.isUndoing
         let previous = document
         document = next
-        registerUndo(restoring: previous, actionName: actionName)
+        registerUndo(restoring: previous, actionName: actionName, shows: shows)
         documentChanged()
         scheduleSave()
+        if !shows { onUnseenUndo?("\(undoing ? "Undo" : "Redo") \(actionName)") }
     }
 
     // MARK: Writing it

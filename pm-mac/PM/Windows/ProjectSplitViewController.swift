@@ -710,12 +710,22 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// The rename itself, with the name already decided — typed into the chip, or come back from the
     /// prompt above.
     func renameWorkspace(named old: String, to new: String) {
-        guard old != new, let url = canvasSource().url,
-              let tiling = CanvasWorkspaces.tiling(named: old, of: url)
-        else { return }
+        guard old != new, let url = canvasSource().url, CanvasWorkspaces.exists(old, of: url) else { return }
         // Renaming *onto* a name is replacing what has it — the save below does not ask, because for
         // the live write-through it must not. See `WorkspaceNamePrompt.confirmReplacing`.
-        guard !CanvasWorkspaces.exists(new, of: url) || WorkspaceNamePrompt.confirmReplacing(new)
+        let replaced = CanvasWorkspaces.tiling(named: new, of: url)
+        guard replaced == nil || WorkspaceNamePrompt.confirmReplacing(new) else { return }
+        moveWorkspace(from: old, to: new)
+        // ⌘Z renames it back, and puts back what the new name replaced.
+        registerWorkspaceStep("Rename Workspace", undo: { split in
+            split.moveWorkspace(from: new, to: old)
+            if let replaced { split.putWorkspace(replaced, named: new, opening: false) }
+        }, redo: { $0.moveWorkspace(from: old, to: new) })
+    }
+
+    /// The rename itself: no question and no undo step, which its callers take care of.
+    private func moveWorkspace(from old: String, to new: String) {
+        guard let url = canvasSource().url, let tiling = CanvasWorkspaces.tiling(named: old, of: url)
         else { return }
         CanvasWorkspaces.save(tiling, as: new, for: url)
         CanvasWorkspaces.remove(old, for: url)
@@ -766,8 +776,12 @@ final class ProjectSplitViewController: NSSplitViewController {
         else { return }
         // The seed counts past the copies that exist; what is typed over it need not.
         guard !taken.contains(new) || WorkspaceNamePrompt.confirmReplacing(new) else { return }
-        CanvasWorkspaces.save(tiling, as: new, for: url)
-        openTab(.board(.workspace(new)))
+        let replaced = CanvasWorkspaces.tiling(named: new, of: url)
+        putWorkspace(tiling, named: new, opening: true)
+        registerWorkspaceStep("Duplicate Workspace", undo: { split in
+            split.dropWorkspace(named: new)
+            if let replaced { split.putWorkspace(replaced, named: new, opening: false) }
+        }, redo: { $0.putWorkspace(tiling, named: new, opening: true) })
     }
 
     /// Forget a workspace, **and take its chip with it**.
@@ -780,9 +794,19 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// **Asked about first**, which it was not for most of this feature's life. The paragraph above is
     /// the whole reason it felt safe to ship without a question, and it is only half the story: the
     /// tiles survive, and the *workspace* — the thing you named so it would be there next month — does
-    /// not, with no undo to reach for. See `WorkspaceNamePrompt.confirmDelete`.
+    /// not — so ⌘Z puts it back, and its chip. See `WorkspaceNamePrompt.confirmDelete`.
     func deleteWorkspace(named name: String) {
-        guard let url = canvasSource().url, WorkspaceNamePrompt.confirmDelete(name) else { return }
+        guard let url = canvasSource().url, let tiling = CanvasWorkspaces.tiling(named: name, of: url),
+              WorkspaceNamePrompt.confirmDelete(name) else { return }
+        dropWorkspace(named: name)
+        registerWorkspaceStep("Delete Workspace",
+                              undo: { $0.putWorkspace(tiling, named: name, opening: true) },
+                              redo: { $0.dropWorkspace(named: name) })
+    }
+
+    /// The delete itself: the workspace and its chips gone, with no question and no undo step.
+    private func dropWorkspace(named name: String) {
+        guard let url = canvasSource().url else { return }
         CanvasWorkspaces.remove(name, for: url)
         let doomed = tabs.tabs.filter { $0.view == .board(.workspace(name)) }.map(\.id)
         tabs.drop { $0.view == .board(.workspace(name)) }
@@ -792,6 +816,31 @@ final class ProjectSplitViewController: NSSplitViewController {
         for id in doomed { contentPane.drop(tab: id) }
         refreshTabModel()
     }
+
+    /// A workspace saved under `name`, and its chip opened when `opening`.
+    private func putWorkspace(_ tiling: CanvasViewState.Tiling, named name: String, opening: Bool) {
+        guard let url = canvasSource().url else { return }
+        CanvasWorkspaces.save(tiling, as: name, for: url)
+        if opening { openTab(.board(.workspace(name))) }
+        refreshTabModel()
+    }
+
+    /// One undoable workspace edit: `undo` on ⌘Z, `redo` on ⇧⌘Z, each registering the other.
+    private func registerWorkspaceStep(_ name: String, undo: @escaping (ProjectSplitViewController) -> Void,
+                                       redo: @escaping (ProjectSplitViewController) -> Void) {
+        guard let manager = workspaceUndo else { return }
+        manager.registerUndo(withTarget: self) { split in
+            MainActor.assumeIsolated {
+                undo(split)
+                split.registerWorkspaceStep(name, undo: redo, redo: undo)
+            }
+        }
+        manager.setActionName(name)
+    }
+
+    /// Where workspace edits are undone: the board's stack, which is where ⌘Z goes in a canvas window,
+    /// whichever tab is up. The window's own when there is no board.
+    private var workspaceUndo: UndoManager? { canvasPane?.store.undoManager ?? view.window?.undoManager }
 
     /// Back to the notes — View ▸ Show Canvas turning itself off. A tab of its own rather than a
     /// replacement: the canvas tab cannot become something else, and the notes already have a chip if
