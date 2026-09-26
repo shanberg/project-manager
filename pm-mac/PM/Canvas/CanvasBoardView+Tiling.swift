@@ -279,10 +279,18 @@ extension CanvasBoardView {
 
     /// What this board looks like at the moment the window stops showing it, for the board that is
     /// about to take its place. See `CanvasArrival`.
-    var departure: CanvasArrival {
+    ///
+    /// **Nil when the window was not showing this board at all** — a lens up in front of it, most of
+    /// all (`CanvasPaneController.applyPresentation` hides the board). A hidden view's `visibleRect` is
+    /// empty, so the centre read from it is the board's own origin: 1600pt of `margin` up and left of
+    /// the nearest card. A workspace opened from the list posed there, tiled around it, and was left
+    /// with its window hanging off the board's top-left corner — tiles drawn where the board's frame
+    /// does not reach, so every click and scroll over the top of them fell through to the clip view.
+    var departure: CanvasArrival? {
+        guard !visibleRect.isEmpty else { return nil }
         // A board picking cards looks like the canvas, so it is handed over as one: the pane taking over
         // arrives at this zoom with nothing to pose as.
-        CanvasArrival(zoom: Double(scrollView?.magnification ?? 1),
+        return CanvasArrival(zoom: Double(scrollView?.magnification ?? 1),
                       centre: canvasPoint(NSPoint(x: visibleRect.midX, y: visibleRect.midY)),
                       tiling: isPicking || maximizedCard != nil ? nil : tiling)
     }

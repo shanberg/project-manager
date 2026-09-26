@@ -554,7 +554,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     /// What the window hands the next pane when the tab it is switching to crosses between the canvas
     /// and one of its workspaces — see `CanvasArrival`.
-    var departure: CanvasArrival { scroll.board.departure }
+    var departure: CanvasArrival? { scroll.board.departure }
 
     /// The pose to come in from, held until there is a board ready to come in *to*.
     ///
@@ -564,6 +564,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     /// Take over from the pane the window was showing, and draw the crossing rather than cut it.
     func arrive(from pose: CanvasArrival) {
+        // Nor is there a crossing to draw *into* a lens: the board it would pose is hidden, and posing
+        // it would leave it wherever the pose put it, to be found there when the lens is put away.
+        guard presentation.showsBoard else { return }
         arrival = pose
         // A pane that has not fitted yet has nothing to pose with — no measured region, and in a moment
         // a workspace to lay out into it. It picks the pose up in `goToWorkspace` instead.
