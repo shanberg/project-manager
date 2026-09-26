@@ -150,3 +150,22 @@ extension ProjectLinksFrameTests {
         XCTAssertFalse(synced.notesChanged)
     }
 }
+
+final class ProjectIntakeTests: XCTestCase {
+    func testFilesAreMovedIntoResourcesAndATakenNameGetsANumber() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let project = root.appendingPathComponent("W-001 Thing")
+        let downloads = root.appendingPathComponent("Downloads")
+        try fm.createDirectory(at: project.appendingPathComponent("resources"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: downloads, withIntermediateDirectories: true)
+        try "old".write(to: project.appendingPathComponent("resources/brief.pdf"), atomically: true, encoding: .utf8)
+        let sent = downloads.appendingPathComponent("brief.pdf")
+        try "new".write(to: sent, atomically: true, encoding: .utf8)
+        let landed = try ProjectIntake.move([sent], intoProject: project.path)
+        XCTAssertEqual(landed.map(\.lastPathComponent), ["brief 2.pdf"])
+        XCTAssertFalse(fm.fileExists(atPath: sent.path), "moved, not copied")
+        XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("resources/brief.pdf"), encoding: .utf8), "old")
+        try? fm.removeItem(at: root)
+    }
+}

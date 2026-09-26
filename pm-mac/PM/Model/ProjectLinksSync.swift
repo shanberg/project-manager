@@ -73,20 +73,27 @@ enum ProjectLinksSync {
     }
 
     private static func syncCanvas(_ url: URL, with links: [LinkEntry]) -> ProjectLinksFrame.Synced? {
+        var synced: ProjectLinksFrame.Synced?
+        edit(canvasAt: url, named: nil) { synced = ProjectLinksFrame.sync(notes: links, canvas: &$0) }
+        return synced
+    }
+
+    /// Change a canvas from outside any board: through its store if a board has it open, so the change
+    /// is the board's — shown at once, saved by it, and undoable under `named` when there is a name —
+    /// and in the file otherwise.
+    static func edit(canvasAt url: URL, named: String?, _ mutate: (inout CanvasDocument) -> Void) {
         if CanvasStoreRegistry.isOpen(url), let store = try? CanvasStoreRegistry.store(for: url) {
             defer { CanvasStoreRegistry.release(store) }
-            var synced: ProjectLinksFrame.Synced?
-            store.changeQuietly { synced = ProjectLinksFrame.sync(notes: links, canvas: &$0) }
-            return synced
+            if let named { store.change(named, mutate) } else { store.changeQuietly(mutate) }
+            return
         }
         do {
             var document = try CanvasDocument.read(contentsOf: url)
-            let synced = ProjectLinksFrame.sync(notes: links, canvas: &document)
-            if synced.canvasChanged { try document.write(to: url) }
-            return synced
+            let before = document
+            mutate(&document)
+            if document != before { try document.write(to: url) }
         } catch {
-            Log.write("links sync: \(url.path): \(error)")
-            return nil
+            Log.write("canvas edit: \(url.path): \(error)")
         }
     }
 

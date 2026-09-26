@@ -83,6 +83,22 @@ targets:
         # the target was 26.0 — the cask's `depends_on macos:` covers Homebrew users, but anyone
         # taking the zip straight from the GitHub release got told it runs on Ventura.
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        # Services ▸ Send to (Focused) Project in Folio: files are moved into the project, addresses become
+        # its links, text goes into its current session. Answered by `FolioServices`. NSRequiredContext
+        # is what lets them show without being switched on in Keyboard settings first.
+        NSServices:
+          - NSMenuItem: {default: "Send to Focused Project in Folio"}
+            NSMessage: sendToFocusedProject
+            NSPortName: Folio
+            NSSendTypes: [public.url, public.utf8-plain-text]
+            NSSendFileTypes: [public.item]
+            NSRequiredContext: {}
+          - NSMenuItem: {default: "Send to Project in Folio…"}
+            NSMessage: sendToProject
+            NSPortName: Folio
+            NSSendTypes: [public.url, public.utf8-plain-text]
+            NSSendFileTypes: [public.item]
+            NSRequiredContext: {}
         # Custom URL scheme so Raycast (and other launchers) can drive the app:
         # pmpanel://toggle | show | hide | pin?on=… | float?on=…
         CFBundleURLTypes:

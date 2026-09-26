@@ -161,7 +161,18 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         model.optionDown = false
     }
 
+    /// Show the project list, and hand the project you choose to `picked` instead of going to it —
+    /// Services ▸ Send to Project in Folio, which has something to put in a project and needs to be told
+    /// which. Dismissing the bar without choosing drops the request.
+    func pickProject(_ picked: @escaping @MainActor (_ key: String, _ name: String) -> Void) {
+        projectPicked = picked
+        show(mode: .goToProject)
+    }
+
+    private var projectPicked: (@MainActor (String, String) -> Void)?
+
     func hide(restoringFocus: Bool = true) {
+        projectPicked = nil
         stashUnsentLine()
         // Whatever is in the writing surface goes in now rather than on the debounce that was still
         // counting. A bar that closes is not a decision about the prose — there is nothing to decide.
@@ -586,6 +597,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             perform(command, argument: argument, reveal: reveal)
 
         case .project(let key, let name, let shortName, _, _):
+            if let picked = projectPicked {
+                hide(restoringFocus: true)
+                picked(key, name)
+                return
+            }
             PMStore.setGlobalFocus(key: key)
             Log.write("quick bar focused \(name)\(reveal ? " and opened it" : "")")
             guard !reveal else {

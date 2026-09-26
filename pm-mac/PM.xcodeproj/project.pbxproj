@@ -121,6 +121,7 @@
 		481FEFC9EB6CDE918506B8B8 /* CanvasSessionPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD939225280D2EE38C200188 /* CanvasSessionPill.swift */; };
 		4825EB706D8D74DCF433CB58 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5AFCE913C956EF623A80D658 /* Assets.xcassets */; };
 		4848686DF492B74125CAE733 /* CanvasPageBudgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6618A28A1B8350DC6699412 /* CanvasPageBudgetTests.swift */; };
+		49A95BB70B1150E2172D0AAE /* FolioServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95CDFFCA4CCB643F40910496 /* FolioServices.swift */; };
 		4AEFB2701B22CDF1C9269553 /* PMActions.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = F710700FE1C3487CCD8AE9CE /* PMActions.generated.swift */; };
 		4C22E9E8234C534314053412 /* NoteEditorUndoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F40B6AE99DDF2D75714BC2C5 /* NoteEditorUndoTests.swift */; };
 		4D12F9B5C958ECD635701EAC /* CanvasWebPopup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1737DDEF16F7384ABE0A1B33 /* CanvasWebPopup.swift */; };
@@ -643,6 +644,7 @@
 		90A29BE9C624BCA20C640DDA /* CanvasItemListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasItemListView.swift; sourceTree = "<group>"; };
 		90BB9DDD079FFA1FD9822C54 /* CoalescerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoalescerTests.swift; sourceTree = "<group>"; };
 		91DAF694D06EA74A49555934 /* SessionPicks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPicks.swift; sourceTree = "<group>"; };
+		95CDFFCA4CCB643F40910496 /* FolioServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolioServices.swift; sourceTree = "<group>"; };
 		95FDEBEBB7BAD06A19EBECE9 /* SidebarRevealTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarRevealTests.swift; sourceTree = "<group>"; };
 		968289B8E6C1C7232AF29218 /* TaskViewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewHelpers.swift; sourceTree = "<group>"; };
 		969971032886F1FC47DBC3DD /* NoteEditorClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorClipboardTests.swift; sourceTree = "<group>"; };
@@ -995,6 +997,7 @@
 				6025B31DBDB751A05489F337 /* ConfigStore.swift */,
 				9831EB99DF551250EFC4CAD8 /* DueLabels.swift */,
 				655EF57D49F1C9DD87AFC18D /* FaviconLoader.swift */,
+				95CDFFCA4CCB643F40910496 /* FolioServices.swift */,
 				20AA79016760E53C63826A34 /* LinkTitleLoader.swift */,
 				84A8DE07C53FA9ECB9C061BC /* Log.swift */,
 				B358A62B026F88C33AA9FF42 /* MenubarRing.swift */,
@@ -1561,6 +1564,7 @@
 				F168696F945C709AFA8F0758 /* FocusPanelController.swift in Sources */,
 				ACB9FD4F00C994B9E09610E1 /* FocusPanelRequests.swift in Sources */,
 				D7206A459F3E4EB3669D1CA6 /* FocusPanelView.swift in Sources */,
+				49A95BB70B1150E2172D0AAE /* FolioServices.swift in Sources */,
 				E7E72625A1DDBBC28E057302 /* FrameMeter.swift in Sources */,
 				DAF071EEEA64B7FE8722D6DB /* GlassBackground.swift in Sources */,
 				86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */,

@@ -69,6 +69,53 @@
 	<string>A web page you allowed, such as a call or huddle, wants to use the camera.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>A web page you allowed, such as a call or huddle, wants to use the microphone.</string>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Send to Focused Project in Folio</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>sendToFocusedProject</string>
+			<key>NSPortName</key>
+			<string>Folio</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.item</string>
+			</array>
+			<key>NSSendTypes</key>
+			<array>
+				<string>public.url</string>
+				<string>public.utf8-plain-text</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Send to Project in Folio…</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>sendToProject</string>
+			<key>NSPortName</key>
+			<string>Folio</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.item</string>
+			</array>
+			<key>NSSendTypes</key>
+			<array>
+				<string>public.url</string>
+				<string>public.utf8-plain-text</string>
+			</array>
+		</dict>
+	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

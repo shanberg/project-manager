@@ -137,7 +137,7 @@ private extension ISO8601DateFormatter {
 /// A file card's path is written the way Obsidian writes it: from the vault root, no leading slash.
 /// Nil when the project isn't inside a vault at all, which is the one case where there's nothing
 /// sensible to store — a card can't point outside the vault it lives in.
-private func vaultRelativePath(of path: String, from canvas: URL) -> String? {
+func vaultRelativePath(of path: String, from canvas: URL) -> String? {
     guard let root = obsidianVaultRoot(for: canvas) else { return nil }
     let rootParts = root.standardizedFileURL.pathComponents
     let fileParts = URL(fileURLWithPath: path).standardizedFileURL.pathComponents

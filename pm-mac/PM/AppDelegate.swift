@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ProjectCodes.migrateLegacyKey()
         // Before any project's notes are read: a project's links are kept in step from the first read.
         ProjectLinksSync.install()
+        FolioServices.install()
         // Off the critical path, and once ever: web cards moved from the app's default store to one of
         // their own, and the sessions you were already signed in to should come with them.
         Task { @MainActor in await CanvasWebSession.migrateOldSessions() }
