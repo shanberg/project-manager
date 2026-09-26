@@ -762,6 +762,7 @@ extension CanvasBoardView {
                 add(menu, "\(noun) Settings\u{2026}", #selector(projectSettingsForCard))
                 add(menu, PMCommand.showEvents.title, #selector(showEventsForCard))
                 addShowsMenu(menu)
+                addTextMenu(menu)
             }
             // A folder card's own two: where it points, and how it lays that out. First, as a project
             // card's are, because they are what this card is rather than what any file card can do.
@@ -965,33 +966,48 @@ extension CanvasBoardView {
         selection.compactMap { nodeViews[$0] }.filter(\.setsProse)
     }
 
+    /// The cards Text ▸ Line Width acts on: prose, and project cards. See `setsLineWidth`.
+    private var selectedLineWidthCards: [CanvasNodeView] {
+        selection.compactMap { nodeViews[$0] }.filter(\.setsLineWidth)
+    }
+
     /// How a card of prose is set: its size, its measure, its face — and, below them, the two editing
     /// preferences that are the app's rather than the card's, which are here because this is where you
     /// are when you want them. See `CanvasTextStyle`.
     ///
     /// Radio lists ticked only where every selected card agrees, as Shows is.
+    ///
+    /// A project card takes Line Width alone, for its session notes. Size and Font are offered only
+    /// when every selected card is prose, so none of them is a no-op on part of the selection.
     private func addTextMenu(_ menu: NSMenu) {
+        let widthCards = selectedLineWidthCards
+        guard !widthCards.isEmpty else { return }
         let cards = selectedProseCards
-        guard !cards.isEmpty else { return }
+        let allProse = cards.count == widthCards.count
         let text = NSMenu(title: "Text")
 
-        text.addItem(.sectionHeader(title: "Size"))
-        add(text, "Bigger", #selector(makeProseBigger(_:)))
-        add(text, "Smaller", #selector(makeProseSmaller(_:)))
-        let actual = add(text, "Actual Size", #selector(makeProseActualSize(_:)))
-        actual.state = cards.allSatisfy { CanvasCardZoom.isNormal($0.contentZoom) } ? .on : .off
-
-        text.addItem(.separator())
+        if allProse {
+            text.addItem(.sectionHeader(title: "Size"))
+            add(text, "Bigger", #selector(makeProseBigger(_:)))
+            add(text, "Smaller", #selector(makeProseSmaller(_:)))
+            let actual = add(text, "Actual Size", #selector(makeProseActualSize(_:)))
+            actual.state = cards.allSatisfy { CanvasCardZoom.isNormal($0.contentZoom) } ? .on : .off
+            text.addItem(.separator())
+        }
         text.addItem(.sectionHeader(title: "Line Width"))
         text.addItem(MenuPictures.palette("Line Width", CanvasTextStyle.LineWidth.allCases.map { width in
             let item = NSMenuItem(title: width.title, action: #selector(setProseLineWidth(_:)), keyEquivalent: "")
             item.target = self
             item.image = MenuPictures.lineWidth(width)
             item.representedObject = width.rawValue
-            item.state = cards.allSatisfy { $0.textStyle.lineWidth == width } ? .on : .off
+            item.state = widthCards.allSatisfy { $0.textStyle.lineWidth == width } ? .on : .off
             return item
         }))
 
+        guard allProse else {
+            menu.addItem(withTitle: "Text", action: nil, keyEquivalent: "").submenu = text
+            return
+        }
         text.addItem(.separator())
         text.addItem(.sectionHeader(title: "Font"))
         text.addItem(MenuPictures.palette("Font", CanvasTextStyle.Face.allCases.map { face in
@@ -1062,7 +1078,7 @@ extension CanvasBoardView {
     @objc func setProseLineWidth(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let width = CanvasTextStyle.LineWidth(rawValue: raw) else { return }
-        changeProseCards { node in
+        changeProseCards(selectedLineWidthCards) { node in
             var style = CanvasTextStyle.of(node)
             style.lineWidth = width
             CanvasTextStyle.set(style, on: &node)
@@ -1081,8 +1097,8 @@ extension CanvasBoardView {
 
     /// Quietly, as a zoom is: how a card is set is how you are looking at it, not an edit to it. See
     /// `setContentZoom`.
-    private func changeProseCards(_ change: (inout CanvasNode) -> Void) {
-        let ids = Set(selectedProseCards.map(\.node.id))
+    private func changeProseCards(_ cards: [CanvasNodeView]? = nil, _ change: (inout CanvasNode) -> Void) {
+        let ids = Set((cards ?? selectedProseCards).map(\.node.id))
         guard !ids.isEmpty else { return }
         store.changeQuietly { doc in
             for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {

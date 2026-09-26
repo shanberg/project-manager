@@ -49,6 +49,10 @@ class CanvasNodeView: NSView {
     /// answers to the menu's Text ▸. See `CanvasTextStyle`.
     var setsProse: Bool { false }
 
+    /// Whether Text ▸ Line Width reaches this card: every card of prose, and a project card, whose
+    /// session notes are written at it.
+    var setsLineWidth: Bool { setsProse }
+
     /// How large this card's content is set, from the document.
     var contentZoom: Double { CanvasCardZoom.of(node) }
 

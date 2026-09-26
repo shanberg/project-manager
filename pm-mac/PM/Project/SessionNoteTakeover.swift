@@ -85,6 +85,9 @@ struct SessionNoteTakeover: View {
     /// Whether the host has the user's attention. The editor stays open when it doesn't; it saves on
     /// the way to false, since nothing else fires when a tile merely loses focus.
     var isActive = true
+    /// The widest the prose gets, in points; nil runs it to the edges. A project card passes its own
+    /// line width (`CanvasTextStyle`).
+    var measure: CGFloat? = MarkdownTextEditor.measureWidth
 
     @State private var text: String
     /// The prose this takeover opened with, and the identity of the session it opened *on*.
@@ -131,10 +134,12 @@ struct SessionNoteTakeover: View {
 
     init(index: Int, session: Session, projectName: String, store: PMStore,
          onOpenProject: @escaping (String) -> Void,
-         onBack: @escaping () -> Void, isActive: Bool = true, startsAt: NSRange? = nil,
+         onBack: @escaping () -> Void, isActive: Bool = true,
+         measure: CGFloat? = MarkdownTextEditor.measureWidth, startsAt: NSRange? = nil,
          onSelectionChange: ((NSRange) -> Void)? = nil,
          onTypingUndo: ((UndoManager, _ open: Bool) -> Void)? = nil) {
         self.isActive = isActive
+        self.measure = measure
         self.startsAt = startsAt
         self.onSelectionChange = onSelectionChange
         self.onTypingUndo = onTypingUndo
@@ -174,14 +179,14 @@ struct SessionNoteTakeover: View {
                 // a frame around the whole column. Its own cap rather than the general one: a note is
                 // set in a fixed-advance face, so its comfortable width is a character count and can be
                 // stated as one. See `MarkdownTextEditor.measureWidth`.
-                .modifier(ReadableWidth(cap: MarkdownTextEditor.measureWidth))
+                .modifier(ReadableWidth(cap: measure ?? .infinity))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
             // The sitting's heading, over a scrim that fades out, so prose scrolled up under it goes
             // quietly. Cap inside the scrim: the heading stays at the width of the prose it heads, the
             // scrim spans the pane.
             header
-                .modifier(ReadableWidth(cap: MarkdownTextEditor.measureWidth))
+                .modifier(ReadableWidth(cap: measure ?? .infinity))
                 .background(SoftHeaderScrim())
                 .background(GeometryReader { geo in
                     Color.clear.preference(key: BarHeightKey.self, value: geo.size.height)
@@ -189,7 +194,7 @@ struct SessionNoteTakeover: View {
         }
         .onPreferenceChange(BarHeightKey.self) { barHeight = $0 }
             footer
-                .modifier(ReadableWidth(cap: MarkdownTextEditor.measureWidth))
+                .modifier(ReadableWidth(cap: measure ?? .infinity))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // Fill the window. The takeover used to negotiate a height with a window that sized itself to

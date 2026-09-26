@@ -309,6 +309,8 @@ struct CanvasProjectNote: View {
                                     onOpenProject: onOpenProject,
                                     onBack: { openNote = nil },
                                     isActive: engagement.isEngaged,
+                                    measure: CanvasTextStyle(lineWidth: display.lineWidth)
+                                        .maxColumnWidth(in: MarkdownTextEditor.baseFont),
                                     onSelectionChange: { display.noteCaret = $0 },
                                     onTypingUndo: { stack, open in
                                         // Closing one note and opening another can report in either
@@ -1622,6 +1624,8 @@ final class CanvasProjectCardDisplay {
     var shows = CanvasCardShows.default
     /// The sitting a `sitting` card draws, from `pmSitting`.
     var sitting: SessionRef?
+    /// How long a line of an open session note gets, from `pmLineWidth`. See `CanvasTextStyle`.
+    var lineWidth = CanvasTextStyle.LineWidth.readable
 
     /// What the board's find is looking for, while this is the card you are standing in.
     ///

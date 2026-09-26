@@ -82,6 +82,8 @@ final class CanvasFileNodeView: CanvasNodeView {
         if projectDisplay.shows != wanted { projectDisplay.shows = wanted }
         let pinned = CanvasSittingPin.of(node)
         if projectDisplay.sitting != pinned { projectDisplay.sitting = pinned }
+        let width = textStyle.lineWidth
+        if projectDisplay.lineWidth != width { projectDisplay.lineWidth = width }
         let options = CanvasFolderOptions.of(node)
         if let folder, folder.options != options { folder.options = options }
     }
@@ -190,6 +192,9 @@ final class CanvasFileNodeView: CanvasNodeView {
     override var setsProse: Bool {
         isProse(stored.path) && !isProjectCard && location.url.map(CanvasFolderListing.isFolder) != true
     }
+
+    /// A project card's notes open at its line width. Its size and face are the task list's.
+    override var setsLineWidth: Bool { setsProse || isProjectCard }
 
     /// Its text answers ⌘+ and ⌘− the way a typed card's does.
     override var zoomsItsContent: Bool { setsProse }
