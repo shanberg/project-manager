@@ -63,6 +63,9 @@ struct CanvasRailLayout: Layout {
 struct CanvasDayWeek: View {
     let span: CanvasCalendarSpan
     let list: SittingList
+    /// The card's projects' calendar events (C4): spans on the grid behind the sittings, all-day ones in
+    /// the strip above it.
+    var events: [ProjectEvent] = []
     var zoom: Double = 1
     var onScreen = CanvasOnScreen()
     var today: String = CanvasTaskLists.todayISO()
@@ -78,9 +81,10 @@ struct CanvasDayWeek: View {
     private var lineHeight: CGFloat { 12.5 * zoom }
 
     var body: some View {
-        let timed = list.sittings.compactMap { CanvasTimeGrid.minutes(of: $0.startTime) }
+        let timed = list.sittings.compactMap { CanvasTimeGrid.minutes(of: $0.startTime) } + eventMinutes
         let hours = CanvasTimeGrid.hours(for: timed)
         let untimed = span.days.map { day in list.sittings.filter { $0.session == day && CanvasTimeGrid.minutes(of: $0.startTime) == nil } }
+        let allDay = span.days.map { day in events.on(day).filter(\.isAllDay) }
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 Color.clear.frame(width: gutter, height: 1)
@@ -90,7 +94,8 @@ struct CanvasDayWeek: View {
             Divider()
             GeometryReader { geometry in
                 let strip = untimed.contains(where: { !$0.isEmpty }) ? blockHeight + 7 : 0
-                let perHour = CanvasCalendarDetail.perHour(available: geometry.size.height - strip - 16,
+                let allDayStrip = allDayHeight(allDay)
+                let perHour = CanvasCalendarDetail.perHour(available: geometry.size.height - strip - allDayStrip - 16,
                                                            hours: hours.count - 1, minimum: 46 * zoom)
                 let columnWidth = (geometry.size.width - gutter) / CGFloat(max(1, span.days.count)) - 4
                 let columns = span.days.map { day in column(day, firstHour: hours.lowerBound, perHour: perHour) }
@@ -98,6 +103,10 @@ struct CanvasDayWeek: View {
                                      columns.map { ($0.last?.top ?? 0) + blockHeight }.max() ?? 0)
                 ScrollView(.vertical) {
                     VStack(spacing: 0) {
+                        if allDayStrip > 0 {
+                            allDayRow(allDay)
+                            Divider()
+                        }
                         if strip > 0 {
                             HStack(alignment: .top, spacing: 0) {
                                 Text("Earlier")
@@ -121,15 +130,8 @@ struct CanvasDayWeek: View {
                         HStack(alignment: .top, spacing: 0) {
                             hourLabels(hours, perHour: perHour).frame(width: gutter, height: gridHeight, alignment: .topTrailing)
                             ForEach(Array(span.days.enumerated()), id: \.offset) { index, _ in
-                                let placed = columns[index]
-                                ZStack(alignment: .topLeading) {
-                                    ForEach(Array(placed.enumerated()), id: \.element.sitting.id) { at, block in
-                                        // Up to where the next one begins, or the grid's foot.
-                                        let next = at + 1 < placed.count ? placed[at + 1].top : gridHeight
-                                        self.block(block.sitting, room: next - block.top - 2, width: columnWidth)
-                                            .offset(y: block.top)
-                                    }
-                                }
+                                dayColumn(span.days[index], placed: columns[index], firstHour: hours.lowerBound,
+                                          perHour: perHour, gridHeight: gridHeight, columnWidth: columnWidth)
                                 .padding(.horizontal, 2)
                                 .frame(maxWidth: .infinity, minHeight: gridHeight, maxHeight: gridHeight, alignment: .topLeading)
                                 .background(alignment: .leading) { Rectangle().fill(Color.primary.opacity(0.08)).frame(width: 0.5) }
@@ -142,6 +144,107 @@ struct CanvasDayWeek: View {
                 }
             }
         }
+    }
+
+    private var eventLine: CGFloat { 15 * zoom }
+
+    private func allDayHeight(_ allDay: [[ProjectEvent]]) -> CGFloat {
+        let most = allDay.map(\.count).max() ?? 0
+        return most == 0 ? 0 : CGFloat(most) * (eventLine + 2) + 6
+    }
+
+    /// The strip above the grid for events that take the whole day.
+    private func allDayRow(_ allDay: [[ProjectEvent]]) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            Text("All day")
+                .font(.system(size: 9.5 * zoom))
+                .foregroundStyle(.tertiary)
+                .frame(width: gutter - 4, alignment: .trailing)
+                .padding(.trailing, 4)
+            ForEach(Array(allDay.enumerated()), id: \.offset) { _, events in
+                VStack(spacing: 2) {
+                    ForEach(events) { event in
+                        CanvasEventLabel(event: event, zoom: zoom, namesProject: false, compact: true)
+                            .padding(.horizontal, 4)
+                            .frame(maxWidth: .infinity, minHeight: eventLine, alignment: .leading)
+                            .background(CanvasEventShape(tint: CanvasCalendarCells.tint(event.projectColor), zoom: zoom))
+                            .help(CanvasCalendarCells.help(event, namesProject: namesProjects))
+                    }
+                }
+                .padding(.horizontal, 2)
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    /// One day on the grid: its events behind, what was scheduled, and its sittings over them, what
+    /// happened.
+    private func dayColumn(_ day: String, placed: [(sitting: SittingEntry, top: CGFloat)], firstHour: Int,
+                           perHour: CGFloat, gridHeight: CGFloat, columnWidth: CGFloat) -> some View {
+        let spans = eventSpans(day, firstHour: firstHour, perHour: perHour, gridHeight: gridHeight)
+        // Where a sitting began during an event the two share the column: the event keeps the left half,
+        // so it still says what it is, and the sitting takes the right.
+        let shared = columnWidth / 2
+        func lands(_ top: CGFloat, in span: (event: ProjectEvent, top: CGFloat, height: CGFloat, lane: Int, of: Int)) -> Bool {
+            top >= span.top && top < span.top + span.height
+        }
+        return ZStack(alignment: .topLeading) {
+            ForEach(spans, id: \.event.id) { placedEvent in
+                let crowded = placed.contains { lands($0.top, in: placedEvent) }
+                eventBlock(placedEvent, width: crowded ? shared : columnWidth)
+            }
+            ForEach(Array(placed.enumerated()), id: \.element.sitting.id) { at, block in
+                // Up to where the next one begins, or the grid's foot.
+                let next = at + 1 < placed.count ? placed[at + 1].top : gridHeight
+                let inset = spans.contains { lands(block.top, in: $0) } ? shared : 0
+                self.block(block.sitting, room: next - block.top - 2, width: columnWidth - inset)
+                    .padding(.leading, inset)
+                    .offset(y: block.top)
+            }
+        }
+    }
+
+    /// Every minute an event on the grid starts or ends at, so the hours take them in.
+    private var eventMinutes: [Int] {
+        var minutes: [Int] = []
+        for day in span.days {
+            for event in events.on(day) {
+                if let start = event.startMinute(on: day) { minutes.append(start) }
+                if let end = event.endMinute(on: day) { minutes.append(max(0, end - 1)) }
+            }
+        }
+        return minutes
+    }
+
+    /// A day's timed events, each placed from when it starts to when it ends — an event is a span that
+    /// was scheduled, so unlike a sitting it is sized by time — and side by side where they overlap.
+    private func eventSpans(_ day: String, firstHour: Int, perHour: CGFloat, gridHeight: CGFloat)
+        -> [(event: ProjectEvent, top: CGFloat, height: CGFloat, lane: Int, of: Int)] {
+        let timed = events.on(day).compactMap { event -> (ProjectEvent, Int, Int)? in
+            guard let start = event.startMinute(on: day), let end = event.endMinute(on: day) else { return nil }
+            return (event, start, max(end, start + 15))
+        }
+        let lanes = CanvasTimeGrid.lanes(timed.map { ($0.1, $0.2) })
+        return zip(timed, lanes).map { item, lane in
+            let top = max(0, CGFloat(item.1 - firstHour * 60) / 60 * perHour)
+            let bottom = min(gridHeight, CGFloat(item.2 - firstHour * 60) / 60 * perHour)
+            return (item.0, top, max(eventLine, bottom - top), lane.lane, lane.of)
+        }
+    }
+
+    private func eventBlock(_ placed: (event: ProjectEvent, top: CGFloat, height: CGFloat, lane: Int, of: Int),
+                            width: CGFloat) -> some View {
+        let laneWidth = width / CGFloat(placed.of)
+        return CanvasEventLabel(event: placed.event, zoom: zoom, namesProject: false, compact: true,
+                                showsTime: placed.height >= eventLine * 2)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .frame(width: max(0, laneWidth - 2), height: placed.height, alignment: .topLeading)
+            .background(CanvasEventShape(tint: CanvasCalendarCells.tint(placed.event.projectColor), zoom: zoom))
+            .clipped()
+            .help(CanvasCalendarCells.help(placed.event, namesProject: namesProjects))
+            .offset(x: CGFloat(placed.lane) * laneWidth, y: placed.top)
     }
 
     /// A day's timed sittings in order, each where it lands.
@@ -352,35 +455,111 @@ struct CanvasMonthGrid<Cell: View>: View {
 /// calendar. See `CanvasCalendarDetail.monthCell`.
 struct CanvasDayMonthCell: View {
     let sittings: [SittingEntry]
+    /// The day's events (C4), listed with the sittings in the order the day went; rings where they're dots.
+    var events: [ProjectEvent] = []
+    var day: String = ""
     var room = CanvasMonthRoom(lines: 0, width: 0)
     var zoom: Double = 1
     var readable = true
     /// See `CanvasDayWeek.namesProjects`.
     var namesProjects = true
 
+    private enum Item: Identifiable {
+        case sitting(SittingEntry)
+        case event(ProjectEvent)
+        var id: String {
+            switch self {
+            case .sitting(let sitting): sitting.id
+            case .event(let event): "event/\(event.id)"
+            }
+        }
+    }
+
+    /// Untimed first — a sitting from before headings kept the time, an all-day event — then by when
+    /// it began, an event ahead of a sitting at the same minute.
+    private var items: [Item] {
+        let all = events.map { (Item.event($0), $0.startMinute(on: day), 0) }
+            + sittings.map { (Item.sitting($0), CanvasTimeGrid.minutes(of: $0.startTime), 1) }
+        return all.enumerated().sorted { a, b in
+            let (x, y) = (a.element.1, b.element.1)
+            if x != y {
+                guard let x else { return true }
+                guard let y else { return false }
+                return x < y
+            }
+            return a.element.2 != b.element.2 ? a.element.2 < b.element.2 : a.offset < b.offset
+        }.map(\.element.0)
+    }
+
     var body: some View {
-        let detail = CanvasCalendarDetail.monthCell(sittings: sittings.count, width: room.width, lines: room.lines,
+        let items = self.items
+        let detail = CanvasCalendarDetail.monthCell(sittings: items.count, width: room.width, lines: room.lines,
                                                     readable: readable)
         Group {
             switch detail {
             case .dots:
-                CanvasDotsCell(colors: sittings.map(\.projectColor), zoom: zoom, large: !readable)
+                CanvasDotsCell(colors: items.map(color), hollow: items.map(isEvent), zoom: zoom, large: !readable)
             case .names(let shown):
                 VStack(alignment: .leading, spacing: 1) {
-                    ForEach(sittings.prefix(shown), id: \.id) { line($0, lede: false) }
-                    if sittings.count > shown {
-                        Text("+\(sittings.count - shown) more")
+                    ForEach(items.prefix(shown)) { line($0, lede: false) }
+                    if items.count > shown {
+                        Text("+\(items.count - shown) more")
                             .font(.system(size: 9 * zoom))
                             .foregroundStyle(.secondary)
                     }
                 }
             case .ledes:
                 VStack(alignment: .leading, spacing: 1) {
-                    ForEach(sittings, id: \.id) { line($0, lede: true) }
+                    ForEach(items) { line($0, lede: true) }
                 }
             }
         }
-        .help(sittings.map { CanvasCalendarCells.help($0, namesProject: namesProjects) }.joined(separator: "\n"))
+        .help(items.map { item in
+            switch item {
+            case .sitting(let sitting): CanvasCalendarCells.help(sitting, namesProject: namesProjects)
+            case .event(let event): CanvasCalendarCells.help(event, namesProject: namesProjects)
+            }
+        }.joined(separator: "\n"))
+    }
+
+    private func color(_ item: Item) -> String? {
+        switch item {
+        case .sitting(let sitting): sitting.projectColor
+        case .event(let event): event.projectColor
+        }
+    }
+
+    private func isEvent(_ item: Item) -> Bool {
+        if case .event = item { return true }
+        return false
+    }
+
+    @ViewBuilder private func line(_ item: Item, lede: Bool) -> some View {
+        switch item {
+        case .sitting(let sitting): line(sitting, lede: lede)
+        case .event(let event): line(event)
+        }
+    }
+
+    /// An event's line: an outlined bar, where a sitting's is filled, then its time where there's room,
+    /// then what it's called.
+    private func line(_ event: ProjectEvent) -> some View {
+        let tint = CanvasCalendarCells.tint(event.projectColor)
+        return HStack(alignment: .top, spacing: 3 * zoom) {
+            RoundedRectangle(cornerRadius: 1).strokeBorder(tint, lineWidth: 1).frame(width: 2.5 * zoom)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                if room.width >= 130, let minute = event.startMinute(on: day) {
+                    Text(CanvasCalendarCells.clock(minute: minute))
+                        .font(.system(size: 9 * zoom).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Text(event.title.isEmpty ? "Event" : event.title)
+                    .font(.system(size: 9.5 * zoom))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// A sitting's line: a bar in its project's colour, then its project, and the time where the cell is
@@ -417,6 +596,8 @@ struct CanvasDayMonthCell: View {
 /// running out of its cell — what a month's day is when it has no room for words.
 struct CanvasDotsCell: View {
     let colors: [String?]
+    /// Which are rings rather than dots: calendar events, beside the things done (C4).
+    var hollow: [Bool] = []
     var zoom: Double = 1
     /// Drawn larger, for a board zoomed out past reading, where a 7pt dot is a speck.
     var large = false
@@ -428,9 +609,15 @@ struct CanvasDotsCell: View {
             ForEach(Array(stride(from: 0, to: shown.count, by: 6)), id: \.self) { start in
                 HStack(spacing: 3 * zoom) {
                     ForEach(start..<min(shown.count, start + 6), id: \.self) { index in
-                        Circle()
-                            .fill(CanvasCalendarCells.tint(shown[index]))
-                            .frame(width: size, height: size)
+                        let tint = CanvasCalendarCells.tint(shown[index])
+                        Group {
+                            if index < hollow.count, hollow[index] {
+                                Circle().strokeBorder(tint, lineWidth: max(1, size / 5))
+                            } else {
+                                Circle().fill(tint)
+                            }
+                        }
+                        .frame(width: size, height: size)
                     }
                 }
             }
@@ -445,7 +632,78 @@ struct CanvasDotsCell: View {
 
 // MARK: - Pieces
 
+/// An event's ground (C4): an outline in its project's colour over the faintest wash of it — a span
+/// that was scheduled, where a sitting is a filled block with a bar, a start that happened.
+struct CanvasEventShape: View {
+    let tint: Color
+    var zoom: Double = 1
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4 * zoom).fill(tint.opacity(0.06))
+            RoundedRectangle(cornerRadius: 4 * zoom)
+                .strokeBorder(tint.opacity(0.75), style: StrokeStyle(lineWidth: max(0.75, zoom), dash: [3 * zoom, 2 * zoom]))
+        }
+    }
+}
+
+/// What an event says: a calendar mark and its title, then when it runs, and whose it is on a card of
+/// several projects. `compact` puts it all on as few lines as a week's column has.
+struct CanvasEventLabel: View {
+    let event: ProjectEvent
+    var zoom: Double = 1
+    var namesProject = true
+    var compact = false
+    var showsTime = true
+
+    var body: some View {
+        let tint = CanvasCalendarCells.tint(event.projectColor)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 4 * zoom) {
+                Image(systemName: "calendar")
+                    .font(.system(size: (compact ? 8 : 10) * zoom))
+                    .foregroundStyle(tint)
+                Text(event.title.isEmpty ? "Event" : event.title)
+                    .font(.system(size: (compact ? 9.5 : 12) * zoom, weight: .medium))
+                    .lineLimit(1)
+                if !compact {
+                    Spacer(minLength: 4)
+                    Text(event.timeLabel())
+                        .font(.system(size: 10 * zoom).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            if compact, showsTime, !event.isAllDay {
+                Text(event.timeLabel())
+                    .font(.system(size: 8.5 * zoom).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if !compact, namesProject {
+                Text(event.projectName)
+                    .font(.system(size: 10 * zoom))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
 enum CanvasCalendarCells {
+    /// What an event says on hover: when, what, whose.
+    static func help(_ event: ProjectEvent, namesProject: Bool = true) -> String {
+        ([event.timeLabel(), event.title] + (namesProject ? [event.projectName] : [])).joined(separator: " · ")
+    }
+
+    /// "9:10 AM", from minutes past midnight.
+    static func clock(minute: Int) -> String {
+        let hour = minute / 60 % 24
+        let twelve = hour % 12 == 0 ? 12 : hour % 12
+        return String(format: "%d:%02d %@", twelve, minute % 60, hour < 12 ? "AM" : "PM")
+    }
+
     /// A project's `pm-color`, or a quiet grey for one without.
     static func tint(_ color: String?) -> Color {
         color.flatMap(ProjectColor.init(value:)).map { Color(nsColor: $0.nsColor) } ?? Color.secondary.opacity(0.6)

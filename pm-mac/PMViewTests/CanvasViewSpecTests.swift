@@ -595,6 +595,37 @@ extension CanvasViewSpecTests {
                        [0, 124, 364], "Measured from where the last timed block landed, not where it would have")
     }
 
+    /// Events side by side where they overlap: a cluster takes as many lanes as its busiest moment, a
+    /// lane frees up when its event ends, and one ending as the next begins doesn't overlap it.
+    func testOverlappingEventsShareAColumn() {
+        let lanes = CanvasTimeGrid.lanes([(540, 600), (570, 630), (600, 660), (660, 720), (700, 710)])
+        XCTAssertEqual(lanes.map(\.lane), [0, 1, 0, 0, 1])
+        XCTAssertEqual(lanes.map(\.of), [2, 2, 2, 2, 2])
+        let apart = CanvasTimeGrid.lanes([(600, 660), (540, 600)])
+        XCTAssertEqual(apart.map(\.lane), [0, 0], "back to back, and given out of order")
+        XCTAssertEqual(apart.map(\.of), [1, 1])
+        XCTAssertTrue(CanvasTimeGrid.lanes([]).isEmpty)
+    }
+
+    /// Events join the rail at their start, an all-day one with the untimed sittings, and ahead of a
+    /// sitting that began the same minute.
+    func testEventsJoinTheRail() throws {
+        let calendar = Calendar.current
+        let day = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 25)))
+        func event(_ id: String, _ hour: Int, allDay: Bool = false) -> ProjectEvent {
+            let start = allDay ? day : day.addingTimeInterval(TimeInterval(hour * 3600))
+            return ProjectEvent(id: id, title: id, start: start, end: start.addingTimeInterval(allDay ? 86_400 : 1800),
+                                isAllDay: allDay, projectFolder: "W-1 Launch", projectName: "Launch", projectColor: nil)
+        }
+        let entries = CanvasTimeGrid.railEntries(SittingList(), events: [event("Review", 14), event("Offsite", 0, allDay: true),
+                                                                         event("Standup", 9)],
+                                                 day: "2026-09-25", calendar: calendar)
+        XCTAssertEqual(entries.map(\.id), ["event/Offsite", "event/Standup", "event/Review"])
+        XCTAssertEqual(entries.map(\.minute), [nil, 540, 840])
+        XCTAssertTrue(CanvasTimeGrid.railEntries(SittingList(), events: [event("Standup", 9)]).isEmpty,
+                      "no day, no events: the rail's day is what places them")
+    }
+
     /// A week's grid is the working day, widened for an early or late sitting; a column pushes a block
     /// down when two began too close together to fit.
     func testAWeeksGridTakesInEverySitting() {

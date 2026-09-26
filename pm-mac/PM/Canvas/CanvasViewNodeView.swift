@@ -150,11 +150,20 @@ final class CanvasViewNodeView: CanvasNodeView {
     /// The card's answer as markdown, for Copy as Text (docs/views.md D10), or nil before it has one.
     var text: String? {
         switch model {
-        case .day(let day): return day.list.map { ViewMarkdown.day($0) }
-        case .tasks(let tasks): return tasks.text
+        case .day(let day): return day.list.map { ViewMarkdown.day($0) + eventsText(day.events, day.range) }
+        case .tasks(let tasks): return tasks.text.map { $0 + eventsText(tasks.events, nil) }
         case .projects(let projects): return projects.text
         case .time(let time): return time.text
         }
+    }
+
+    /// The events the card draws, after its answer (views.md D10, C4): over a week or month's days, or
+    /// the rail's one day. Nothing when it draws none.
+    private func eventsText(_ feed: CanvasEventFeed, _ range: DoneRange?) -> String {
+        guard !feed.events.isEmpty else { return "" }
+        let days = (try? spec.calendarSpan())?.days ?? range.map { [CanvasDayCard.isoDay($0.start)] } ?? []
+        let text = ViewMarkdown.events(feed.events, days: days)
+        return text.isEmpty ? "" : "\n" + text
     }
 
     override func contentChanged() {

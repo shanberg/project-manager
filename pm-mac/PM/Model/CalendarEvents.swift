@@ -76,20 +76,42 @@ final class CalendarEvents {
     /// The events in `interval` that belong to a project with these sources, by start. Only the
     /// calendars the sources name are searched.
     func events(in interval: DateInterval, for sources: [ProjectEventSource]) -> [Event] {
-        guard access == .granted, !sources.isEmpty else { return [] }
-        let calendars = store.calendars(for: .event).filter { calendar in
-            sources.contains { $0.namesCalendar(calendar) }
-        }
-        guard !calendars.isEmpty else { return [] }
-        let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: calendars)
-        return store.events(matching: predicate)
+        occurrences(in: interval, for: sources)
             .filter { sources.matches(calendar: $0.calendar.title, account: $0.calendar.source?.title, title: $0.title ?? "") }
             .map { event in
                 Event(eventID: event.eventIdentifier ?? "", title: event.title ?? "", start: event.startDate,
                       end: event.endDate, isAllDay: event.isAllDay, calendar: event.calendar.title,
                       account: event.calendar.source?.title ?? "")
             }
-            .sorted { $0.start < $1.start }
+    }
+
+    /// The events in `interval` for each of these projects, by start: one per project an event belongs
+    /// to, since two projects can both claim a meeting (views.md C3). One EventKit read for all of them.
+    func events(in interval: DateInterval, links: [ProjectEventLink]) -> [ProjectEvent] {
+        var out: [ProjectEvent] = []
+        for event in occurrences(in: interval, for: links.flatMap(\.sources)) {
+            let title = event.title ?? ""
+            for link in links where link.sources.matches(calendar: event.calendar.title,
+                                                         account: event.calendar.source?.title, title: title) {
+                out.append(ProjectEvent(
+                    id: "\(link.projectFolder)/\(event.eventIdentifier ?? "")@\(event.startDate.timeIntervalSinceReferenceDate)",
+                    title: title, start: event.startDate, end: event.endDate, isAllDay: event.isAllDay,
+                    projectFolder: link.projectFolder, projectName: link.projectName,
+                    projectColor: link.projectColor))
+            }
+        }
+        return out
+    }
+
+    /// Every occurrence in the calendars `sources` name, unfiltered by title, by start.
+    private func occurrences(in interval: DateInterval, for sources: [ProjectEventSource]) -> [EKEvent] {
+        guard access == .granted, !sources.isEmpty else { return [] }
+        let calendars = store.calendars(for: .event).filter { calendar in
+            sources.contains { $0.namesCalendar(calendar) }
+        }
+        guard !calendars.isEmpty else { return [] }
+        let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: calendars)
+        return store.events(matching: predicate).sorted { $0.startDate < $1.startDate }
     }
 }
 

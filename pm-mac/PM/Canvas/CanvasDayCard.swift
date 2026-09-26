@@ -19,6 +19,8 @@ final class CanvasDayModel {
     private(set) var list: SittingList?
     private(set) var range: DoneRange?
     private(set) var failure: String?
+    /// The calendar events of the card's projects, over what the rail, week or month draws (views.md C4).
+    let events: CanvasEventFeed
 
     /// What the card is set to, from the node.
     var spec: CanvasViewSpec { didSet { if spec != oldValue { reload() } } }
@@ -51,17 +53,21 @@ final class CanvasDayModel {
 
     init(spec: CanvasViewSpec) {
         self.spec = spec
+        events = CanvasEventFeed()
+        events.onChange = { [weak self] in self?.onChange?() }
     }
 
     /// A model holding an answer already in hand, which never looks: for drawing the card in a test.
-    init(spec: CanvasViewSpec, showing list: SittingList, for range: DoneRange) {
+    init(spec: CanvasViewSpec, showing list: SittingList, for range: DoneRange, events: [ProjectEvent] = []) {
         self.spec = spec
         self.list = list
         self.range = range
+        self.events = CanvasEventFeed(showing: events)
     }
 
     /// Start looking, now and every `interval`.
     func start() {
+        events.start()
         reload()
         guard timer == nil else { return }
         let timer = Timer(timeInterval: Self.interval, repeats: true) { [weak self] _ in
@@ -76,6 +82,7 @@ final class CanvasDayModel {
     func stop() {
         timer?.invalidate()
         timer = nil
+        events.stop()
     }
 
     /// Show `row` as `state` until its write has been read back.
@@ -121,6 +128,10 @@ final class CanvasDayModel {
         case .board: projects = boardProjects
         case .named(let names): projects = names
         }
+        // Events are drawn on time — the rail, a week, a month — and the plain list waits (C4).
+        let drawsEvents = spec.shownLayout != .list
+        let eventRange = drawsEvents ? ((try? spec.calendarSpan())?.map(\.range) ?? (try? spec.period.range())) : nil
+        events.load(projects: projects, interval: eventRange.map { DateInterval(start: $0.start, end: $0.end) })
         queue.async { [weak self] in
             let result = Result { () throws -> (DoneRange, SittingList) in
                 // A week or a month laid out asks about the whole of it, not only the period's days.
@@ -281,18 +292,20 @@ struct CanvasDayCard: View {
         } else if let list = model.list, let span {
             // A week or a month is drawn even when it's empty: an empty week is still seven days.
             if model.spec.shownLayout == .week {
-                CanvasDayWeek(span: span, list: list, zoom: zoom, onScreen: onScreen, onOpenProject: onOpenProject,
+                CanvasDayWeek(span: span, list: list, events: model.events.events, zoom: zoom, onScreen: onScreen, onOpenProject: onOpenProject,
                               onOpenDay: onOpenDay, sittingCard: sittingCard, namesProjects: !model.showsOneProject)
             } else {
                 CanvasMonthGrid(span: span, zoom: zoom, isQuiet: { !$0.hasPrefix(span.month ?? $0) },
                                 onOpenDay: onOpenDay) { day, room in
                     CanvasDayMonthCell(sittings: CanvasTimeGrid.ordered(list.sittings.filter { $0.session == day }),
-                                       room: room, zoom: zoom, readable: onScreen.finePrintReadable,
+                                       events: model.events.events.on(day), day: day, room: room, zoom: zoom, readable: onScreen.finePrintReadable,
                                        namesProjects: !model.showsOneProject)
                 }
             }
         } else if let list = model.list {
-            if list.sittings.isEmpty && list.elsewhere.isEmpty {
+            // A day of meetings and nothing written is still a day to draw, on the rail.
+            if list.sittings.isEmpty && list.elsewhere.isEmpty
+                && (model.spec.shownLayout != .rail || railEvents.isEmpty) {
                 quiet(emptyMessage)
             } else {
                 ScrollView(.vertical) {
@@ -370,14 +383,19 @@ struct CanvasDayCard: View {
     /// One day down its time gutter (D9): each sitting at least as far below the last as the time
     /// between them, and each completion from no sitting at its own time, so a tick from the menubar at
     /// 4:02 is on the rail at 4:02. A faint line runs down the gutter's edge, which is the rail.
+    /// The rail's one day, and the events on it.
+    private var railDay: String? { model.range.map { CanvasDayCard.isoDay($0.start) } }
+    private var railEvents: [ProjectEvent] { railDay.map { model.events.events.on($0) } ?? [] }
+
     private func rail(_ list: SittingList) -> some View {
-        let entries = CanvasTimeGrid.railEntries(list)
+        let entries = CanvasTimeGrid.railEntries(list, events: model.events.events, day: railDay)
         return CanvasRailLayout(perMinute: 0.8 * zoom, gap: 0) {
             ForEach(entries) { entry in
                 Group {
                     switch entry.kind {
                     case .sitting(let sitting): sittingBlock(sitting)
                     case .done(let item): railDone(item)
+                    case .event(let event): railEvent(event)
                     }
                 }
                 .layoutValue(key: CanvasRailLayout.Minute.self, value: entry.minute)
@@ -417,6 +435,30 @@ struct CanvasDayCard: View {
         .padding(.leading, 4)
         .padding(.trailing, 12)
         .padding(.vertical, 3)
+    }
+
+    /// An event on the rail (C4): its start in the gutter, then a span that was scheduled, drawn unlike a
+    /// sitting — an outline in its project's colour, not a block of it — with when it runs, what it's
+    /// called and, on a card of several projects, whose it is. Read only: the calendar is the truth.
+    private func railEvent(_ event: ProjectEvent) -> some View {
+        let tint = CanvasCalendarCells.tint(event.projectColor)
+        let starts = railDay.flatMap { event.startMinute(on: $0) }
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(event.isAllDay ? "All day" : starts.map { CanvasCalendarCells.clock(minute: $0) } ?? "")
+                .font(.system(size: 11 * zoom).monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .frame(width: Self.gutter * zoom, alignment: .trailing)
+                .lineLimit(1)
+            CanvasEventLabel(event: event, zoom: zoom, namesProject: !model.showsOneProject)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(CanvasEventShape(tint: tint, zoom: zoom))
+        }
+        .padding(.leading, 4)
+        .padding(.trailing, 12)
+        .padding(.vertical, 3)
+        .help(CanvasCalendarCells.help(event, namesProject: !model.showsOneProject))
     }
 
     // MARK: A sitting
@@ -685,6 +727,14 @@ struct CanvasDayCard: View {
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
+
+    /// The local day a date falls on, as `YYYY-MM-DD`.
+    static func isoDay(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
 
     /// The local day an instant fell on, as `YYYY-MM-DD`.
     static func localISO(_ instant: String) -> String? {

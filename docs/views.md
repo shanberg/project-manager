@@ -3,7 +3,7 @@
 **Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row), 5 (Waiting and Search), 6 (Leftovers), 7 (Coming up, Projects, Copy as Text) and 9 (Time) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
-goals (at the end) so that it isn't built only for the day. **Calendars** are decided (below); steps 1 (PmLib) and 2 (the app) are built. An inbox was considered and decided against.
+goals (at the end) so that it isn't built only for the day. **Calendars** are decided (below); steps 1 (PmLib), 2 (the app) and 3 (the views) are built. An inbox was considered and decided against.
 
 ## The problem
 
@@ -575,7 +575,7 @@ choosing Period: Week/Month while Layout is Rail resets Layout to List.
 
 ## Calendars
 
-Decided 2026-09-18. Steps 1 and 2 built 2026-09-25.
+Decided 2026-09-18. Steps 1–3 built 2026-09-25.
 
 **The ask:** subscribe to a calendar, associate it with a project or area, and see its events among the
 sittings, in the views that cover that project.
@@ -656,7 +656,30 @@ the plain list, and how, waits until they've been seen on the rail. Copy as Text
    - Rows ⇄ sources are PmLib (`projectEventChoices`, `projectEventSources(from:)`). An account is
      written when the file named one, or two calendars here share the title and aren't checked alike.
      Opening and saving unchanged writes nothing.
-3. **The views.** Events for the card's projects, drawn in the rail, week and month.
+3. ✓ **The views.** Events for the card's projects, drawn in the rail, week and month.
+   As built:
+   - `projectEventLinks(projects:)` (PmLib): every project with `pm-events` among a card's projects.
+     All projects means active and areas; a named archived project counts. Frontmatter only, cached
+     per file by modified date.
+   - `ProjectEvent` (PmLib): an occurrence with its project. `days`, `startMinute(on:)`,
+     `endMinute(on:)`, `timeLabel` ("9:00–9:30 AM", "All day"). An all-day event ends at the next
+     midnight; a timed one ending at midnight stays on its day.
+   - `CanvasEventFeed` (app): per Day card and Coming up card. Links off the main thread, then one
+     EventKit read; again on every card poll and on `EKEventStoreChanged`. Nothing without access.
+   - Drawn only where a layout is on time: Day's rail, week and month; Coming up's week and month.
+     Day's plain list and Coming up's list draw none (C4).
+   - Look: a dashed outline in the project's colour over a faint wash, with a calendar mark. Sittings
+     stay filled blocks with a bar. Month lines: an outlined bar; dots: a ring.
+   - Rail: at its start, an all-day one with the untimed sittings, ahead of a sitting at the same
+     minute. A day with events and nothing written still draws its rail.
+   - Day week: events sized by their span (sittings still aren't), side by side where they overlap
+     (`CanvasTimeGrid.lanes`), behind the sittings. A sitting that begins in an event takes the right
+     half; the event keeps the left. All-day events in a strip above the grid. Hours widen for them.
+   - Coming up week: a day's events above what's due. Month: events before tasks, one line kept for
+     tasks, "+N events" when they don't fit.
+   - Copy as Text: an `## Events` section after the answer, a heading per day with events
+     (`ViewMarkdown.events`).
+   - Read only: no click action; the help names time, title and project.
 4. **Later.** A sitting started during an associated event takes the event's title, so the meeting and
    its notes read as one row. A period anchored to an event ("since the last 1:1" as the calendar says
    it, not only as the notes do). **Take Notes for This Meeting**, starting a sitting in the associated

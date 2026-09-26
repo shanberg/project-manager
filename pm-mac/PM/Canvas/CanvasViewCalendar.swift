@@ -167,21 +167,57 @@ enum CanvasTimeGrid {
         return tops
     }
 
-    /// Something on the rail: a sitting, or a completion that fell in none.
+    /// Side by side, for spans in one column that overlap: each span's lane and how many lanes its
+    /// cluster — the spans that overlap it, and those that overlap them — needs. A span ending as the next
+    /// begins doesn't overlap it. In the order given.
+    static func lanes(_ spans: [(start: Int, end: Int)]) -> [(lane: Int, of: Int)] {
+        let order = spans.indices.sorted { spans[$0].start != spans[$1].start ? spans[$0].start < spans[$1].start : $0 < $1 }
+        var result = Array(repeating: (lane: 0, of: 1), count: spans.count)
+        var cluster: [Int] = []
+        var laneEnds: [Int] = []
+        var clusterEnd = Int.min
+        func close() {
+            for index in cluster { result[index].of = max(1, laneEnds.count) }
+            cluster = []
+            laneEnds = []
+        }
+        for index in order {
+            let span = spans[index]
+            if span.start >= clusterEnd { close() }
+            let lane = laneEnds.firstIndex { $0 <= span.start } ?? laneEnds.count
+            if lane == laneEnds.count { laneEnds.append(span.end) } else { laneEnds[lane] = span.end }
+            result[index].lane = lane
+            cluster.append(index)
+            clusterEnd = cluster.count == 1 ? span.end : max(clusterEnd, span.end)
+        }
+        close()
+        return result
+    }
+
+    /// Something on the rail: a sitting, a completion that fell in none, or a calendar event.
     struct RailEntry: Identifiable {
         enum Kind {
             case sitting(SittingEntry)
             case done(DoneItem)
+            case event(ProjectEvent)
         }
         let id: String
         let minute: Int?
         let kind: Kind
     }
 
-    /// The day's sittings and its stray completions, in the order the day went: a sitting with no time
-    /// first, as the list has it ("Earlier").
-    static func railEntries(_ list: SittingList, calendar: Calendar = .current) -> [RailEntry] {
-        var entries = list.sittings.map {
+    /// The day's sittings, its stray completions and its events, in the order the day went: a sitting
+    /// with no time first, as the list has it ("Earlier"), and an all-day event with them. An event that
+    /// began the day before is on the rail from midnight. A sitting and an event at the same minute: the
+    /// event first, since it was on the calendar before the sitting began.
+    static func railEntries(_ list: SittingList, events: [ProjectEvent] = [], day: String? = nil,
+                            calendar: Calendar = .current) -> [RailEntry] {
+        var entries = day.map { day in
+            events.on(day, calendar: calendar).map {
+                RailEntry(id: "event/\($0.id)", minute: $0.startMinute(on: day, calendar: calendar), kind: .event($0))
+            }
+        } ?? []
+        entries += list.sittings.map {
             RailEntry(id: $0.id, minute: CanvasTimeGrid.minutes(of: $0.startTime), kind: .sitting($0))
         }
         entries += list.elsewhere.enumerated().map { index, item in

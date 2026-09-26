@@ -352,3 +352,186 @@ public func projectEventSources(from choices: [ProjectEventChoice]) -> [ProjectE
 private func choiceID(_ title: String, _ account: String?) -> String {
     "\(account?.lowercased() ?? "")\u{1f}\(title.lowercased())"
 }
+
+// MARK: - Across the vault
+
+/// A project that shows events, and what it takes them from — what a view needs to fetch its events and
+/// draw them in the project's colours (views.md C3).
+public struct ProjectEventLink: Equatable, Sendable {
+    public let projectFolder: String
+    public let projectName: String
+    public let projectColor: String?
+    public let projectIcon: String?
+    public let sources: [ProjectEventSource]
+}
+
+/// Every project with `pm-events`, among `projects` (named as `sessionList` takes them; nil for all).
+///
+/// Unlike sittings, all means the active projects and areas: an archived project's calendar is still
+/// someone's calendar, and a meeting next week isn't the archived work's. Named, the archive counts.
+///
+/// **Only frontmatter is read, and only when the file changed.** A view asks every little while, and
+/// the answer changes when a notes file does, so each file's links are kept against its modified date.
+public func projectEventLinks(projects: [String]? = nil) throws -> [ProjectEventLink] {
+    let (config, paths) = try loadConfigAndPaths(skipPathValidation: true)
+    let codes = Array(config.domains.keys)
+    let only = try projects.map(projectFolders(named:))
+
+    var links: [ProjectEventLink] = []
+    var seen = Set<String>()
+    for scope in ProjectScope.allCases where only != nil || !scope.isArchived {
+        let base = scope.path(in: paths)
+        for folder in (try? getFolders(basePath: base, scope: scope, domainCodes: codes)) ?? [] {
+            if let only, !only.contains(folder) { continue }
+            let projectPath = (base as NSString).appendingPathComponent(folder)
+            guard seen.insert(projectPath).inserted,
+                  let notesPath = (try? resolveNotesPath(projectPath: projectPath)) ?? nil,
+                  let link = EventLinkCache.shared.link(folder: folder, notesPath: notesPath) else { continue }
+            links.append(link)
+        }
+    }
+    return links
+}
+
+private final class EventLinkCache: @unchecked Sendable {
+    static let shared = EventLinkCache()
+    private let lock = NSLock()
+    private var entries: [String: (modified: Date?, link: ProjectEventLink?)] = [:]
+
+    func link(folder: String, notesPath: String) -> ProjectEventLink? {
+        let modified = notesLastEdited(path: notesPath)
+        lock.lock()
+        let hit = entries[notesPath]
+        lock.unlock()
+        if let hit, hit.modified == modified, modified != nil, hit.link?.projectFolder ?? folder == folder {
+            return hit.link
+        }
+        var link: ProjectEventLink?
+        if let raw = try? String(contentsOfFile: notesPath, encoding: .utf8) {
+            let sources = projectEventSources(rawText: raw)
+            if !sources.isEmpty {
+                link = ProjectEventLink(projectFolder: folder, projectName: projectTitle(fromFolderName: folder),
+                                        projectColor: projectColor(rawText: raw)?.value,
+                                        projectIcon: projectIcon(rawText: raw, notesPath: notesPath)?.value,
+                                        sources: sources)
+            }
+        }
+        lock.lock()
+        entries[notesPath] = (modified, link)
+        lock.unlock()
+        return link
+    }
+}
+
+// MARK: - An event, placed
+
+/// A calendar event as a view draws it: which project's, and where it falls. The app fills these from
+/// EventKit; everything after that — which days it's on, what it says as text — is here, and tested.
+public struct ProjectEvent: Equatable, Hashable, Sendable, Identifiable {
+    /// The occurrence: an event's identifier and its start, since a series shares one identifier.
+    public let id: String
+    public let title: String
+    public let start: Date
+    public let end: Date
+    public let isAllDay: Bool
+    public let projectFolder: String
+    public let projectName: String
+    public let projectColor: String?
+
+    public init(id: String, title: String, start: Date, end: Date, isAllDay: Bool,
+                projectFolder: String, projectName: String, projectColor: String?) {
+        self.id = id
+        self.title = title
+        self.start = start
+        self.end = end
+        self.isAllDay = isAllDay
+        self.projectFolder = projectFolder
+        self.projectName = projectName
+        self.projectColor = projectColor
+    }
+
+    /// The local days it's on, `YYYY-MM-DD`: an all-day event's end is the midnight after its last day,
+    /// and a timed one ending at midnight doesn't reach into the next.
+    public func days(calendar: Calendar = .current) -> [String] {
+        let first = calendar.startOfDay(for: start)
+        let last = calendar.startOfDay(for: max(start, end.addingTimeInterval(-1)))
+        var days: [String] = []
+        var day = first
+        while day <= last, days.count < 366 {
+            days.append(Self.iso(day, calendar))
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return days
+    }
+
+    /// Minutes past midnight it starts on `day`: 0 when it began on an earlier day. Nil all day.
+    public func startMinute(on day: String, calendar: Calendar = .current) -> Int? {
+        guard !isAllDay else { return nil }
+        guard Self.iso(start, calendar) == day else { return 0 }
+        let parts = calendar.dateComponents([.hour, .minute], from: start)
+        return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+    }
+
+    /// Minutes past midnight it ends on `day`: 1440 when it runs on past it. Nil all day.
+    public func endMinute(on day: String, calendar: Calendar = .current) -> Int? {
+        guard !isAllDay else { return nil }
+        let endDay = Self.iso(end.addingTimeInterval(-1), calendar)
+        guard endDay == day else { return 24 * 60 }
+        let parts = calendar.dateComponents([.hour, .minute], from: end)
+        let minute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        return minute == 0 ? 24 * 60 : minute
+    }
+
+    /// "9:00–9:30 AM", "11:30 AM–12:15 PM", "All day".
+    public func timeLabel(calendar: Calendar = .current) -> String {
+        guard !isAllDay else { return "All day" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.amSymbol = "AM"
+        formatter.pmSymbol = "PM"
+        formatter.dateFormat = "a"
+        let sameHalf = formatter.string(from: start) == formatter.string(from: end)
+            && calendar.isDate(start, inSameDayAs: end)
+        formatter.dateFormat = sameHalf ? "h:mm" : "h:mm a"
+        let from = formatter.string(from: start)
+        formatter.dateFormat = "h:mm a"
+        return "\(from)–\(formatter.string(from: end))"
+    }
+
+    private static func iso(_ date: Date, _ calendar: Calendar) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+}
+
+extension Array where Element == ProjectEvent {
+    /// The events on `day`, all-day first, then by start.
+    public func on(_ day: String, calendar: Calendar = .current) -> [ProjectEvent] {
+        filter { $0.days(calendar: calendar).contains(day) }
+            .sorted { a, b in
+                if a.isAllDay != b.isAllDay { return a.isAllDay }
+                return a.start != b.start ? a.start < b.start : a.title < b.title
+            }
+    }
+}
+
+// MARK: - As text
+
+extension ViewMarkdown {
+    /// A view's events for Copy as Text (views.md D10, C4): a section after its answer, a heading per
+    /// day in `days`, and a line per event. Empty when none of them has any.
+    public static func events(_ events: [ProjectEvent], days: [String], calendar: Calendar = .current) -> String {
+        var out: [String] = []
+        for day in days {
+            let on = events.on(day, calendar: calendar)
+            guard !on.isEmpty else { continue }
+            out += ["", "### \(longDay(day, calendar: calendar))", ""]
+            out += on.map { "- \($0.timeLabel(calendar: calendar)) · \($0.title) · \(link($0.projectFolder))" }
+        }
+        guard !out.isEmpty else { return "" }
+        return (["## Events"] + out).joined(separator: "\n") + "\n"
+    }
+}

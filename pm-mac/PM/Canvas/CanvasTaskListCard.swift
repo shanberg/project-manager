@@ -21,6 +21,8 @@ final class CanvasTaskListModel {
     /// The same answer as markdown, for Copy as Text (docs/views.md D10) — PmLib's words for it, made
     /// from the contract's answer in the same look.
     private(set) var text: String?
+    /// Coming up's calendar events, over what its week or month draws (views.md C4). None elsewhere.
+    let events: CanvasEventFeed
 
     /// What the card is set to, from the node.
     var spec: CanvasViewSpec { didSet { if spec != oldValue { query = spec.query; reload() } } }
@@ -52,16 +54,20 @@ final class CanvasTaskListModel {
     init(spec: CanvasViewSpec) {
         self.spec = spec
         self.query = spec.query
+        events = CanvasEventFeed()
+        events.onChange = { [weak self] in self?.onChange?() }
     }
 
     /// A model holding an answer already in hand, which never looks: for drawing the card in a test.
-    init(spec: CanvasViewSpec, showing groups: [CanvasTaskGroup]) {
+    init(spec: CanvasViewSpec, showing groups: [CanvasTaskGroup], events: [ProjectEvent] = []) {
         self.spec = spec
         self.query = spec.query
         self.groups = groups
+        self.events = CanvasEventFeed(showing: events)
     }
 
     func start() {
+        events.start()
         reload()
         guard timer == nil else { return }
         let timer = Timer(timeInterval: Self.interval, repeats: true) { [weak self] _ in
@@ -76,6 +82,7 @@ final class CanvasTaskListModel {
         timer?.invalidate()
         timer = nil
         typing?.cancel()
+        events.stop()
     }
 
     /// Search for `text` as it's typed, once typing rests — without writing it to the node, which
@@ -115,6 +122,7 @@ final class CanvasTaskListModel {
         case .board: projects = boardProjects
         case .named(let names): projects = names
         }
+        events.load(projects: projects, interval: span.map { DateInterval(start: $0.range.start, end: $0.range.end) })
         queue.async { [weak self] in
             let result = Result { () throws -> ([CanvasTaskGroup], String) in
                 let none = projects?.isEmpty == true
@@ -380,6 +388,16 @@ struct CanvasTaskListCard: View {
                                 ForEach(overdue, id: \.key) { item in row(item, among: groups, column: column) }
                                 if !(byDay[day] ?? []).isEmpty { Divider().padding(.vertical, 2) }
                             }
+                            let scheduled = model.events.events.on(day)
+                            ForEach(scheduled) { event in
+                                CanvasEventLabel(event: event, zoom: zoom, namesProject: false, compact: true)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(CanvasEventShape(tint: CanvasCalendarCells.tint(event.projectColor), zoom: zoom))
+                                    .help(CanvasCalendarCells.help(event))
+                            }
+                            if !scheduled.isEmpty, !(byDay[day] ?? []).isEmpty { Spacer().frame(height: 3) }
                             ForEach(byDay[day] ?? [], id: \.key) { item in row(item, among: groups, column: column) }
                         }
                         .padding(.horizontal, 3)
@@ -411,10 +429,12 @@ struct CanvasTaskListCard: View {
         return CanvasMonthGrid(span: span, zoom: zoom, today: today, isQuiet: { $0 < today }) { day, room in
             let items = byDay[day] ?? []
             let late = day == today ? overdue : []
-            let lines = room.lines
+            let scheduled = model.events.events.on(day)
             if !onScreen.finePrintReadable {
-                CanvasDotsCell(colors: (late + items).map(\.hit.projectColor), zoom: zoom, large: true)
-                    .help((late + items).map { "\($0.hit.text) · \($0.hit.projectName)" }.joined(separator: "\n"))
+                CanvasDotsCell(colors: scheduled.map(\.projectColor) + (late + items).map(\.hit.projectColor),
+                               hollow: scheduled.map { _ in true }, zoom: zoom, large: true)
+                    .help((scheduled.map { CanvasCalendarCells.help($0) }
+                           + (late + items).map { "\($0.hit.text) · \($0.hit.projectName)" }).joined(separator: "\n"))
             } else {
                 VStack(alignment: .leading, spacing: 1) {
                     if !late.isEmpty {
@@ -423,7 +443,10 @@ struct CanvasTaskListCard: View {
                             .foregroundStyle(Color.red)
                             .help(late.map { "\($0.hit.text) · \($0.hit.projectName)" }.joined(separator: "\n"))
                     }
-                    let left = max(0, lines - (late.isEmpty ? 0 : 1))
+                    let afterLate = max(0, room.lines - (late.isEmpty ? 0 : 1))
+                    let eventLines = monthEventLines(scheduled, room: afterLate, tasks: items.count)
+                    monthEvents(scheduled, lines: eventLines, day: day, width: room.width)
+                    let left = max(0, afterLate - eventLines)
                     // The last line says how many more, rather than one more task.
                     let shown = items.count > left ? max(0, left - 1) : items.count
                     // Two lines each, when the day is wide and every one of them has them.
@@ -449,6 +472,40 @@ struct CanvasTaskListCard: View {
                     }
                 }
             }
+        }
+    }
+
+    /// How many of a month day's lines its events take: all they need, less one kept for its tasks
+    /// when it has any, since what's due is the card's own answer and the events are beside it.
+    private func monthEventLines(_ events: [ProjectEvent], room: Int, tasks: Int) -> Int {
+        min(events.count, max(0, room - (tasks > 0 ? 1 : 0)))
+    }
+
+    /// A month day's events in `lines` lines: one each, or all but the last and then how many more.
+    @ViewBuilder private func monthEvents(_ events: [ProjectEvent], lines: Int, day: String, width: CGFloat) -> some View {
+        let shown = events.count > lines ? max(0, lines - 1) : events.count
+        ForEach(events.prefix(shown)) { event in
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 7.5 * zoom))
+                    .foregroundStyle(CanvasCalendarCells.tint(event.projectColor))
+                if width >= 130, let minute = event.startMinute(on: day) {
+                    Text(CanvasCalendarCells.clock(minute: minute))
+                        .font(.system(size: 9 * zoom).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Text(event.title.isEmpty ? "Event" : event.title)
+                    .font(.system(size: 9.5 * zoom))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .help(CanvasCalendarCells.help(event))
+        }
+        if lines > 0, events.count > shown {
+            Text("+\(events.count - shown) events")
+                .font(.system(size: 9 * zoom))
+                .foregroundStyle(.secondary)
+                .help(events.dropFirst(shown).map { CanvasCalendarCells.help($0) }.joined(separator: "\n"))
         }
     }
 
