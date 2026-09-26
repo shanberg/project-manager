@@ -50,6 +50,8 @@ enum PMCommandRunner {
         // edits them rather than offering a second, smaller editor for the same text.
         case .startSession, .sessionNote:
             WindowManager.shared.openFocusedProject().newSession(nil)
+        case .takeMeetingNotes:
+            MeetingNotes.takeCurrent()
 
         // The project. Three of these are contract affordances, performed under the same names the
         // manifest publishes rather than through a second vocabulary — see `PMContract`.

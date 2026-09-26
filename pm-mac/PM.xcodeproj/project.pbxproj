@@ -92,6 +92,7 @@
 		38F2808F5DB1FB96DFD674AF /* TaskLineLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1827632D51602B8F2EAA6994 /* TaskLineLayout.swift */; };
 		3940FDB469BFA446E4482160 /* CanvasVisibleCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4814704319A31C6D1526F36A /* CanvasVisibleCards.swift */; };
 		3962C95F533643BFDC9C53FA /* ProjectDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD9FCB322CC884666C6E5DC /* ProjectDetails.swift */; };
+		3963CF1F59B7F7CBA7CD6A11 /* MeetingNotes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68F2B4C2116B0B1C0993F76E /* MeetingNotes.swift */; };
 		396821A7CF9BC94AE29C9E43 /* ProjectSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B473BD75913801C69C0B4E4 /* ProjectSplitViewController.swift */; };
 		3986E63E25D78EFD62284A3A /* CrossingBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5EA2C568B8EE5A4722910B4 /* CrossingBench.swift */; };
 		3994652D43A118D738BDA647 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = C0127A158FF1A3C19DE0375C /* AppIcon.icon */; };
@@ -586,6 +587,7 @@
 		670C6E6568761BF6AA2FF6AB /* FocusPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelView.swift; sourceTree = "<group>"; };
 		67BE510BEC3BAA46D3DEBDFC /* HeaderChromeMotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderChromeMotionTests.swift; sourceTree = "<group>"; };
 		67C9C91443C938A6F7527779 /* CanvasCardSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardSession.swift; sourceTree = "<group>"; };
+		68F2B4C2116B0B1C0993F76E /* MeetingNotes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingNotes.swift; sourceTree = "<group>"; };
 		6A22E7015433BB94E0092FF7 /* CanvasPanBounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPanBounds.swift; sourceTree = "<group>"; };
 		6A8C1ABCEE220CAA7C8B45A9 /* ProjectTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTab.swift; sourceTree = "<group>"; };
 		6AD2F0A659BE24A6D83D8C71 /* CanvasHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasHeader.swift; sourceTree = "<group>"; };
@@ -1002,6 +1004,7 @@
 				95CDFFCA4CCB643F40910496 /* FolioServices.swift */,
 				20AA79016760E53C63826A34 /* LinkTitleLoader.swift */,
 				84A8DE07C53FA9ECB9C061BC /* Log.swift */,
+				68F2B4C2116B0B1C0993F76E /* MeetingNotes.swift */,
 				B358A62B026F88C33AA9FF42 /* MenubarRing.swift */,
 				17912D894364C3FC66AC8134 /* ObsidianLink.swift */,
 				8DA5731D97AE6117FBCCA3EB /* PanelSettings.swift */,
@@ -1583,6 +1586,7 @@
 				C1920D4ABB2E832B9F975126 /* Log.swift in Sources */,
 				173B371DDE759BC440514326 /* MainMenu.swift in Sources */,
 				A31F5E7E03CD4DC12A3D4B47 /* MarkdownTextEditor.swift in Sources */,
+				3963CF1F59B7F7CBA7CD6A11 /* MeetingNotes.swift in Sources */,
 				8160DFD7CDF04EB531FD0223 /* MentionPopover.swift in Sources */,
 				9D473605CD7C3F57BBE67E83 /* MenuPictures.swift in Sources */,
 				BD603BE91C8784FC9AC79573 /* MenubarRing.swift in Sources */,

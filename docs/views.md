@@ -3,7 +3,7 @@
 **Status:** proposed 2026-09-18. Build steps 1 (start times), 2 (`session.list`, `pm day`), 3 (the Day card), 4 (acting from a row), 5 (Waiting and Search), 6 (Leftovers), 7 (Coming up, Projects, Copy as Text) and 9 (Time) are built. Follows [sessions.md](sessions.md), whose "Not in this
 pass" left *a day across projects* waiting until the pick log existed. Generalises it: the day is the
 first of a small set of cards that draw an answer rather than a document. Checked against a wider set of
-goals (at the end) so that it isn't built only for the day. **Calendars** are decided (below); steps 1 (PmLib), 2 (the app) and 3 (the views) are built. An inbox was considered and decided against.
+goals (at the end) so that it isn't built only for the day. **Calendars** are decided (below); steps 1–3 and Take Notes for This Meeting are built. An inbox was considered and decided against.
 
 ## The problem
 
@@ -684,6 +684,18 @@ the plain list, and how, waits until they've been seen on the rail. Copy as Text
    its notes read as one row. A period anchored to an event ("since the last 1:1" as the calendar says
    it, not only as the notes do). **Take Notes for This Meeting**, starting a sitting in the associated
    area.
+   - ✓ **Take Notes for This Meeting**, built 2026-09-25:
+     - Which meeting (`meetingForNotes`, PmLib): one on now, the latest to have begun; else the next
+       to begin within 10 minutes. Never all-day. The same event in two projects goes to the first by
+       name.
+     - What it does (`MeetingNotes`, app): opens the project's window, then a sitting named for the
+       event (`session.start`, `new`, `label`), and opens its note. The current sitting already
+       named that is rejoined instead. An event with no title makes "Meeting".
+     - Where: File ▸ Take Notes for "1:1 Priya", named as the menu opens and greyed with no meeting;
+       the quick bar (`meeting`, `call`, `notes`). Not the menu extra's Project ▸, which is the
+       focused project's.
+     - Auto-naming a sitting started during an event is not built: a name nobody chose, and only on
+       sittings the app starts.
 
 ## No inbox, by decision
 

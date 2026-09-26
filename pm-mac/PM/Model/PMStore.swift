@@ -1307,6 +1307,21 @@ final class PMStore {
         }) { try PMContract.perform(.sessionStart, PMContract.input(project: $0) { $0.new = forcingNew ? true : nil }) }
     }
 
+    /// Open a sitting named `name` — a meeting's, from Take Notes for This Meeting — and hand its index
+    /// back once re-read: the current sitting when it already has that name, so asking twice lands in
+    /// the same one, else a new sitting under its heading, whatever the idle window says. A meeting is a
+    /// sitting of its own even straight after another.
+    func openSession(named name: String, then: @escaping @MainActor (Int?) -> Void) {
+        if let index = todaySessionIndex, !willStartNewSession, let sessions = notes?.sessions,
+           sessions.indices.contains(index), SessionLabel(parsing: sessions[index].label).name == name {
+            then(index)
+            return
+        }
+        mutate(then: { [weak self] in
+            then(self?.todaySessionIndex)
+        }) { try PMContract.perform(.sessionStart, PMContract.input(project: $0) { $0.new = true; $0.label = name }) }
+    }
+
     /// Fill in the session-addressing fields of an action's input from a reference.
     private static func address(_ input: inout ApiInput, _ ref: SessionRef) {
         input.session = ref.date ?? ref.index.map(String.init)

@@ -106,6 +106,8 @@ enum MainMenu {
             modifiers: [.command, .shift])
         add(menu, "Start a New Session", #selector(ProjectWindowController.startNewSession), target: nil,
             key: "n", modifiers: [.command, .shift, .option]).isAlternate = true
+        // Named for the meeting as the menu opens, and greyed without one (`AppDelegate.validateMenuItem`).
+        add(menu, PMCommand.takeMeetingNotes.title, #selector(AppDelegate.takeMeetingNotes), target: target, key: "")
         // The front canvas's add commands, filled as the menu opens — see `CanvasNewCardMenu`.
         let cards = NSMenu(title: "New Card")
         cards.delegate = CanvasNewCardMenu.shared

@@ -33,6 +33,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
     // The session.
     case startSession
     case sessionNote
+    case takeMeetingNotes
 
     // The project.
     case openWindow
@@ -74,6 +75,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .wrapTask: return "Wrap Focused Task…"
         case .startSession: return "Start Today's Session"
         case .sessionNote: return "Add Session Note…"
+        case .takeMeetingNotes: return "Take Notes for This Meeting"
         case .openWindow: return "Open Project Window"
         // "Reveal", not "Open". The call is `activateFileViewerSelecting`, which selects the folder in
         // its parent rather than opening it — and "Reveal in Finder" is what every Mac app calls that.
@@ -101,6 +103,9 @@ enum PMCommand: String, CaseIterable, Identifiable {
         switch self {
         case .openInEditor:
             return context.editorName.map { "Open in \($0)" } ?? title
+        // Which meeting, so the item says what it will open before it's chosen.
+        case .takeMeetingNotes:
+            return MeetingNotes.title(for: MeetingNotes.current())
         default:
             return title
         }
@@ -120,6 +125,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .wrapTask: return "arrow.up.and.down.and.arrow.left.and.right"
         case .startSession: return "calendar.badge.plus"
         case .sessionNote: return "note.text"
+        case .takeMeetingNotes: return "calendar.badge.clock"
         case .openWindow: return "macwindow"
         case .openInFinder: return "folder"
         case .openInObsidian: return "book.closed"
@@ -156,7 +162,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
             return .project
         // Placed by hand or not in the bar: Open Project Window is Go's, the session is File ▸ New
         // Session and Project ▸ Write Session Note…, and Edit ▸ Undo already names Undo Complete Task.
-        case .newProject, .settings, .openWindow, .startSession, .sessionNote, .undoLast:
+        // Take Notes is File's, beside New Session, since it isn't about the focused project.
+        case .newProject, .settings, .openWindow, .startSession, .sessionNote, .undoLast, .takeMeetingNotes:
             return nil
         }
     }
@@ -205,7 +212,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         // Complete, Undo Last and Dive In sit inline at the top of the dropdown rather than in a
         // submenu — they're the reason the menu gets opened. The menu builds those itself. Drop isn't
         // one of those reasons: it's a decision made in a list, not a glance at the menubar.
-        case .complete, .drop, .undoLast, .diveIn, .newProject, .settings:
+        case .complete, .drop, .undoLast, .diveIn, .newProject, .settings, .takeMeetingNotes:
             return nil
         }
     }
@@ -279,6 +286,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .wrapTask: return ["parent", "outdent"]
         case .startSession: return ["session", "today", "day"]
         case .sessionNote: return ["note", "log", "journal"]
+        case .takeMeetingNotes: return ["meeting", "call", "notes", "calendar", "event"]
         case .openWindow: return ["show"]
         case .openInFinder: return ["reveal", "folder", "files", "open"]
         case .openInObsidian: return ["notes", "markdown"]
@@ -413,6 +421,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
         switch self {
         case .newProject, .settings:
             return true
+        case .takeMeetingNotes:
+            return MeetingNotes.current() != nil
         case .complete, .drop, .editTask, .setDue, .wrapTask, .narrowFocus, .addAfter, .addBefore:
             return context.hasFocusedTask
         case .undoLast:

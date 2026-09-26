@@ -318,3 +318,38 @@ final class ProjectEventTextTests: XCTestCase {
         XCTAssertEqual(ViewMarkdown.events(events, days: ["2026-09-24"], calendar: calendar), "")
     }
 }
+
+final class MeetingForNotesTests: XCTestCase {
+    private let base = Date(timeIntervalSinceReferenceDate: 800_000_000)
+    private func event(_ title: String, _ from: Double, _ to: Double, project: String = "Launch",
+                       allDay: Bool = false) -> ProjectEvent {
+        ProjectEvent(id: title + project, title: title, start: base.addingTimeInterval(from * 60),
+                     end: base.addingTimeInterval(to * 60), isAllDay: allDay,
+                     projectFolder: "W-1 \(project)", projectName: project, projectColor: nil)
+    }
+
+    func testTheOneOnNow() {
+        let events = [event("Standup", -30, 15), event("1:1 Priya", -5, 25), event("Later", 5, 60)]
+        XCTAssertEqual(meetingForNotes(events, now: base)?.title, "1:1 Priya", "the latest to have begun")
+    }
+
+    func testTheNextOneSoon() {
+        XCTAssertEqual(meetingForNotes([event("Review", 8, 60), event("Crit", 3, 30)], now: base)?.title, "Crit")
+        XCTAssertNil(meetingForNotes([event("Review", 11, 60)], now: base), "past the lead")
+        XCTAssertNil(meetingForNotes([event("Done", -60, 0)], now: base), "ended as now began")
+    }
+
+    func testNeverAllDay() {
+        XCTAssertNil(meetingForNotes([event("Offsite", -600, 800, allDay: true)], now: base))
+    }
+
+    func testOneEventInTwoProjects() {
+        let events = [event("Sync", -5, 25, project: "Redesign"), event("Sync", -5, 25, project: "Hiring")]
+        XCTAssertEqual(meetingForNotes(events, now: base)?.projectName, "Hiring")
+    }
+
+    func testLabel() {
+        XCTAssertEqual(meetingSittingLabel(event("  1:1 Priya ", 0, 30)), "1:1 Priya")
+        XCTAssertEqual(meetingSittingLabel(event(" ", 0, 30)), "Meeting")
+    }
+}

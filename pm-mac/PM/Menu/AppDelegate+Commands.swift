@@ -94,6 +94,9 @@ extension AppDelegate: NSMenuItemValidation {
         ProjectPrompts.adoptArea { key in WindowManager.shared.open(projectKey: key) }
     }
 
+    /// File ▸ Take Notes for "…": the meeting on now, in whichever project shows it.
+    @objc func takeMeetingNotes() { MeetingNotes.takeCurrent() }
+
     /// Show (or put away) the cross-project Waiting list.
     @objc func toggleWaiting() { WaitingWindowController.shared.toggle() }
 
@@ -210,6 +213,11 @@ extension AppDelegate: NSMenuItemValidation {
             return PMCommand.openInFinder.isAvailable(in: PMCommand.Context(store: store))
         case #selector(closeAllWindows):
             return !WindowManager.shared.controllers.isEmpty
+        // Named for the meeting as the menu opens, since the name is what tells you it's the right one.
+        case #selector(takeMeetingNotes):
+            let meeting = MeetingNotes.current()
+            item.title = MeetingNotes.title(for: meeting)
+            return meeting != nil
         default:
             return true
         }

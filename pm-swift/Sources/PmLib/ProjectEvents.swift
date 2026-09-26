@@ -535,3 +535,25 @@ extension ViewMarkdown {
         return (["## Events"] + out).joined(separator: "\n") + "\n"
     }
 }
+
+// MARK: - Taking notes for a meeting
+
+/// The meeting Take Notes for This Meeting is about at `now` (views.md, Calendars step 4): one that's
+/// on, the latest to have begun, since that's the room just walked into; else the next to begin within
+/// `lead`, since notes are often opened a few minutes early. An all-day event is never the meeting.
+/// The same event in two projects goes to the first by name, so the answer doesn't flicker.
+public func meetingForNotes(_ events: [ProjectEvent], now: Date, lead: TimeInterval = 10 * 60) -> ProjectEvent? {
+    let timed = events.filter { !$0.isAllDay }
+    let on = timed.filter { $0.start <= now && now < $0.end }
+        .sorted { $0.start != $1.start ? $0.start > $1.start : $0.projectName < $1.projectName }
+    if let meeting = on.first { return meeting }
+    return timed.filter { $0.start > now && $0.start.timeIntervalSince(now) <= lead }
+        .sorted { $0.start != $1.start ? $0.start < $1.start : $0.projectName < $1.projectName }
+        .first
+}
+
+/// What a sitting for a meeting is called: the event's title, or "Meeting" for one without.
+public func meetingSittingLabel(_ event: ProjectEvent) -> String {
+    let title = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    return title.isEmpty ? "Meeting" : title
+}

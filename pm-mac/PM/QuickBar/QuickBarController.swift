@@ -978,7 +978,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// these commands were given a global shortcut for in the first place.
     private func staysInPM(_ command: QuickBarCommand, argument: String) -> Bool {
         switch command {
-        case .openWindow, .settings, .newProject, .projectSettings, .showEvents, .addLink, .editDetails: return true
+        case .openWindow, .settings, .newProject, .projectSettings, .showEvents, .addLink, .editDetails,
+             .takeMeetingNotes: return true
         // Given text it just writes the note; given none it opens the place that edits it.
         case .sessionNote: return argument.isEmpty
         default: return false
@@ -1175,6 +1176,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .showEvents:
             guard let name = store?.projectName else { break }
             ProjectEventsSheet.present(projectNamed: name)
+        case .takeMeetingNotes:
+            MeetingNotes.takeCurrent()
         case .archiveProject, .unarchiveProject:
             // Synchronous, and it either threw or it didn't — so this is the one receipt that doesn't
             // wait on a store re-read to know whether it has something true to say.
