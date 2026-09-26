@@ -46,8 +46,14 @@ final class CanvasBoardView: NSView {
     /// the window has now, which is the other half of it: a crossing that also slid sideways would be
     /// two changes to follow.
     func tileableRect(atZoom scale: Double) -> CanvasRect {
-        CanvasTiling.area(of: visibleCanvasRect(atZoom: scale), margins: tileMargins(atZoom: scale))
+        let visible = visibleCanvasRect(atZoom: scale).inset(by: tileBleed / scale) // grows it
+        return CanvasTiling.area(of: visible, margins: tileMargins(atZoom: scale))
     }
+
+    /// How far past this board's edges a tiling is laid out, in points. Zero for a board in a window.
+    /// The list lens's detail sets it past the tiling's own margin, so its tiles run off every edge
+    /// and the view cuts them square: edge to edge, with no second shape of tiling to maintain.
+    var tileBleed: Double = 0
 
     /// Everything the window would be able to show at a given zoom, about the middle it is looking at
     /// now. The zoom the board is *at* answers with its own visible region exactly.

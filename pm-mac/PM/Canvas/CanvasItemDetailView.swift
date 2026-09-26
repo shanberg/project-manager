@@ -44,6 +44,15 @@ final class CanvasItemDetailView: NSView, CanvasItemDetailPane {
 
     private let nothing = PlaceholderView()
 
+    /// Told once the detail has laid out what it was asked to show.
+    var onShown: (() -> Void)?
+
+    /// The page card the detail is showing, when it is showing exactly one and it is a page.
+    var shownPageCard: CanvasNodeView? {
+        guard showing.count == 1, let card = board.nodeViews[showing[0]], card.isPageCard else { return nil }
+        return card
+    }
+
     init(store: CanvasDocumentStore) {
         self.store = store
         scroll = CanvasScrollView(store: store)
@@ -65,27 +74,69 @@ final class CanvasItemDetailView: NSView, CanvasItemDetailPane {
         // plain grey along the seam and nowhere else, which is the kind of difference you see without
         // being able to say what it is.
         scroll.translatesAutoresizingMaskIntoConstraints = false
-        // The board runs to the edges, and its tiling keeps clear of the header itself — the lens's
-        // band, not a board's own. See `CanvasBoardView.topClearance`.
-        scroll.board.topClearance = Double(Self.headerBand)
+        // **Edge to edge, and under the header the way the board is.** The tiles are the board's own —
+        // margins, gaps, rounded outer corners — so rather than teach the tiling a second shape, it is
+        // laid out a little past this half on every side (`tileBleed`) and the view cuts it off square.
+        // The tiles still start on the header line, so nothing they say is under the header; above
+        // each one its face carries on up to the window's top (`faces`), and the board's own soft edge
+        // fades the lot out before the header's controls (`CanvasSoftEdge`). Chosen in the list-lens
+        // mock, 2026-09-25.
+        let bleed = CanvasTiling.edgeGap + 2
+        scroll.board.tileBleed = bleed
+        scroll.board.topClearance = Double(Self.headerBand) + bleed - CanvasTiling.edgeGap
         // Nothing here adds cards, and a drop on this half means the section the rows are showing,
         // which the list already answers. A board that took drops itself would be a third answer.
         scroll.board.unregisterDraggedTypes()
-        addSubview(scroll)
+        edge.wantsLayer = true
+        edge.layer?.masksToBounds = true
+        edge.translatesAutoresizingMaskIntoConstraints = false
+        faces.frame = edge.bounds
+        faces.autoresizingMask = [.width, .height]
+        edge.addSubview(scroll)
+        edge.addSubview(faces)
+        edge.layer?.mask = fade
+        addSubview(edge)
         nothing.translatesAutoresizingMaskIntoConstraints = false
         nothing.set("Select an item", symbol: NSImage(systemSymbolName: "square.dashed",
                                                      accessibilityDescription: nil))
         addSubview(nothing)
         NSLayoutConstraint.activate([
-            scroll.topAnchor.constraint(equalTo: topAnchor),
-            scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            edge.topAnchor.constraint(equalTo: topAnchor),
+            edge.leadingAnchor.constraint(equalTo: leadingAnchor),
+            edge.trailingAnchor.constraint(equalTo: trailingAnchor),
+            edge.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scroll.topAnchor.constraint(equalTo: edge.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: edge.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: edge.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: edge.bottomAnchor),
             nothing.topAnchor.constraint(equalTo: topAnchor, constant: Self.headerBand),
             nothing.leadingAnchor.constraint(equalTo: leadingAnchor),
             nothing.trailingAnchor.constraint(equalTo: trailingAnchor),
             nothing.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+    }
+
+    /// The board's frame, clipping what the bleed lays out past it, and faded at the top.
+    private let edge = NSView()
+    /// Over the board: each tile's face carried up from its top to the window's.
+    private let faces = CanvasItemDetailFaces()
+    private let fade = CAGradientLayer()
+
+    /// Put a face above each tile, reaching just over its top edge, so the tile's rim and rounded top
+    /// corners are covered and the face runs on up without a seam. Takes no clicks.
+    private func placeFaces() {
+        faces.subviews.forEach { $0.removeFromSuperview() }
+        guard !scroll.isHidden else { return }
+        for id in showing {
+            guard let tile = board.nodeViews[id], !tile.isHidden, tile.window != nil else { continue }
+            let rect = tile.convert(tile.bounds, to: faces)
+            let top = faces.isFlipped ? rect.minY : rect.maxY
+            let face = CanvasItemDetailFace()
+            face.frame = faces.isFlipped
+                ? NSRect(x: rect.minX, y: 0, width: rect.width, height: top + 2)
+                : NSRect(x: rect.minX, y: top - 2, width: rect.width, height: faces.bounds.maxY - top + 2)
+            faces.addSubview(face)
+        }
     }
 
     // MARK: What it shows
@@ -115,6 +166,10 @@ final class CanvasItemDetailView: NSView, CanvasItemDetailPane {
         scroll.isHidden = ids.isEmpty
         pending = ids
         lay()
+        DispatchQueue.main.async { [weak self] in
+            self?.placeFaces()
+            self?.onShown?()
+        }
         // A hidden board is the page budget's own answer to nobody looking, but being hidden is
         // neither a scroll nor a resize, so it has to be told. The same note as
         // `CanvasPaneController.applyPresentation`, for the same reason.
@@ -138,6 +193,9 @@ final class CanvasItemDetailView: NSView, CanvasItemDetailPane {
     override func layout() {
         super.layout()
         lay()
+        CanvasSoftEdge.update(fade, for: edge.bounds, flipped: edge.isFlipped, tiled: 0)
+        // After the board has placed its tiles, which it does in this same pass.
+        DispatchQueue.main.async { [weak self] in self?.placeFaces() }
     }
 
     // MARK: Standing down
@@ -195,4 +253,28 @@ final class CanvasItemDetailView: NSView, CanvasItemDetailPane {
             symbol.isHidden = image == nil
         }
     }
+}
+
+/// A tile's face above the tile, in the card's own colour — see `CanvasItemDetailView.placeFaces`.
+private final class CanvasItemDetailFace: NSView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var wantsUpdateLayer: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func updateLayer() {
+        var fill = CanvasPalette.card.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance { fill = CanvasPalette.card.cgColor }
+        layer?.backgroundColor = fill
+    }
+}
+
+/// Holds the faces, in front of the board, and lets every click through to it.
+private final class CanvasItemDetailFaces: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

@@ -787,6 +787,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // it, which is exactly the cost the lens is supposed to save.
         scroll.board.applyPageBudget()
         Log.write("canvas lens: \(presentation.rawValue)")
+        // The header's item controls follow the board you're working in, which a lens changes.
+        pageStateChanged()
     }
 
     /// The list lens, built the first time it is needed and kept after.
@@ -800,7 +802,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         list.frame_ = focus.frameID
         // **The half the rows navigate is a board** (docs/items.md D11), so it is made here, where
         // boards are made, rather than inside a table. See `CanvasItemDetailPane`.
-        list.detail = CanvasItemDetailView(store: store)
+        let detail = CanvasItemDetailView(store: store)
+        // Its cards drive the header the way the pane's own board's do — see `workingBoard`.
+        detail.board.onPageStateChanged = { [weak self] in self?.pageStateChanged() }
+        detail.board.onPressEnded = { [weak self] in self?.pageStateChanged() }
+        detail.onShown = { [weak self] in self?.pageStateChanged() }
+        list.detail = detail
         wire(list)
         mount(list)
         self.list = list
@@ -1127,8 +1134,22 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// They appear only while a card is engaged. A board is not a browser, and a header carrying
     /// browser buttons for a board with nothing running on it would say otherwise.
     private var engagedCard: CanvasLinkNodeView? {
-        scroll.board.engagedPageCard as? CanvasLinkNodeView
+        // In the list lens, the item in the detail: the page you stepped into there, or the one page
+        // the detail is showing — looking at a page is using it, so its browser controls are up.
+        if let detail = lensDetail {
+            return (detail.board.engagedPageCard ?? detail.shownPageCard) as? CanvasLinkNodeView
+        }
+        return scroll.board.engagedPageCard as? CanvasLinkNodeView
     }
+
+    /// The list lens's detail, while the list lens is up — the board the header's item controls are
+    /// about then (docs/items.md D11).
+    private var lensDetail: CanvasItemDetailView? {
+        presentation == .list ? list?.detail as? CanvasItemDetailView : nil
+    }
+
+    /// The board you are working in: the detail's in the list lens, else the pane's own.
+    private var workingBoard: CanvasBoardView { lensDetail?.board ?? scroll.board }
 
     /// `app.openPageAsNewCard`, from outside the window: the card you are inside, or the one web card
     /// selected. False when there is no such page.
@@ -1144,7 +1165,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             guard header.page != nil else { return }
             // Held through a press: pressing the next web card lets go of this one on the way down,
             // and the next one steps in on the way up. See `CanvasBoardView.isPressed`.
-            if scroll.board.isPressed { return }
+            if workingBoard.isPressed { return }
             header.page = nil
             return
         }
@@ -1195,7 +1216,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     private var findScope: CanvasHeaderModel.Find.Scope {
         if engagedCard != nil { return .page }
-        return scroll.board.engagedProjectCard != nil ? .tasks : .canvas
+        return workingBoard.engagedProjectCard != nil ? .tasks : .canvas
     }
 
     /// The site's own icon, if the loader already has it.
@@ -1237,13 +1258,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// find cannot see a page's text at all, so the answer it gave was always "nothing matches" for
     /// words that were plainly on the screen.
     private var searchTarget: CanvasLinkNodeView? {
-        scroll.board.engagedPageCard as? CanvasLinkNodeView
+        workingBoard.engagedPageCard as? CanvasLinkNodeView
     }
 
     /// The project card you are standing in, when there is one. The third thing find can be pointed
     /// at, on the same rule as the first two: **find looks inside whatever you have stepped into.**
     /// Nothing engaged means the board itself, and the board's find matches cards.
-    private var searchedProjectCard: CanvasFileNodeView? { scroll.board.engagedProjectCard }
+    private var searchedProjectCard: CanvasFileNodeView? { workingBoard.engagedProjectCard }
 
     /// The card whose match count is being listened to, and the subscription doing it.
     ///
@@ -1381,7 +1402,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     /// The stack ⌘Z acts on in this pane: the editor of the card you are typing in, and otherwise the
     /// canvas document. See `CanvasBoardView.engagedCardUndoManager`.
-    var undoManagerForContent: UndoManager { scroll.board.engagedCardUndoManager ?? store.undoManager }
+    var undoManagerForContent: UndoManager { workingBoard.engagedCardUndoManager ?? store.undoManager }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         if item.action == #selector(showCanvasAs(_:)) {
@@ -1476,7 +1497,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// the menu: the menu used to name the card's typing while the key went to the project or the
     /// board underneath it.
     private func act(redoing: Bool) {
-        let editing = scroll.board.engagedCardUndoManager
+        let editing = workingBoard.engagedCardUndoManager
         let project = scroll.board.lastEditedProject
         switch route(editing: editing, project: project, redoing: redoing) {
         case .editor:
@@ -1505,7 +1526,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// can say which one it is about to act on: "Undo Complete Task" and "Undo Move Card" are the
     /// difference between a command you can trust and one you have to try.
     private func validateUndo(_ item: NSMenuItem, redoing: Bool) -> Bool {
-        let editing = scroll.board.engagedCardUndoManager
+        let editing = workingBoard.engagedCardUndoManager
         let project = scroll.board.lastEditedProject
         switch route(editing: editing, project: project, redoing: redoing) {
         case .editor:

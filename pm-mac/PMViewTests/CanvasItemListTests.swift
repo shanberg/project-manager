@@ -59,6 +59,7 @@ final class CanvasItemListTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        UserDefaults.standard.removeObject(forKey: "CanvasItemListFolded " + url.standardizedFileURL.path)
         list = nil
         detail = nil
         window = nil
@@ -93,10 +94,10 @@ final class CanvasItemListTests: XCTestCase {
 
     // MARK: What it draws
 
-    /// Loose cards under no header, then a section per frame — and an add row at the foot of each, so
-    /// the board's own items and the frame's each have somewhere to be added to.
-    func testTheBoardIsDrawnAsSectionsWithAnAddRowUnderEach() {
-        XCTAssertEqual(table.numberOfRows, 6, "loose, add, header, two items, add")
+    /// Loose cards under no header, then a section per frame. The loose items keep an add row, having
+    /// no header to put a `+` on; a frame's section adds from the `+` on its header.
+    func testTheBoardIsDrawnAsSectionsWithAnAddRowOnlyForTheLooseItems() {
+        XCTAssertEqual(table.numberOfRows, 5, "loose, add, header, two items")
         XCTAssertEqual(row(of: "loose"), 0)
         XCTAssertGreaterThan(row(of: "first"), row(of: "loose"))
         XCTAssertEqual(row(of: "second"), row(of: "first") + 1, "reading order inside the frame")
@@ -189,7 +190,9 @@ final class CanvasItemListTests: XCTestCase {
         var added: [(frame: String?, text: String)] = []
         list.onAdd = { added.append((frame: $0, text: $1)) }
 
+        list.beginAdding(in: "frame")
         let underTheFrame = table.numberOfRows - 1
+        XCTAssertNil(list.idOfRow(underTheFrame), "the + opened an add row at the foot of the frame")
         try submit("Design review", inRowAt: underTheFrame)
         XCTAssertEqual(added.last?.frame, "frame")
         XCTAssertEqual(added.last?.text, "Design review")
@@ -221,6 +224,37 @@ final class CanvasItemListTests: XCTestCase {
         cell.field.stringValue = "   "
         submit(cell)
         XCTAssertEqual(added, 0)
+    }
+
+    /// The add row a `+` opened is there while you're typing in it, and goes when you give it up.
+    func testAnAddRowFromThePlusGoesWhenGivenUp() throws {
+        list.beginAdding(in: "frame")
+        XCTAssertEqual(table.numberOfRows, 6)
+        let cell = try addCell(at: table.numberOfRows - 1)
+        cell.onEnd()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(table.numberOfRows, 5)
+    }
+
+    /// Folding keeps the header and hides its items, and a new lens on the same board opens folded.
+    func testASectionFoldsToItsHeaderAndStaysFolded() {
+        list.toggleFold("frame")
+        XCTAssertEqual(table.numberOfRows, 3, "loose, add, header")
+        XCTAssertEqual(row(of: "first"), -1)
+        let again = CanvasItemListView(store: store)
+        XCTAssertNil((0..<5).compactMap { again.idOfRow($0) }.first { $0 == "first" }, "remembered for this board")
+        again.stopWatching()
+        list.toggleFold("frame")
+        XCTAssertEqual(table.numberOfRows, 5)
+    }
+
+    /// One line of what the item says: the first line that isn't its title, without its markdown.
+    func testTheLineUnderTheTitleIsWhatTheItemSays() {
+        XCTAssertEqual(CanvasItemListView.firstLine(of: "Spec\n\n- [ ] **Draft** the outline", besides: "Spec"),
+                       "Draft the outline")
+        XCTAssertEqual(CanvasItemListView.firstLine(of: "---\ntags: x\n---\n# Vendor call\nAsk about the DPA",
+                                                    besides: "Vendor call"), "Ask about the DPA")
+        XCTAssertNil(CanvasItemListView.firstLine(of: "Spec", besides: "Spec"))
     }
 
     // MARK: The detail (D11)
@@ -312,7 +346,8 @@ final class CanvasItemListTests: XCTestCase {
         list.layoutSubtreeIfNeeded()
         let short = table.rect(ofRow: row(of: "loose")).height
         let long = table.rect(ofRow: row(of: "essay")).height
-        XCTAssertEqual(short, CanvasItemListView.rowHeight, "a one-line title is the ordinary row")
+        XCTAssertEqual(short, CanvasItemListView.rowHeight + CanvasItemListView.rowGap,
+                       "a one-line title is the ordinary row, and the table counts the gap under it")
         XCTAssertGreaterThan(long, short, "and a wrapped one is taller")
     }
 

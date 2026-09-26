@@ -365,6 +365,22 @@ list refusing to show the difference between two cards that begin alike. So a ti
 lines, and its row grows. Measured strings are cached per width, so forty rows are measured once and
 then only when the divider moves — which is exactly when a title that fitted stops fitting.
 
+### D12 — How the list looks (2026-09-25)
+
+Settled in a mock with controls, option by option.
+
+- Rows rest flat. The selected row is backed like the header's current tab: the text colour at 9%, no edge, no shadow, no accent.
+- A row: an icon on a 22 pt plate; a medium-weight title, up to 2 lines; the folder name or host; one line of what the item says (the first line of a doc or text card that isn't its title).
+- The folder name is the last folder that isn't `docs` or `resources`, and is left off for the board's own `docs`.
+- 40 pt minimum row, 10 pt above and below the text, 2 pt between rows.
+- Section headers: a fold arrow, the label, the item count, and a `+`. Headers stay pinned while scrolling.
+- Folding is per board on this Mac (`CanvasItemListFolded <canvas path>`).
+- The `+` opens an add row at the foot of its section, gone when the field is given up. Loose items, which have no header, keep a standing add row.
+- No divider line between the list and the detail; the divider still drags.
+- The detail is edge to edge. Its tiles start on the header line (46 pt, where a workspace's tiles start); above each one its face runs to the window's top, and the board's soft edge (`CanvasSoftEdge`) fades it out before the header's controls. `CanvasBoardView.tileBleed` lays the tiling out past the view's edges so they cut it square.
+- The header's item controls follow the detail: a single web card shown there brings up the browser controls; find and ⌘Z follow a card stepped into there.
+- Card colours are still not drawn (`CanvasColors.swift`), so icon plates are neutral.
+
 ## Not in this pass
 
 - **`card.delete` on the wire.** Deleting a card from a board a window may be holding, from a surface
