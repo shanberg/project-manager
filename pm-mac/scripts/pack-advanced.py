@@ -19,6 +19,12 @@ Emitted shape, keyed by domain, "*" for rules that apply everywhere:
     ["s",   key,  value]         sessionStorage    ("$remove$" removes)
     ["css", text]                a stylesheet to inject
     ["ht",  selector, text]      :has-text(...) — hide matches whose text contains `text`
+    ["jp",  paths, required]     json-prune — delete `paths` from parsed JSON carrying `required`
+    ["xhr", pattern]             no-xhr-if — answer matching XHRs with an empty 200
+
+An optional third argument names a list taken *only* for json-prune and no-xhr-if. AdGuard Base is
+used this way: it is the list that keeps up with streaming sites' server-stitched ads, which only
+those two can reach, but the whole of it would be twice the rules PM ships today.
 """
 import collections
 import json
@@ -26,13 +32,39 @@ import re
 import sys
 import zlib
 
-# ("ubo-set-cookie", "name", "value", ...maybe more)
+# ("ubo-set-cookie", "name", "value", ...maybe more) — uBO-syntax lists come out double-quoted,
+# AdGuard-syntax lists single-quoted.
 SCRIPTLET = re.compile(r'#%#//scriptlet\((.*)\)\s*$')
-ARG = re.compile(r'"((?:[^"\\]|\\.)*)"')
+ARG = re.compile(r'"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'')
 HAS_TEXT = re.compile(r'^(.*?):has-text\(\s*(.*?)\s*\)\s*$')
 
 KEEP = {"ubo-set-cookie": "c", "ubo-set-cookie-reload": "c",
-        "ubo-set-local-storage-item": "l", "ubo-set-session-storage-item": "s"}
+        "ubo-set-local-storage-item": "l", "ubo-set-session-storage-item": "s",
+        "ubo-json-prune": "jp", "json-prune": "jp",
+        "ubo-no-xhr-if": "xhr", "prevent-xhr": "xhr"}
+DATA_RULES = {"jp", "xhr"}
+
+
+def entry(kind, args):
+    """The table entry for a kept scriptlet, or a reason it can't be honoured as written."""
+    if kind == "jp":
+        # A stack argument narrows the rule to one caller. advanced.js can't check that, and
+        # applying the rule without it would prune in places the list author ruled out.
+        if len(args) < 2 or not args[1].strip():
+            return None, "json-prune without paths"
+        if len(args) > 3 and args[3].strip():
+            return None, "json-prune with stack"
+        return ["jp", args[1], args[2] if len(args) > 2 else ""], None
+    if kind == "xhr":
+        # No pattern is uBO's logging mode; a second argument asks for a specific fake response.
+        if len(args) < 2 or not args[1].strip() or args[1].strip() == "*":
+            return None, "no-xhr-if without pattern"
+        if len(args) > 2 and args[2].strip():
+            return None, "no-xhr-if with response"
+        return ["xhr", args[1]], None
+    if len(args) < 3:
+        return None, args[0]
+    return [kind, args[1], args[2]], None
 
 
 def domains_of(head: str):
@@ -47,11 +79,17 @@ def domains_of(head: str):
     return out or ["*"]
 
 
-def build(path: str):
+def build(path: str, narrow: str = None):
     table = collections.defaultdict(list)
     kept = collections.Counter()
     dropped = collections.Counter()
+    read(path, table, kept, dropped, only=None)
+    if narrow:
+        read(narrow, table, kept, dropped, only=DATA_RULES)
+    return table, kept, dropped
 
+
+def read(path, table, kept, dropped, only):
     for line in open(path):
         line = line.rstrip("\n")
         if not line or line.startswith("!"):
@@ -66,17 +104,27 @@ def build(path: str):
             if not match:
                 dropped["unparsed scriptlet"] += 1
                 continue
-            args = [a.replace('\\"', '"') for a in ARG.findall(match.group(1))]
+            args = [(d or s_).replace('\\"', '"').replace("\\'", "'")
+                    for d, s_ in ARG.findall(match.group(1))]
             if not args:
                 dropped["unparsed scriptlet"] += 1
                 continue
             kind = KEEP.get(args[0])
-            if kind is None or len(args) < 3:
+            if only is not None and kind not in only:
+                continue                            # not taken from this list at all
+            if kind is None:
                 dropped[args[0]] += 1
                 continue
+            rule, why = entry(kind, args)
+            if rule is None:
+                dropped[why] += 1
+                continue
             for domain in domains_of(head):
-                table[domain].append([kind, args[1], args[2]])
+                table[domain].append(rule)
             kept[args[0]] += 1
+            continue
+
+        if only is not None:
             continue
 
         for marker, handler in (("#$#", "css"), ("#?#", "ext"), ("#$?#", "ext")):
@@ -105,12 +153,10 @@ def build(path: str):
         else:
             dropped["other"] += 1
 
-    return table, kept, dropped
-
 
 if __name__ == "__main__":
     source, out = sys.argv[1], sys.argv[2]
-    table, kept, dropped = build(source)
+    table, kept, dropped = build(source, sys.argv[3] if len(sys.argv) > 3 else None)
     # The canary, matching the one in each rule list: a rule on a host that cannot resolve, so
     # CanvasContentBlocker can ask at launch whether this half is being applied either.
     table["pm-canary.invalid"] = [["css", "#pm-canary-advanced { display: none !important; }"]]

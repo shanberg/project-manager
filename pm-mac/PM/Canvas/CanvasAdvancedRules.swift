@@ -15,6 +15,11 @@ import WebKit
 /// pseudo-class for 91% of extended CSS. `Resources/AdvancedRules/advanced.js` implements that
 /// subset — 90% of the rules — and `scripts/pack-advanced.py` prints what it drops so the number
 /// stays honest.
+///
+/// Two more are there for streaming video, whose ads are stitched into the stream server-side where
+/// no request can be refused: `json-prune`, which deletes the ad-stitched manifest from the playback
+/// data before the player reads it, and `no-xhr-if`. Those rules come from AdGuard Base, which is
+/// taken for them alone.
 @MainActor
 enum CanvasAdvancedRules {
     /// The interpreter with the rule table baked into it, or nil if it could not be built.

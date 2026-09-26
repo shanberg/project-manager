@@ -74,9 +74,19 @@ for entry in "${lists[@]}"; do
   printf "    %-14s %7s rules -> %s\n" "$name" "$count" "$packed"
 done
 
+# AdGuard Base, for its json-prune and no-xhr-if rules only: they are how streaming sites'
+# server-stitched video ads get removed, and AdGuard is who keeps them current. The rest of the list
+# is not shipped — its network rules alone would double what PM compiles.
+curl -fsSL -o "$work/adguard-base.txt" "https://filters.adtidy.org/extension/safari/filters/2.txt"
+"$converter" convert --safari-version 26.0 --advanced-blocking true \
+    --input-path "$work/adguard-base.txt" \
+    --safari-rules-json-path "$work/adguard-base.json" \
+    --advanced-blocking-rules-path "$work/adguard-base.adv" >/dev/null
+
 mkdir -p "$here/Resources/AdvancedRules"
 cat "$work"/*.adv.txt > "$work/advanced.txt"
-python3 "$here/scripts/pack-advanced.py" "$work/advanced.txt" "$here/Resources/AdvancedRules"
+python3 "$here/scripts/pack-advanced.py" "$work/advanced.txt" "$here/Resources/AdvancedRules" \
+    "$work/adguard-base.adv"
 
 echo "==> $total rules across ${#lists[@]} lists in Resources/BlockLists"
 echo "    commit these, then check the launch log says: verified $(( ${#lists[@]} + 1 )) list(s) in force"

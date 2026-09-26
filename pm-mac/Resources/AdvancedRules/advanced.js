@@ -55,6 +55,111 @@
         } catch (e) {}   // Safari throws on storage access in some third-party frames.
     }
 
+    // ---- json-prune ---------------------------------------------------------------------------
+    // Streaming sites stitch their ads into the video server-side, so no request can be refused and
+    // no element hidden. What can be done is to edit the playback data before the player reads it:
+    // delete the ad-stitched manifest and the player falls back to the clean one. Paths are dotted,
+    // with "*" or "[]" standing for every key or element at that level.
+    var pruneRules = [];
+
+    function pathsOf(list) {
+        return String(list || "").split(/\s+/).filter(Boolean).map(function (p) { return p.split("."); });
+    }
+
+    // Visit every value `parts` names below `node`; `leaf(owner, key)` is handed each one found.
+    function walk(node, parts, index, leaf) {
+        if (node === null || typeof node !== "object") return;
+        var key = parts[index];
+        var keys = key === "*" || key === "[]" ? Object.keys(node) : [key];
+        for (var i = 0; i < keys.length; i++) {
+            if (!Object.prototype.hasOwnProperty.call(node, keys[i])) continue;
+            if (index === parts.length - 1) leaf(node, keys[i]);
+            else walk(node[keys[i]], parts, index + 1, leaf);
+        }
+    }
+
+    function has(node, parts) {
+        var found = false;
+        walk(node, parts, 0, function () { found = true; });
+        return found;
+    }
+
+    function prune(value) {
+        if (value === null || typeof value !== "object") return;
+        try {
+            for (var i = 0; i < pruneRules.length; i++) {
+                var rule = pruneRules[i];
+                if (!rule.required.every(function (p) { return has(value, p); })) continue;
+                for (var j = 0; j < rule.remove.length; j++) {
+                    walk(value, rule.remove[j], 0, function (owner, key) { delete owner[key]; });
+                }
+            }
+        } catch (e) {}   // never let a rule break the page's own parse
+    }
+
+    function installPrune() {
+        if (pruneRules.length === 0) return;
+        var parse = JSON.parse;
+        JSON.parse = function () {
+            var value = parse.apply(this, arguments);
+            prune(value);
+            return value;
+        };
+        if (window.Response && Response.prototype.json) {
+            var json = Response.prototype.json;
+            Response.prototype.json = function () {
+                return json.apply(this, arguments).then(function (value) {
+                    prune(value);
+                    return value;
+                });
+            };
+        }
+    }
+
+    // ---- no-xhr-if ----------------------------------------------------------------------------
+    // Answer matching XHRs with an empty 200 instead of sending them. Refusing them outright is what
+    // a content blocker does, and ad code tends to treat that as an error worth retrying or stalling
+    // on; an empty success is what it has no answer to.
+    var xhrPatterns = [];
+
+    function patternOf(text) {
+        if (text.length > 1 && text.charAt(0) === "/" && text.charAt(text.length - 1) === "/") {
+            try { return new RegExp(text.slice(1, -1)); } catch (e) { return null; }
+        }
+        return { test: function (s) { return s.indexOf(text) !== -1; } };
+    }
+
+    function installXHR() {
+        if (xhrPatterns.length === 0 || !window.XMLHttpRequest) return;
+        var proto = XMLHttpRequest.prototype;
+        var open = proto.open;
+        var send = proto.send;
+        proto.open = function (method, url) {
+            var target = String(url);
+            this.__pmSilenced = xhrPatterns.some(function (p) { return p.test(target); });
+            this.__pmURL = target;
+            return open.apply(this, arguments);
+        };
+        proto.send = function () {
+            if (!this.__pmSilenced) return send.apply(this, arguments);
+            var xhr = this;
+            var empty = xhr.responseType === "json" ? null
+                : xhr.responseType === "" || xhr.responseType === "text" ? "" : null;
+            try {
+                Object.defineProperties(xhr, {
+                    readyState: { value: 4 }, status: { value: 200 }, statusText: { value: "OK" },
+                    response: { value: empty }, responseText: { value: "" },
+                    responseURL: { value: xhr.__pmURL },
+                });
+            } catch (e) {}
+            setTimeout(function () {
+                ["readystatechange", "load", "loadend"].forEach(function (type) {
+                    try { xhr.dispatchEvent(new Event(type)); } catch (e) {}
+                });
+            }, 0);
+        };
+    }
+
     // ---- stylesheet ---------------------------------------------------------------------------
     var pending = "";
     function addStyle(text) { pending += text + "\n"; }
@@ -143,8 +248,19 @@
             }
             textRules.push({ selector: rule[1], text: text, pattern: pattern });
             break;
+        case "jp":
+            pruneRules.push({ remove: pathsOf(rule[1]), required: pathsOf(rule[2]) });
+            break;
+        case "xhr":
+            var xhrPattern = patternOf(rule[1]);
+            if (xhrPattern) xhrPatterns.push(xhrPattern);
+            break;
         }
     }
+
+    // Before anything else: these have to be in place before the page's first script runs.
+    installPrune();
+    installXHR();
 
     if (document.head || document.documentElement) {
         flushStyle();
