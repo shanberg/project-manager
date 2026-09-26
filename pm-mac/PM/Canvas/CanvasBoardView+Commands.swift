@@ -262,7 +262,10 @@ extension CanvasBoardView {
             insert(cards(links.map { .link(url: $0.address) }), at: nil,
                    actionName: links.count > 1 ? "Add Links" : "Add Link", into: landing)
         case .text(let text):
-            insert(cards([.text(text)]), at: nil, actionName: "Paste", into: landing)
+            // Text pasted or dropped is a document, like a card drawn on the board (`CanvasDocCards`),
+            // or text on the board when `docs` can't be written.
+            let doc = try? CanvasDocCards.write(text, in: CanvasDocCards.folder(forCanvasAt: store.url))
+            insert(cards([doc.map(file) ?? .text(text)]), at: nil, actionName: "Paste", into: landing)
         }
         // `insert` selects what it made. In document order, so several go up in the order they were
         // dropped. Not while a lens is up: there is no tiled view in front of you to put them in, and
@@ -1017,11 +1020,8 @@ extension CanvasBoardView {
         var paths: [String: String] = [:]
         for id in selectedTypedCards {
             guard let node = document.node(id: id), case .text(let text) = node.content else { continue }
-            let name = CanvasDocCards.title(from: text) ?? CanvasDocCards.placeholder
             do {
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let url = CanvasDocCards.available(name, in: folder)
-                try Data(text.utf8).write(to: url, options: .withoutOverwriting)
+                let url = try CanvasDocCards.write(text, in: folder)
                 paths[id] = store.resolver.storablePath(for: url) ?? url.path
             } catch {
                 Log.write("converting a card to a document failed: \(error)")
@@ -3098,7 +3098,9 @@ extension CanvasBoardView {
     /// Every card whose content mentions `query`, in the order they sit in the file. The rule — what a
     /// card says, a web card's remembered page name included — is `CanvasSearch.matches`.
     func matches(_ query: String) -> [String] {
-        CanvasSearch.matches(query, in: document)
+        let resolver = store.resolver
+        return CanvasSearch.matches(query, in: document,
+                                    fileText: { CanvasSearch.prose(at: $0, resolver: resolver) })
     }
 
     /// Select what `query` finds and frame the first of them.

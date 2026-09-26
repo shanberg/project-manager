@@ -888,8 +888,14 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// the way a card is made — one undo, selected afterwards, and placed by the rule above.
     private func addItem(_ text: String, to frame: String?) {
         let address = canvasTypedAddress(text)
-        let node = CanvasNode(content: address.map { CanvasContent.link(url: $0) } ?? .text(text),
-                              frame: CanvasRect(x: 0, y: 0, width: 400, height: 400))
+        // Anything else is a document, as `card.add` makes it (`CanvasDocCards`).
+        let store = scroll.board.store
+        let doc = address == nil
+            ? try? CanvasDocCards.write(text, in: CanvasDocCards.folder(forCanvasAt: store.url)) : nil
+        let content = address.map { CanvasContent.link(url: $0) }
+            ?? doc.map { .file(path: store.resolver.storablePath(for: $0) ?? $0.path, subpath: nil) }
+            ?? .text(text)
+        let node = CanvasNode(content: content, frame: CanvasRect(x: 0, y: 0, width: 400, height: 400))
         lensAddTarget = frame
         defer { lensAddTarget = nil }
         let id = scroll.board.addCard(node, actionName: address == nil ? "Add Card" : "Add Web Card")

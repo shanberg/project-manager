@@ -145,6 +145,14 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Keys PM adds are prefixed `pm`, and keys PM doesn't know are kept as they are.
 - A new canvas holds the project card: a file card on the project's notes.
 - Items: text, file (folders included), view and page cards. Frames are sections, not items.
+- Doc cards: a card you write in is a markdown file in the board's `docs/`, shown by a file card. ([CanvasDocCards.swift](../pm-swift/Sources/PmLib/CanvasDocCards.swift))
+  - Made by: drawing a card, pasting or dropping text, `card.add`, Convert to Document.
+  - A new card's file is `Untitled.md`, marked `pmUntitled`. It is renamed after its first line on step-out, once.
+  - A card left empty is removed with its file.
+  - A text card from before doc cards stays in the canvas until it's written in. Stepping out after writing makes it a doc card; ⌘Z takes it back to text and leaves the file.
+  - Deleting a doc card offers to move its file to the Trash when no other card on the board shows it.
+  - Board search matches what doc cards say.
+  - Text cards remain for view cards (`pmView`) and when `docs/` can't be written.
 - Lenses: Board, List, Grid (⌥⌘1–3), remembered per canvas on this Mac. Sorted by reading order, file, name or kind.
 - View cards: a text card with `pmView` — `day`, `waiting`, `search`, `leftovers`, `coming-up`, `projects`, `time` — plus `pmProjects`, `pmPeriod`, `pmQuery`, `pmLayout`. What a view shows is never written to the file. ([views.md](views.md))
 - Project card presets (`pmShows`): everything, current, tasks, brief, sitting.

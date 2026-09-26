@@ -782,6 +782,14 @@ final class CanvasBoardView: NSView {
         let wanted = CanvasVisibleCards.wanted(in: document, layout: layout,
                                                keep: keep, built: Set(nodeViews.keys))
         for node in document.nodes where wanted.contains(node.id) {
+            // A card whose content changed kind — Convert to Document, a text card stepped out of — is
+            // drawn by another view: this one goes, and the next line builds that.
+            if let existing = nodeViews[node.id], type(of: existing) != CanvasNodeView.kind(of: node),
+               !existing.isHeldElsewhere {
+                existing.prepareForRemoval()
+                existing.removeFromSuperview()
+                nodeViews.removeValue(forKey: node.id)
+            }
             if let existing = nodeViews[node.id] {
                 existing.update(node: node, scale: liveScale)
             } else {

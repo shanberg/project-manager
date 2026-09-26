@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.22.0"
+public let apiContractVersion = "1.23.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -265,10 +265,10 @@ public enum ApiRegistry {
         // anything away from a window. Where a card sits, how big it is and what is tiled stay the
         // app's — they are answers to questions only a board can ask.
         ApiActionSpec(name: "card.add", tier: .mutation,
-                      summary: "Put an item on a project's board: a web card for an address, a text card for anything else. It goes in the named frame, or in the project's Inbox.",
+                      summary: "Put an item on a project's board: a web card for an address, a document in the project's docs folder for anything else. It goes in the named frame, or in the project's Inbox.",
                       fields: [optionalProject,
                                ApiField("text", .string, required: true,
-                                        "An address, which makes a web card, or a line of text, which makes a text card."),
+                                        "An address, which makes a web card, or text, which becomes a document named after its first line."),
                                ApiField("frame", .string,
                                         "The frame to add it to, by label. Made if the board hasn't got one. Defaults to Inbox.")]),
         ApiActionSpec(name: "card.list", tier: .query,

@@ -145,17 +145,53 @@ final class CardApiTests: XCTestCase {
 
     /// What you typed decides what it is, and the summary says which — a caller with no board in front
     /// of it has nothing else to read.
-    func testAnAddressMakesAWebCardAndAnythingElseMakesATextCard() throws {
+    func testAnAddressMakesAWebCardAndAnythingElseMakesADocument() throws {
         XCTAssertEqual(try add("https://jsoncanvas.org").summary, "Added a web card to Inbox in Redesign.")
         XCTAssertEqual(try add("Ask legal about the DPA").summary, "Added a card to Inbox in Redesign.")
         let kinds = try board.nodes.filter { !$0.isGroup }.map(\.content.type)
-        XCTAssertEqual(Set(kinds), ["link", "text"])
+        XCTAssertEqual(Set(kinds), ["link", "file"])
     }
 
     /// `roadmap.md` is a note about a roadmap, not a website in Moldova — see `canvasTypedAddress`.
     func testALineThatOnlyLooksLikeAHostIsStillProse() throws {
         _ = try add("roadmap.md")
-        XCTAssertEqual(try board.nodes.first { !$0.isGroup }?.content.type, "text")
+        XCTAssertEqual(try board.nodes.first { !$0.isGroup }?.content.type, "file")
+    }
+
+    private var docs: URL {
+        get throws {
+            let canvas = try XCTUnwrap(resolveProjectCanvasPath(
+                projectPath: try resolveProjectPath(nameOrPrefix: "W-1")))
+            return CanvasDocCards.folder(forCanvasAt: URL(fileURLWithPath: canvas))
+        }
+    }
+
+    /// The card is a file in the project's `docs`, named after its first line and holding everything
+    /// that was sent — the same document the board makes when you draw a card.
+    func testTextBecomesADocumentInDocsNamedAfterItsFirstLine() throws {
+        _ = try add("## Vendor call\nAsk about the DPA")
+        let node = try XCTUnwrap(try board.nodes.first { !$0.isGroup })
+        guard case .file(let path, nil) = node.content else { return XCTFail("\(node.content)") }
+        let file = try docs.appendingPathComponent("Vendor call.md")
+        XCTAssertEqual(path, file.path, "absolute outside a vault, as the board stores it")
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "## Vendor call\nAsk about the DPA")
+        XCTAssertEqual(CanvasItem.of(node)?.title, "Vendor call")
+    }
+
+    func testASecondDocumentOfTheSameNameIsNumberedNotOverwritten() throws {
+        _ = try add("Groceries")
+        _ = try add("Groceries")
+        let names = try FileManager.default.contentsOfDirectory(atPath: try docs.path)
+            .filter { $0.hasPrefix("Groceries") }.sorted()
+        XCTAssertEqual(names, ["Groceries 2.md", "Groceries.md"])
+    }
+
+    func testAPreviewOfTextWritesNoDocument() throws {
+        _ = try add("https://jsoncanvas.org")
+        let before = try FileManager.default.contentsOfDirectory(atPath: try docs.path)
+        let preview = try add("Groceries", dryRun: true)
+        XCTAssertEqual(preview.summary, "Would add a card to Inbox in Redesign.")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: try docs.path), before)
     }
 
     func testAddingMakesTheBoardWhenTheProjectHasntGotOne() throws {

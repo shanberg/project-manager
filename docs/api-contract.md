@@ -97,6 +97,14 @@ Three things are settled rather than left to be discovered. **The revision is th
 
 Where a card *sits*, how big it is and what is tiled stay the app's — they are answers to questions only a board can ask. `card.delete` is deliberately not in this pass: deleting a card from a board a window may be holding, from a surface that cannot see it, wants its own argument.
 
+`card.add` (1.23.0) — text is a document:
+
+- Anything but an address is written to `<board folder>/docs/<first line>.md` (`CanvasDocCards`) and added as a file card on it. A taken name gets a number.
+- The name is the first line with words on it, without markdown or characters a filename or link can't hold, cut at 60. `Untitled` when nothing is left.
+- A preview names the card and writes no file.
+- A `docs` that can't be written gets a text card, as before.
+- `journal.undo` restores the canvas and leaves the document.
+
 `time.aways`, `time.count` (1.22.0) — see [away-time.md](away-time.md):
 
 - `time.aways`: query. Period fields as `time.spent`, plus `projects`. Returns `AttentionAway[]`: `project`, `key`, `from`, `to`, `seconds`, `why`.

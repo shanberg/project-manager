@@ -11,7 +11,7 @@ import PmLib
 /// Named distinctly from PmLib's own `apiContractVersion`, which is in scope here — a file-scope
 /// `let` of the same name would shadow it silently, and a check comparing the two would then be
 /// comparing a thing with itself.
-let generatedFromContractVersion = "1.22.0"
+let generatedFromContractVersion = "1.23.0"
 
 /// Every action the contract publishes.
 ///
@@ -33,7 +33,7 @@ enum PMAction: String, CaseIterable, Sendable {
     case appShowPanel = "app.showPanel"
     /// Read a typed capture line: its text, its due date, and the project it names.
     case captureParse = "capture.parse"
-    /// Put an item on a project's board: a web card for an address, a text card for anything else. It goes in the named frame, or in the project's Inbox.
+    /// Put an item on a project's board: a web card for an address, a document in the project's docs folder for anything else. It goes in the named frame, or in the project's Inbox.
     case cardAdd = "card.add"
     /// What a project's board holds: every item, grouped by the frame it sits in.
     case cardList = "card.list"

@@ -1,5 +1,4 @@
 import Foundation
-import PmLib
 
 /// A new card is a markdown document in the board's `docs` folder, not text stored in the canvas.
 ///
@@ -16,22 +15,22 @@ import PmLib
 /// **Empty is nothing.** A card opened empty and left empty was a double-click that landed somewhere
 /// you didn't mean, and taking it away takes its file too — but only a file this made, only while
 /// it's still empty.
-enum CanvasDocCards {
+public enum CanvasDocCards {
     /// Marks a card whose file still has the name it was given before it had words.
-    static let untitledKey = "pmUntitled"
+    public static let untitledKey = "pmUntitled"
 
-    static let placeholder = "Untitled"
+    public static let placeholder = "Untitled"
 
     /// Where a board's new documents go: its own folder when that is a `docs` folder — which is where
     /// every project keeps its canvas (`getProjectCanvasPath`) — and a `docs` beside it otherwise.
-    static func folder(forCanvasAt canvas: URL) -> URL {
+    public static func folder(forCanvasAt canvas: URL) -> URL {
         let folder = canvas.deletingLastPathComponent()
         return folder.lastPathComponent == "docs" ? folder : folder.appendingPathComponent("docs")
     }
 
     /// Make an empty `Untitled.md` in `folder` — `Untitled 2.md` and so on when that is taken — and
     /// return where it went. Never overwrites.
-    static func makeUntitled(in folder: URL) throws -> URL {
+    public static func makeUntitled(in folder: URL) throws -> URL {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = available(placeholder, in: folder)
         // `.withoutOverwriting`: a file appearing between the check and the write — another window
@@ -40,8 +39,19 @@ enum CanvasDocCards {
         return url
     }
 
+    /// Write `text` as a new document in `folder`, named after its first line — `Untitled` when that
+    /// gives no name — and return where it went. Never overwrites: a taken name gets a number.
+    /// How a card that was text becomes a file, and how text arriving from outside the board — `pm card
+    /// add`, a paste — becomes a card.
+    public static func write(_ text: String, in folder: URL) throws -> URL {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = available(title(from: text) ?? placeholder, in: folder)
+        try Data(text.utf8).write(to: url, options: .withoutOverwriting)
+        return url
+    }
+
     /// The first free `<name>.md`, `<name> 2.md`, … in `folder`.
-    static func available(_ name: String, in folder: URL, except current: URL? = nil) -> URL {
+    public static func available(_ name: String, in folder: URL, except current: URL? = nil) -> URL {
         var candidate = folder.appendingPathComponent(name + ".md")
         var n = 2
         while FileManager.default.fileExists(atPath: candidate.path),
@@ -55,7 +65,7 @@ enum CanvasDocCards {
     /// What a document is called, from what it says: its first line with words on it, without the
     /// markdown that dresses it and without the characters a filename or an Obsidian link can't hold.
     /// Nil when nothing usable is left.
-    static func title(from text: String) -> String? {
+    public static func title(from text: String) -> String? {
         guard let line = text.split(whereSeparator: \.isNewline)
             .map({ $0.trimmingCharacters(in: .whitespaces) })
             .first(where: { !$0.isEmpty }) else { return nil }
@@ -93,7 +103,7 @@ enum CanvasDocCards {
     /// vault is a pointer to something that belongs to where it is, and deleting the pointer is all the
     /// delete key has ever meant for it. Another *board* may still show one of these — nothing here can
     /// know that — which is why the answer is the Trash, and why Undo brings it back.
-    static func ownDocuments(deleting ids: Set<String>, from document: CanvasDocument, docs: URL,
+    public static func ownDocuments(deleting ids: Set<String>, from document: CanvasDocument, docs: URL,
                              locate: (String) -> URL?) -> [URL] {
         func shown(by node: CanvasNode) -> URL? {
             guard case .file(let path, nil) = node.content else { return nil }

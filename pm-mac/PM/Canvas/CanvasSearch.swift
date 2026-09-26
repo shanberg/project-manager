@@ -22,10 +22,17 @@ enum CanvasSearch {
     /// there for cards that have never been loaded in this window — which are most of them, on a board
     /// you have just opened.
     ///
+    /// A document card matches on **what is written in it** too — a card drawn on the board is a file
+    /// (`CanvasDocCards`), and a search that only knew its name would find none of what you wrote.
+    /// Only markdown and plain text, and only when the file is found.
+    ///
     /// - Parameter pageTitle: The remembered name of the page at an address. Injectable so the rule can
     ///   be tested without the app's defaults; the board passes nothing and gets the real one.
+    /// - Parameter fileText: What the file at a stored path says. Nil reads nothing, which is the
+    ///   default; the board passes `prose(at:resolver:)`.
     static func matches(_ query: String, in document: CanvasDocument,
-                        pageTitle: (String) -> String? = CanvasPageTitles.of) -> [String] {
+                        pageTitle: (String) -> String? = CanvasPageTitles.of,
+                        fileText: (String) -> String? = { _ in nil }) -> [String] {
         let needle = query.trimmingCharacters(in: .whitespaces)
         guard !needle.isEmpty else { return [] }
         return document.nodes.filter { node in
@@ -37,10 +44,21 @@ enum CanvasSearch {
             case .file(let path, let subpath):
                 return path.localizedCaseInsensitiveContains(needle)
                     || (subpath?.localizedCaseInsensitiveContains(needle) ?? false)
+                    || fileText(path)?.localizedCaseInsensitiveContains(needle) == true
             case .group(let label, _, _):
                 return label?.localizedCaseInsensitiveContains(needle) ?? false
             }
         }
         .map(\.id)
+    }
+
+    /// What a markdown or text file card says, read from disk. Nil for any other kind of file, one that
+    /// can't be found, and one too large to be a note (over a megabyte), which search skips.
+    @MainActor static func prose(at stored: String, resolver: CanvasFileResolver) -> String? {
+        guard ["md", "markdown", "txt"].contains((stored as NSString).pathExtension.lowercased()),
+              let url = resolver.resolve(stored).url,
+              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 1_000_000
+        else { return nil }
+        return try? String(contentsOf: url, encoding: .utf8)
     }
 }

@@ -145,18 +145,29 @@ class CanvasNodeView: NSView {
 
     /// Build the view for a card, by what the card is.
     static func make(node: CanvasNode, board: CanvasBoardView, scale: Double) -> CanvasNodeView {
+        switch kind(of: node) {
+        case is CanvasViewNodeView.Type: return CanvasViewNodeView(node: node, board: board, scale: scale)
+        case is CanvasTextNodeView.Type: return CanvasTextNodeView(node: node, board: board, scale: scale)
+        case is CanvasFileNodeView.Type: return CanvasFileNodeView(node: node, board: board, scale: scale)
+        case is CanvasLinkNodeView.Type: return CanvasLinkNodeView(node: node, board: board, scale: scale)
+        default: return CanvasNodeView(node: node, board: board, scale: scale)
+        }
+    }
+
+    /// Which view a card is drawn by. Also asked of a card that already has a view: one whose content
+    /// changed kind under it — a text card that became a document — needs a new one.
+    static func kind(of node: CanvasNode) -> CanvasNodeView.Type {
         switch node.content {
         // A text node carrying a view this build knows is drawn as that view's answer; one naming a view
         // it doesn't is the text card it also is. See `CanvasViewSpec`.
-        case .text where CanvasViewSpec.of(node) != nil:
-            return CanvasViewNodeView(node: node, board: board, scale: scale)
-        case .text: return CanvasTextNodeView(node: node, board: board, scale: scale)
-        case .file: return CanvasFileNodeView(node: node, board: board, scale: scale)
-        case .link: return CanvasLinkNodeView(node: node, board: board, scale: scale)
+        case .text where CanvasViewSpec.of(node) != nil: return CanvasViewNodeView.self
+        case .text: return CanvasTextNodeView.self
+        case .file: return CanvasFileNodeView.self
+        case .link: return CanvasLinkNodeView.self
         // Frames are painted by the board, behind everything, and never become a view — so this is
         // unreachable in practice. A plain card rather than a trap: an unexpected frame here should
         // look wrong, not take the window down.
-        case .group: return CanvasNodeView(node: node, board: board, scale: scale)
+        case .group: return CanvasNodeView.self
         }
     }
 
@@ -1117,7 +1128,26 @@ final class CanvasTextNodeView: CanvasNodeView {
             }
             return
         }
+        if session?.hasWritten == true, becomeDocument() { return }
         contentChanged()
+    }
+
+    /// **A text card you've written in becomes a document** (`CanvasDocCards`) as you step out. Only
+    /// then: cards made before doc cards stay in the canvas until someone touches them, so a board
+    /// drawn by hand in Obsidian isn't rewritten by being opened. Quietly, so the session's one step
+    /// still takes the card back to the text it was; the file stays, as it does for Convert to Document.
+    /// False when `docs` can't be written, and the card stays text.
+    private func becomeDocument() -> Bool {
+        let id = node.id
+        let text = text
+        guard let url = try? CanvasDocCards.write(text, in: CanvasDocCards.folder(forCanvasAt: board.store.url))
+        else { return false }
+        let path = board.store.resolver.storablePath(for: url) ?? url.path
+        board.store.changeQuietly { doc in
+            guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
+            doc.nodes[index].content = .file(path: path, subpath: nil)
+        }
+        return true
     }
 
     /// The start of the line at `share` of the way through `text`, or nil for the top — where there is

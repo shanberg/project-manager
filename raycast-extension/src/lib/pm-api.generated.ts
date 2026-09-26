@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.22.0";
+export const API_CONTRACT_VERSION = "1.23.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -43,13 +43,13 @@ export interface CaptureParseInput {
   text: string;
 }
 
-/** Put an item on a project's board: a web card for an address, a text card for anything else. It goes in the named frame, or in the project's Inbox. */
+/** Put an item on a project's board: a web card for an address, a document in the project's docs folder for anything else. It goes in the named frame, or in the project's Inbox. */
 export interface CardAddInput {
   /** The frame to add it to, by label. Made if the board hasn't got one. Defaults to Inbox. */
   frame?: string;
   /** Project name or prefix. Defaults to the focused project. */
   project?: string;
-  /** An address, which makes a web card, or a line of text, which makes a text card. */
+  /** An address, which makes a web card, or text, which becomes a document named after its first line. */
   text: string;
 }
 

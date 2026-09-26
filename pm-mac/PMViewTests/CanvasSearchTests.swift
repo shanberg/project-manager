@@ -27,6 +27,21 @@ final class CanvasSearchTests: XCTestCase {
                        "a space is not a search for every card with a space in it")
     }
 
+    /// A document card is found by what is written in it, not only by its name.
+    @MainActor func testADocumentCardIsFoundByWhatItSays() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let canvas = folder.appendingPathComponent("docs/Board.canvas")
+        let file = try CanvasDocCards.write("Vendor call\nAsk about the DPA", in: CanvasDocCards.folder(forCanvasAt: canvas))
+        let doc = CanvasDocument(nodes: [node("f", .file(path: file.path, subpath: nil)),
+                                         node("l", .file(path: folder.appendingPathComponent("x.png").path, subpath: nil))])
+        let resolver = CanvasFileResolver(canvas: canvas)
+        XCTAssertEqual(CanvasSearch.matches("dpa", in: doc, pageTitle: noTitles,
+                                            fileText: { CanvasSearch.prose(at: $0, resolver: resolver) }), ["f"])
+        XCTAssertEqual(CanvasSearch.matches("dpa", in: doc, pageTitle: noTitles), [],
+                       "reading files is the board's to ask for")
+    }
+
     func testTextIsMatchedWithoutCaringAboutCase() {
         let doc = CanvasDocument(nodes: [node("t", .text("Quarterly Planning"))])
         XCTAssertEqual(CanvasSearch.matches("planning", in: doc, pageTitle: noTitles), ["t"])

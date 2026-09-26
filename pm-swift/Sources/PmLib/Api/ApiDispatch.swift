@@ -904,9 +904,24 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
             ?? CanvasDocument().serialized()
         var document = try CanvasDocument.parse(Data(before.utf8))
         let address = canvasTypedAddress(text)
+        let canvasURL = URL(fileURLWithPath: canvasPath)
+        // Anything but an address is a document in the board's `docs`, the card the board itself makes
+        // (`CanvasDocCards`). A preview names the file it would write and writes nothing. A `docs` that
+        // can't be written still gets the card, as text on the board.
+        // `journal.undo` puts the board back and leaves the document, as Undo on the board does.
+        var content = address.map { CanvasContent.link(url: $0) } ?? .text(text)
+        if address == nil {
+            let folder = CanvasDocCards.folder(forCanvasAt: canvasURL)
+            let doc = options.dryRun
+                ? CanvasDocCards.available(CanvasDocCards.title(from: text) ?? CanvasDocCards.placeholder,
+                                           in: folder)
+                : try? CanvasDocCards.write(text, in: folder)
+            if let doc {
+                content = .file(path: vaultRelativePath(of: doc.path, from: canvasURL) ?? doc.path, subpath: nil)
+            }
+        }
         let frame = input.frame.map { CanvasItemPlacement.frame(labelled: $0, in: &document) }
-        let node = CanvasItemPlacement.add(address.map { CanvasContent.link(url: $0) } ?? .text(text),
-                                           to: &document, frame: frame)
+        let node = CanvasItemPlacement.add(content, to: &document, frame: frame)
         let after = try document.serialized()
         // Named after the placement rather than looked up by label: the card went into the frame that
         // was named, or into the Inbox, which is a marked node and need not still be called one.
@@ -914,7 +929,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         let phrase = "\(address == nil ? "a card" : "a web card") to "
             + "\(where_.map(canvasFrameLabel) ?? CanvasItemPlacement.inboxLabel) in \(title)."
         if !options.dryRun {
-            try document.write(to: URL(fileURLWithPath: canvasPath))
+            try document.write(to: canvasURL)
             // Journaled as the document write it is. The board is not the notes, so the entry names
             // the canvas — and `journal.undo` restores a file's content under a revision guard, which
             // is as true of a `.canvas` as of a `.md`. What it cannot report is a diff of tasks,

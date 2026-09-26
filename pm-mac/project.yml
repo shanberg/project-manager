@@ -214,7 +214,6 @@ targets:
       - path: PM/Canvas/WorkspaceNamePrompt.swift
       - path: PM/Canvas/CanvasCardZoom.swift
       - path: PM/Canvas/CanvasTextStyle.swift
-      - path: PM/Canvas/CanvasDocCards.swift
       - path: PM/Canvas/CanvasFileWatch.swift
       - path: PM/Canvas/CanvasPageTitles.swift
       - path: PM/Canvas/CanvasPageVisits.swift

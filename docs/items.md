@@ -169,7 +169,7 @@ A project that wants to be a list is a list every time it opens, which is the wh
 ### D6 — Adding from the list, and where the card lands
 
 At the foot of each section is an **add row**, the way the task column has one: type a name and get a
-text card, paste a URL and get a web card, or use the `+` for the full `CanvasAddCommand.offered` list
+doc card (a markdown file in `docs/`), paste a URL and get a web card, or use the `+` for the full `CanvasAddCommand.offered` list
 (file, folder, private web, the views). One surface, no dialog, no placement.
 
 Where it goes:
