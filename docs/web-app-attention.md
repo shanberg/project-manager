@@ -51,10 +51,51 @@ ordered-out window, for 8 minutes each:
 | Changes its title on each message | Held up to 41s until the first title change, then **1–100ms** for the rest | Open |
 | Never changes its title | **Batched about once a minute** (lags of 42s / 22s / 2s, every minute) | Open |
 
-No suspension within 8 minutes in either — but this ran inside xctest, which RunningBoard may treat
-differently from an app; reports from shipping apps show suspension at 4–16 minutes. **Has to be
-re-measured inside Folio**, watching `_webProcessState`. Levers if it suspends: keep the listener in an
-ordered-in window with `_windowOcclusionDetectionEnabled = NO`; deliver notifications natively.
+No suspension within 8 minutes in either — but that ran inside xctest, which can't take WebKit's process
+assertions (its log says so). Re-measured in an app, below.
+
+### Measured in an app, 2026-09-25
+
+A standalone app bundle, launched through LaunchServices, each page hidden, `_webProcessState` read every
+minute (0 not running, 1 foreground, 2 background, 3 suspended); a 1s page timer counted each minute.
+Probe sources in the session scratchpad; pages from a local server.
+
+| Page | State, 64 minutes | Timer ticks/min |
+|---|---|---|
+| No window, quiet | suspended throughout | 2.0 |
+| Ordered-out window, quiet | suspended throughout | 4.1 |
+| Ordered-out window, title changes every 30s | background 63 of 64 | 29.6 |
+| Ordered-out window, `_windowOcclusionDetectionEnabled = NO` | suspended throughout | 4.1 |
+| Ordered-out window, notification permission denied, posting | suspended throughout | 4.0 |
+| Ordered-out window, script-shimmed `Notification`, posting | suspended throughout | 4.0 |
+| Ordered-out window, origin granted notification permission (second app, 20 min) | background throughout | 30 |
+| Its control: same origin, not posting | background throughout | 30 |
+
+- Inside an app, a hidden quiet page is suspended within its first minute, not 4.
+- The ticks counted while suspended are the probe's own questions waking the page for a moment.
+- A page that changes its title is held in background and keeps running, throttled to about one timer every 2s.
+- Turning off occlusion detection doesn't keep an ordered-out page from suspending.
+- The script shim doesn't either — as expected, since WebKit never sees a notification.
+- **Granting notification permission to the origin keeps its pages in background**, whether or not they post. Granted through the data store's `_delegate` (`notificationPermissionsForWebsiteDataStore:` answering `{origin: true}`), which also makes `Notification.permission` read `"granted"` without a prompt.
+- `_webView:requestNotificationPermissionForSecurityOrigin:decisionHandler:` was never called: `requestPermission()` without a user gesture resolves `"denied"` without asking.
+- A granted page's own `new Notification()` did not reach `websiteDataStore:showNotification:` (9 posted, 0 received) — that delegate is for service-worker notifications. Page notifications need the notification provider (`WKNotificationManagerSetProvider`). Not tried.
+
+### What a listener page costs
+
+Renderer memory (`ps` RSS of the page's WebContent process), 25s after loading, signed out:
+
+| Page | MB |
+|---|---|
+| accounts.google.com (Gmail's sign-in) | 78 |
+| app.slack.com/signin | 154 |
+| discord.com/app | 172 |
+| github.com, a repository | 191 |
+| notion.com | 285 |
+| youtube.com | 666 |
+| A local page with a timer | 26–30 |
+
+- A signed-in app is heavier than its sign-in page. One listener per account is in the order of 150–300 MB.
+- Suspension doesn't release it: a suspended page's renderer keeps its memory.
 
 Timers in a hidden page are throttled hard either way (a 1s interval fired 7 times in 180s with no
 window) — so anything PM asks of a page runs on PM's clock (`evaluateJavaScript`), never the page's.
@@ -108,10 +149,11 @@ already holds.
    each): record every `Notification`, service-worker notification, title and favicon change from
    Slack, Discord, Teams, Gmail, Google Chat, WhatsApp — what they carry, and whether one page hears
    every workspace or account.
-2. **Suspension inside the real app**, over an hour, for a quiet page and a title-updating one.
-3. **Native provider vs script shim** side by side: does the SPI path keep a page awake, and does
-   either catch everything?
-4. **Memory**: one listener page per account, measured, against the page budget.
+2. ~~Suspension inside the real app~~ — measured, §3.
+3. **Native provider vs script shim**: the shim doesn't keep a page awake; granting permission does
+   (§3). Still open: catching a page's notifications with `WKNotificationManagerSetProvider`, and
+   whether that catches everything the apps send.
+4. ~~Memory~~ — measured signed out, §3; signed-in figures wait on item 1.
 5. **One tracker poll** (GitHub is the cheapest) end to end, to see the routing work on exact ids.
 
 Then design: the listener registry, what Settings shows, the grouping and cool-down, and where a count
