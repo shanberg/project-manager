@@ -1397,6 +1397,12 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// tells them from an edit that means a different page — the page on screen is the one pinned.
     private var pinned: (home: String, page: String)?
 
+    /// Open WebKit's inspector on the page — only once there is a page to inspect.
+    var canShowInspector: Bool { web != nil && revealed }
+    func showInspector() {
+        if let web, revealed { CanvasWebSession.showInspector(web) }
+    }
+
     /// Load it again from the top — and if the card had given up, start over from the placeholder.
     func reload() {
         if let web, revealed { web.reload() } else { contentChanged() }

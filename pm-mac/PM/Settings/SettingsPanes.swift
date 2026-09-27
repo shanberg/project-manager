@@ -246,6 +246,27 @@ private struct CanvasSitesSection: View {
     }
 }
 
+/// Advanced: switches for chasing a problem, off by default.
+struct AdvancedSettingsView: View {
+    @AppStorage(CanvasWebSession.inspectorDefaultsKey) private var showsInspector = false
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Show Web Inspector in web card menus", isOn: $showsInspector)
+            } header: {
+                Text("Web Cards")
+            } footer: {
+                Text("Adds Show Web Inspector to a web card's Page menu. Pages loaded while this is on can also be inspected from Safari's Develop menu, and by any app running as you.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .scenePadding()
+    }
+}
+
 /// Notifications: which nudges PM schedules, plus a way out to the system's own permission switch
 /// (which is the one that actually decides whether anything is delivered).
 struct NotificationSettingsView: View {

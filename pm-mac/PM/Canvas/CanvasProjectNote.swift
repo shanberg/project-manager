@@ -688,7 +688,7 @@ struct CanvasProjectNote: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: symbol).font(.system(size: 11))
-                Text(title).font(.system(size: TaskRowMetrics.textSize))
+                Text(title).font(FolioType.body)
             }
             .foregroundStyle(.tertiary)
             .padding(.horizontal, Self.margin)
@@ -762,12 +762,12 @@ struct CanvasProjectNote: View {
                   : !member.showsProgress ? "Ongoing"
                   : member.ownTotal > 0 ? "\(member.ownDone) of \(member.ownTotal) done" : "No tasks")
             Text(member.shortName)
-                .font(.system(size: 12.5))
+                .font(FolioType.body)
                 .lineLimit(1)
                 .layoutPriority(1)
             if let task = member.nextTask {
                 Text(task)
-                    .font(.system(size: 11.5))
+                    .font(FolioType.meta)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
@@ -789,7 +789,7 @@ struct CanvasProjectNote: View {
                         Text(projectTitle(fromFolderName: master))
                         Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
                     }
-                    .font(.system(size: 11))
+                    .font(FolioType.meta)
                     .foregroundStyle(.tertiary)
                     .contentShape(Rectangle())
                 }
@@ -811,7 +811,7 @@ struct CanvasProjectNote: View {
                     .help(!store.kind.showsProgress ? "Ongoing — nothing to finish"
                           : progress.total > 0 ? "\(progress.done) of \(progress.total) done" : "No tasks yet")
                 Text(name)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(FolioType.title)
                     .lineLimit(2)
                     .foregroundStyle(store.hasLoaded ? AnyShapeStyle(.primary)
                                                      : AnyShapeStyle(.secondary))
@@ -1006,7 +1006,7 @@ struct CanvasProjectNote: View {
         Button(action: action) {
             Label(title, systemImage: symbol)
                 .labelStyle(.titleAndIcon)
-                .font(.caption)
+                .font(FolioType.meta)
                 .foregroundStyle(.tertiary)
                 .contentShape(Rectangle())
         }
@@ -1111,7 +1111,7 @@ struct CanvasProjectNote: View {
                             Image(systemName: "arrow.up.right")
                             Text(day)
                         }
-                        .font(.caption2)
+                        .font(FolioType.meta)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .fixedSize()
@@ -1123,7 +1123,7 @@ struct CanvasProjectNote: View {
                     // working from.
                     if todo.state == .open, let count = subtaskCounts[key], count.total > 0 {
                         Text("\(count.done)/\(count.total)")
-                            .font(.caption2.monospacedDigit())
+                            .font(FolioType.meta.monospacedDigit())
                             .foregroundStyle(.tertiary)
                             .fixedSize()
                             .help("\(count.done) of \(count.total) subtasks done")
@@ -1421,7 +1421,7 @@ struct CanvasProjectNote: View {
             }
         } label: {
             Text(SessionPicks.day(iso: todo.sessionISODate) ?? "Earlier")
-                .font(.caption2)
+                .font(FolioType.meta)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .padding(.horizontal, 5)
@@ -1804,14 +1804,14 @@ struct SessionHeading: View {
                 (Text(heading.day).foregroundStyle(Color.accentColor)
                  + Text(session.name.isEmpty ? "" : " · \(session.name)").foregroundStyle(.secondary)
                     .fontWeight(.regular))
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .font(FolioType.bodyEmphasis)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
                 Spacer(minLength: 8)
                 if let detail = heading.detail {
                     Text(detail)
-                        .font(.system(size: 11))
+                        .font(FolioType.meta)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .fixedSize()

@@ -113,7 +113,10 @@ final class CanvasTaskListModel {
         let kind = spec.kind
         // Coming up laid out as a week or a month looks as far ahead as it draws.
         let span = spec.kind == .comingUp ? ((try? spec.calendarSpan()) ?? nil) : nil
-        let before = span?.days.last ?? spec.period.value
+        if case .sinceMeeting(let project) = spec.period { MeetingAnchors.refresh(project) }
+        // A since-the-last-meeting cut-off with no meeting to count from is said, not guessed at.
+        let cutoff = Result { try spec.period.cutoff() }
+        let before = span?.days.last ?? ((try? cutoff.get()) ?? spec.period.value)
         let beforeTitle = spec.period.beforeTitle.lowercased()
         let query = self.query.trimmingCharacters(in: .whitespaces)
         let projects: [String]?
@@ -136,6 +139,7 @@ final class CanvasTaskListModel {
                     let groups = CanvasTaskLists.groups(search: try searchableTasks(projects: projects), query: query)
                     return (groups, ViewMarkdown.search(groups.flatMap(\.hits), query: query))
                 case .leftovers:
+                    _ = try cutoff.get()
                     let list = none ? LeftoverList() : try leftoverTasks(before: before, projects: projects)
                     return (CanvasTaskLists.groups(leftovers: list), ViewMarkdown.leftovers(list, before: beforeTitle))
                 case .comingUp:

@@ -109,7 +109,7 @@ struct ProjectDetailsView: View {
     // persistent project content is visually a different medium from the sans-serif task UI below.
 
     /// Serif reading face for detail body copy, distinguishing document content from the task UI.
-    private static let bodyFont = Font.system(size: 13, design: .serif)
+    private static let bodyFont = FolioType.reading
 
     private func readContent(_ n: ProjectNotes) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -118,7 +118,7 @@ struct ProjectDetailsView: View {
             // the line of notes Things keeps under a project's name.
             if !n.summary.isBlank {
                 Text(n.summary)
-                    .font(.system(size: 14, design: .serif))
+                    .font(FolioType.lede)
                     .foregroundStyle(.secondary)
                     .lineSpacing(2.5)
                     .fixedSize(horizontal: false, vertical: true)
@@ -163,7 +163,7 @@ struct ProjectDetailsView: View {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             // Hanging figure: numerals in a fixed-width gutter so the copy aligns.
                             Text("\(idx + 1)")
-                                .font(.system(size: 12, weight: .semibold, design: .serif))
+                                .font(FolioType.reading.weight(.semibold))
                                 .foregroundStyle(.tertiary)
                                 .monospacedDigit()
                                 .frame(width: 14, alignment: .trailing)
@@ -199,8 +199,9 @@ struct ProjectDetailsView: View {
     }
 }
 
-/// A section label in the brief — Goals, Links — and anywhere on a card that wants a sub-heading
-/// quieter than a sitting's: Projects, Picked up, Still open.
+/// A section label in the brief — Goals, Links — anywhere on a card that wants a sub-heading
+/// quieter than a sitting's — Projects, Picked up, Still open — and the sidebar's section headings, so
+/// the two panes head their sections the same way.
 ///
 /// Sentence case, a touch heavier than the text around it, in the secondary colour: Craft's quiet
 /// heading. It used to be tracked capitals at ten points, a magazine's eyebrow, which read as louder
@@ -210,8 +211,9 @@ struct BriefLabel: View {
     init(_ title: String) { self.title = title }
     var body: some View {
         Text(title)
-            .font(.system(size: 11.5, weight: .medium))
+            .font(FolioType.label)
             .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 }
 
@@ -410,7 +412,7 @@ private struct DetailsEditor: View {
                 // entry in the document every time somebody clicked this and thought better of it.
                 links.append(EditableLink(label: "", url: ""))
             } label: {
-                Label("Add link", systemImage: "plus.circle").font(.caption)
+                Label("Add link", systemImage: "plus.circle").font(FolioType.meta)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -516,7 +518,7 @@ private struct LinksBlock: View {
         let label = (link.label ?? "").trimmingCharacters(in: .whitespaces)
         VStack(alignment: .leading, spacing: 2) {
             if !label.isEmpty {
-                Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                Text(label).font(FolioType.label).foregroundStyle(.secondary)
             }
             ForEach(Array(children.enumerated()), id: \.offset) { _, child in
                 linkRow(child).padding(.leading, 10)
@@ -543,14 +545,14 @@ private struct LinksBlock: View {
                         .foregroundStyle(.primary)
                 }
                 .buttonStyle(.plain)
-                .font(.system(size: 12.5))
+                .font(FolioType.body)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .layoutPriority(1)
                 Spacer(minLength: 6)
                 if !label.isEmpty, let host {
                     Text(host)
-                        .font(.system(size: 11))
+                        .font(FolioType.meta)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
@@ -561,7 +563,7 @@ private struct LinksBlock: View {
             .reportsLinkZone(url)
         } else {
             let text = (!label.isEmpty && !urlStr.isEmpty) ? "\(label): \(urlStr)" : (label.isEmpty ? urlStr : label)
-            Text(text).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(text).font(FolioType.body).foregroundStyle(.secondary)
         }
     }
 

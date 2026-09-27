@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 
 /// A project window's content: the project sidebar beside the task column, as a real
@@ -916,6 +917,17 @@ final class ProjectSplitViewController: NSSplitViewController {
         guard newStore !== store else { return }
         store = newStore
         sidebarHosting.rootView = ProjectSidebar(store: newStore, state: state)
+        // A switch is a change of place, and a short fade says so: cut straight across, one project's
+        // card replacing another's in the same frame read as the card flickering, not as going
+        // somewhere. Short enough that walking the sidebar with the arrow keys never waits on it.
+        let fade = Motion.duration(0.15)
+        if fade > 0, let layer = contentPane.view.layer {
+            let transition = CATransition()
+            transition.type = .fade
+            transition.duration = fade
+            transition.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(transition, forKey: "projectSwitch")
+        }
         // Every tab was a view of the *old* project, so none of them survive. The window follows this
         // with the new project's own remembered tabs; rebuilding here as well is what keeps the column
         // from being empty for the turn of the run loop in between.

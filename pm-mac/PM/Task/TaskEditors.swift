@@ -59,7 +59,7 @@ struct TaskStatusIcon: View {
 /// doesn't move its words off the column its siblings' words are on.
 enum TaskRowMetrics {
     /// The words.
-    static let textSize: CGFloat = 13
+    static let textSize: CGFloat = FolioType.bodySize
     /// A top-level task's box, and a subtask's, one step smaller: the level is said by the size as well
     /// as the indent, which is what lets a narrow card keep the indent modest.
     static let boxSize: CGFloat = 13
@@ -276,7 +276,7 @@ struct AddEditor: View {
             Image(systemName: symbol)
             Text(label)
         }
-        .font(.caption)
+        .font(FolioType.meta)
         .lineLimit(1)
         .foregroundStyle(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.secondary))
         .padding(.horizontal, 6)

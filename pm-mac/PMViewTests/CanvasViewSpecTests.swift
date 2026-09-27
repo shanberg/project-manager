@@ -595,6 +595,40 @@ extension CanvasViewSpecTests {
                        [0, 124, 364], "Measured from where the last timed block landed, not where it would have")
     }
 
+    /// Since the last meeting (D2, Calendars step 4): kept on the node as written, drawn as a list, and
+    /// counted from the meeting's day to today — or, with no meeting to count from, said rather than
+    /// guessed.
+    func testSinceTheLastMeeting() throws {
+        let project = "[[Team 1-1s]]"
+        var card = node([CanvasViewSpec.viewKey: .string("day")])
+        CanvasViewSpec.set(CanvasViewSpec(kind: .day, period: .sinceMeeting(project), layout: .rail), on: &card)
+        XCTAssertEqual(card.extra[CanvasViewSpec.periodKey], .string("since-meeting:[[Team 1-1s]]"))
+        let spec = try XCTUnwrap(CanvasViewSpec.of(card))
+        XCTAssertEqual(spec.period, .sinceMeeting(project))
+        XCTAssertEqual(spec.shownLayout, .list, "a stretch of days, not one day's rail")
+        XCTAssertTrue(spec.period.isSpan)
+        XCTAssertEqual(CanvasViewSpec.Period(value: "since-meeting:"), .today)
+        XCTAssertEqual(spec.period.title, "Since the Last Meeting in Team 1-1s")
+
+        CanvasMeetingAnchors.set(nil, for: project)
+        XCTAssertThrowsError(try spec.period.range()) { error in
+            XCTAssertEqual(String(describing: error), "No meeting yet in Team 1-1s's calendars.")
+        }
+        XCTAssertThrowsError(try spec.period.cutoff())
+
+        let calendar = Calendar.current
+        let met = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 22, hour: 10)))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 25, hour: 9)))
+        CanvasMeetingAnchors.set(.init(start: met, title: "1:1 Priya"), for: project)
+        defer { CanvasMeetingAnchors.set(nil, for: project) }
+        let range = try spec.period.range(now: now, calendar: calendar)
+        XCTAssertEqual(range.start, calendar.startOfDay(for: met), "the meeting's own day, where its notes are")
+        XCTAssertEqual(range.end, calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)))
+        XCTAssertEqual(try spec.period.cutoff(), "2026-09-22")
+        XCTAssertTrue(spec.caption(for: range).hasPrefix("Since 1:1 Priya · "))
+        XCTAssertEqual(CanvasViewSpec.Period.today.value, try CanvasViewSpec.Period.today.cutoff())
+    }
+
     /// Events side by side where they overlap: a cluster takes as many lanes as its busiest moment, a
     /// lane frees up when its event ends, and one ending as the next begins doesn't overlap it.
     func testOverlappingEventsShareAColumn() {

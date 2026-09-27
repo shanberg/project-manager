@@ -39,3 +39,36 @@ struct RowSelectionFill: View {
         }
     }
 }
+
+/// Turns off the highlight of the `NSTableView` a SwiftUI `List` row sits in, so the row can draw
+/// `RowSelectionBand` instead.
+///
+/// The sidebar keeps its `List` for what a list does — click and ⇧/⌘-click, arrow keys, type-select,
+/// scroll-into-view, the selection-aware context menu — and gives up only the table's own solid fill.
+/// That fill is why every coloured thing on a sidebar row had to stand down when it was selected: a
+/// project's ring, a red due date, an Up Next card's wash all went grey on the accent. On the band they
+/// keep their colours, as the task rows' due chips always have, and the two panes select alike.
+///
+/// SwiftUI owns the table and builds it lazily, so the table is found from inside a row — the one place
+/// that is certainly in it — and set on every attach. Setting it is idempotent and cheap.
+struct NativeHighlightSuppressor: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Probe() }
+    func updateNSView(_ nsView: NSView, context: Context) { (nsView as? Probe)?.suppress() }
+
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            suppress()
+        }
+
+        func suppress() {
+            var view = superview
+            while let current = view, !(current is NSTableView) { view = current.superview }
+            guard let table = view as? NSTableView, table.selectionHighlightStyle != .none else { return }
+            table.selectionHighlightStyle = .none
+        }
+
+        // A probe, not a target: clicks go through to the row.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}

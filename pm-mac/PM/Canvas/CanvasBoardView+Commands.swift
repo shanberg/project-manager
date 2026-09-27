@@ -846,6 +846,12 @@ extension CanvasBoardView {
             add(page, "Make This the Card\u{2019}s Address", #selector(adoptCurrentAddress))
         }
         add(page, "Edit Address\u{2026}", #selector(editLinkAddress))
+        // Settings ▸ Advanced. One card only: an inspector per selected card would be a window each.
+        if CanvasWebSession.showsInspector, selectedLinkCards.count == 1,
+           (nodeViews[id] as? CanvasLinkNodeView)?.canShowInspector == true {
+            page.addItem(.separator())
+            add(page, "Show Web Inspector", #selector(showLinkInspector))
+        }
         menu.addItem(withTitle: "Page", action: nil, keyEquivalent: "").submenu = page
     }
 
@@ -1153,7 +1159,31 @@ extension CanvasBoardView {
                 return item
             }))
         }
+        if kind == .day {
+            addMeetingPeriods(periods, cards, header: "Since the Last Meeting") { item, period in
+                item.action = #selector(setViewSpan(_:))
+                item.representedObject = [period.value, CanvasViewSpec.Layout.list.rawValue]
+            }
+        }
         menu.addItem(withTitle: "Period", action: nil, keyEquivalent: "").submenu = periods
+    }
+
+    /// A since-the-last-meeting period per project whose calendars are linked (D2, Calendars step 4) —
+    /// the 1:1-prep period, counted from the meeting as the calendar has it. Nothing when none are.
+    private func addMeetingPeriods(_ periods: NSMenu, _ cards: [CanvasViewNodeView], header: String,
+                                   configure: (NSMenuItem, CanvasViewSpec.Period) -> Void) {
+        let projects = MeetingAnchors.projects()
+        guard !projects.isEmpty else { return }
+        periods.addItem(.separator())
+        periods.addItem(.sectionHeader(title: header))
+        for link in projects {
+            let period = CanvasViewSpec.Period.sinceMeeting("[[\(link.projectFolder)]]")
+            let item = NSMenuItem(title: link.projectName, action: nil, keyEquivalent: "")
+            item.target = self
+            configure(item, period)
+            item.state = cards.allSatisfy { $0.spec.period == period } ? .on : .off
+            periods.addItem(item)
+        }
     }
 
     /// One cell of `addSpanMenu`: the period and the layout together, growing each card to what the
@@ -1201,6 +1231,13 @@ extension CanvasBoardView {
             let item = add(periods, kind?.title(of: period) ?? period.title, #selector(setViewPeriod(_:)))
             item.representedObject = period.value
             item.state = cards.allSatisfy { $0.spec.period == period } ? .on : .off
+        }
+        // Leftovers as 1:1 prep: what was left open before you last met.
+        if kind == .leftovers {
+            addMeetingPeriods(periods, cards, header: "Before the Last Meeting") { item, period in
+                item.action = #selector(setViewPeriod(_:))
+                item.representedObject = period.value
+            }
         }
         menu.addItem(withTitle: "Period", action: nil, keyEquivalent: "").submenu = periods
     }
@@ -2601,6 +2638,10 @@ extension CanvasBoardView {
                                    width: candidate.width, height: candidate.height)
         }
         return candidate
+    }
+
+    @objc private func showLinkInspector() {
+        for id in selection { (nodeViews[id] as? CanvasLinkNodeView)?.showInspector() }
     }
 
     @objc private func reloadLink() {

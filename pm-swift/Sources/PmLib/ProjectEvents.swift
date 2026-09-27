@@ -557,3 +557,14 @@ public func meetingSittingLabel(_ event: ProjectEvent) -> String {
     let title = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
     return title.isEmpty ? "Meeting" : title
 }
+
+// MARK: - Since the last meeting
+
+/// The meeting a since-the-last-meeting period starts at (views.md D2, Calendars step 4): the latest
+/// one to have ended by `now`, so a card read during the next 1:1, or just before it, still covers
+/// everything since the one before. All-day events aren't meetings.
+public func lastMeeting(_ events: [ProjectEvent], now: Date) -> ProjectEvent? {
+    events.filter { !$0.isAllDay && $0.end <= now }
+        .max { $0.start != $1.start ? $0.start < $1.start : $0.projectName > $1.projectName }
+}
+

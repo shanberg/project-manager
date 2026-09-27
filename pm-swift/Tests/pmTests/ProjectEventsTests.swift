@@ -353,3 +353,21 @@ final class MeetingForNotesTests: XCTestCase {
         XCTAssertEqual(meetingSittingLabel(event(" ", 0, 30)), "Meeting")
     }
 }
+
+final class LastMeetingTests: XCTestCase {
+    private let base = Date(timeIntervalSinceReferenceDate: 800_000_000)
+    private func event(_ title: String, _ from: Double, _ to: Double, allDay: Bool = false) -> ProjectEvent {
+        ProjectEvent(id: title, title: title, start: base.addingTimeInterval(from * 3600),
+                     end: base.addingTimeInterval(to * 3600), isAllDay: allDay,
+                     projectFolder: "Team 1-1s", projectName: "Team 1-1s", projectColor: nil)
+    }
+
+    /// The one before the one that's on: prep for the next 1:1 covers since the last.
+    func testTheLatestToHaveEnded() {
+        let events = [event("Last week", -168, -167.5), event("Yesterday", -24, -23.5), event("Now", -0.25, 0.25),
+                      event("Offsite", -48, -24, allDay: true)]
+        XCTAssertEqual(lastMeeting(events, now: base)?.title, "Yesterday")
+        XCTAssertEqual(lastMeeting(events, now: base.addingTimeInterval(0.5 * 3600))?.title, "Now", "once it's over")
+        XCTAssertNil(lastMeeting([event("Tomorrow", 24, 25)], now: base))
+    }
+}

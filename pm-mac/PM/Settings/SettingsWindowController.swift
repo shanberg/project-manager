@@ -33,6 +33,8 @@ final class SettingsWindowController: NSWindowController {
                                      symbol: "keyboard", identifier: "shortcuts"))
         tabs.addTabViewItem(Self.tab(NotificationSettingsView(), title: "Notifications",
                                      symbol: "bell", identifier: "notifications"))
+        tabs.addTabViewItem(Self.tab(AdvancedSettingsView(), title: "Advanced",
+                                     symbol: "gearshape.2", identifier: "advanced"))
 
         let window = NSWindow(contentViewController: tabs)
         window.styleMask = [.titled, .closable]
@@ -47,7 +49,7 @@ final class SettingsWindowController: NSWindowController {
     /// The panes, named so a command can ask for one by name rather than by index — an index would
     /// silently point at the wrong pane the next time the order changes.
     enum Pane: String {
-        case general, windows, projects, notes, time, boards, shortcuts, notifications
+        case general, windows, projects, notes, time, boards, shortcuts, notifications, advanced
     }
 
     func show(selecting pane: Pane? = nil) {

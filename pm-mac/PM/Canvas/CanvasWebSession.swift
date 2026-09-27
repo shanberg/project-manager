@@ -191,9 +191,30 @@ enum CanvasWebSession {
     /// door worth keeping shut on a card that is signed in to your mail. Debug builds get it outright.
     ///
     /// Turn it on for an installed copy the same way — `defaults write com.stuarthanberg.pm
-    /// PMLogEnabled -bool YES` — then relaunch and look under Safari's Develop menu.
+    /// PMLogEnabled -bool YES` — then relaunch and look under Safari's Develop menu — or with
+    /// Settings ▸ Advanced ▸ Show Web Inspector in web card menus (`showsInspector`).
     static func allowInspecting(_ web: WKWebView) {
-        web.isInspectable = Log.isEnabled
+        web.isInspectable = Log.isEnabled || showsInspector
+    }
+
+    /// Settings ▸ Advanced: a Show Web Inspector item on a web card's Page menu.
+    /// - Off by default: an inspectable page can be attached to and driven by any process running as you.
+    /// - Also makes new pages inspectable from Safari's Develop menu, as the log switch does.
+    static let inspectorDefaultsKey = "PMCanvasShowsWebInspector"
+    static var showsInspector: Bool { UserDefaults.standard.bool(forKey: inspectorDefaultsKey) }
+
+    /// Open WebKit's inspector on this page, in its own window.
+    /// - Private API (`_inspector`, `-show`); there is no public way to open it. Fails quietly if it goes.
+    static func showInspector(_ web: WKWebView) {
+        web.isInspectable = true
+        let inspector = NSSelectorFromString("_inspector"), show = NSSelectorFromString("show")
+        guard web.responds(to: inspector),
+              let object = web.perform(inspector)?.takeUnretainedValue() as? NSObject,
+              object.responds(to: show) else {
+            Log.write("canvas web session: no inspector to show")
+            return
+        }
+        object.perform(show)
     }
 
     /// Everything one site has stored — its cookies, and the local storage a modern login also uses.

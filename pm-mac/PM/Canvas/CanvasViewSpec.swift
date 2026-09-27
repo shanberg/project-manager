@@ -27,6 +27,12 @@ struct CanvasViewSpec: Equatable {
         case today, yesterday, week, month
         /// A local day, `YYYY-MM-DD`.
         case day(String)
+        /// Since the last meeting of a project, by its calendars (`pm-events`): the 1:1-prep period
+        /// (D2, Calendars step 4). The project as written, a `[[link]]`. Its meeting is found by the app
+        /// and kept in `CanvasMeetingAnchors`, which is what `range` reads.
+        case sinceMeeting(String)
+
+        static let sinceMeetingPrefix = "since-meeting:"
 
         var value: String {
             switch self {
@@ -35,11 +41,18 @@ struct CanvasViewSpec: Equatable {
             case .week: return "week"
             case .month: return "month"
             case .day(let iso): return iso
+            case .sinceMeeting(let project): return Self.sinceMeetingPrefix + project
             }
         }
 
         init(value: String) {
-            switch value.trimmingCharacters(in: .whitespaces).lowercased() {
+            let trimmed = value.trimmingCharacters(in: .whitespaces)
+            if trimmed.lowercased().hasPrefix(Self.sinceMeetingPrefix) {
+                let project = String(trimmed.dropFirst(Self.sinceMeetingPrefix.count)).trimmingCharacters(in: .whitespaces)
+                self = project.isEmpty ? .today : .sinceMeeting(project)
+                return
+            }
+            switch trimmed.lowercased() {
             case "yesterday": self = .yesterday
             case "week": self = .week
             case "month": self = .month
@@ -56,12 +69,41 @@ struct CanvasViewSpec: Equatable {
                 return try DoneRange.resolve(period: value, since: nil, until: nil, now: now, calendar: calendar)
             case .day(let iso):
                 return try DoneRange.resolve(period: nil, since: iso, until: iso, now: now, calendar: calendar)
+            // From the meeting's day, since sittings are dated by the day and its own notes belong at
+            // the top of the prep, to the end of today.
+            case .sinceMeeting(let project):
+                guard let meeting = CanvasMeetingAnchors.meeting(for: project) else {
+                    throw CanvasMeetingAnchors.NoMeeting(project: project)
+                }
+                return try DoneRange.resolve(period: nil, since: CanvasMeetingAnchors.isoDay(meeting.start, calendar),
+                                             until: CanvasMeetingAnchors.isoDay(now, calendar), now: now, calendar: calendar)
             }
+        }
+
+        /// What Leftovers asks `task.leftovers` for: the period itself, or for since-the-last-meeting,
+        /// the meeting's day — what was left open before you met.
+        func cutoff() throws -> String {
+            guard case .sinceMeeting(let project) = self else { return value }
+            guard let meeting = CanvasMeetingAnchors.meeting(for: project) else {
+                throw CanvasMeetingAnchors.NoMeeting(project: project)
+            }
+            return CanvasMeetingAnchors.isoDay(meeting.start, .current)
+        }
+
+        /// The project a since-the-last-meeting period names, as it reads.
+        var meetingProjectName: String? {
+            guard case .sinceMeeting(let project) = self else { return nil }
+            return projectTitle(fromFolderName: ProjectPartOf.writtenName(in: project) ?? project)
         }
 
         /// Whether this is more than one day, which is what decides between the day's full prose and a
         /// week's ledes (D5).
-        var isSpan: Bool { self == .week || self == .month }
+        var isSpan: Bool {
+            switch self {
+            case .week, .month, .sinceMeeting: return true
+            case .today, .yesterday, .day: return false
+            }
+        }
 
         /// What the menu calls it.
         var title: String {
@@ -71,6 +113,7 @@ struct CanvasViewSpec: Equatable {
             case .week: return "This Week"
             case .month: return "This Month"
             case .day(let iso): return SessionPicks.day(iso: iso) ?? iso
+            case .sinceMeeting: return "Since the Last Meeting in \(meetingProjectName ?? "")"
             }
         }
 
@@ -82,6 +125,7 @@ struct CanvasViewSpec: Equatable {
             case .week: return "Before This Week"
             case .month: return "Before This Month"
             case .day: return "Before \(title)"
+            case .sinceMeeting: return "Before the Last Meeting in \(meetingProjectName ?? "")"
             }
         }
 
@@ -94,6 +138,7 @@ struct CanvasViewSpec: Equatable {
             case .week: return "Next 7 Days"
             case .month: return "Next 5 Weeks"
             case .day: return "Through \(title)"
+            case .sinceMeeting: return title
             }
         }
 
@@ -195,6 +240,8 @@ struct CanvasViewSpec: Equatable {
 
     var shownLayout: Layout {
         guard kind.layouts.contains(layout) else { return .list }
+        // Since a meeting is a stretch of days that starts wherever the meeting was: a list of them.
+        if case .sinceMeeting = period { return .list }
         if layout == .rail && period.isSpan { return .list }
         return layout
     }
@@ -317,7 +364,49 @@ struct CanvasViewSpec: Equatable {
             return "This Month · \(long.string(from: range.start))"
         case .day:
             return day.string(from: range.start)
+        case .sinceMeeting(let project):
+            // "Since 1:1 Priya · Tue, Sep 22": which meeting, as the calendar names it.
+            let meeting = CanvasMeetingAnchors.meeting(for: project)
+            return "Since \(meeting?.title ?? "the Last Meeting") · \(day.string(from: meeting?.start ?? range.start))"
         }
+    }
+}
+
+/// The last meeting of each project a since-the-last-meeting period names (D2, Calendars step 4). The
+/// app finds them from its calendars on the main actor (`MeetingAnchors`) and puts them here, so a
+/// period's range can be worked out on whatever queue asks — and a test can set one by hand.
+enum CanvasMeetingAnchors {
+    struct Meeting: Equatable {
+        let start: Date
+        let title: String
+    }
+
+    /// No meeting to count from: none ended yet, no calendars linked, or no access.
+    struct NoMeeting: Error, CustomStringConvertible {
+        let project: String
+        var description: String {
+            "No meeting yet in \(projectTitle(fromFolderName: ProjectPartOf.writtenName(in: project) ?? project))'s calendars."
+        }
+    }
+
+    private static let lock = NSLock()
+    private static var meetings: [String: Meeting] = [:]
+
+    static func meeting(for project: String) -> Meeting? {
+        lock.lock()
+        defer { lock.unlock() }
+        return meetings[project]
+    }
+
+    static func set(_ meeting: Meeting?, for project: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        meetings[project] = meeting
+    }
+
+    static func isoDay(_ date: Date, _ calendar: Calendar) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
 }
 

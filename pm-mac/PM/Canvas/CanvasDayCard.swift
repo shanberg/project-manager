@@ -128,6 +128,7 @@ final class CanvasDayModel {
         case .board: projects = boardProjects
         case .named(let names): projects = names
         }
+        if case .sinceMeeting(let project) = spec.period { MeetingAnchors.refresh(project) }
         // Events are drawn on time — the rail, a week, a month — and the plain list waits (C4).
         let drawsEvents = spec.shownLayout != .list
         let eventRange = drawsEvents ? ((try? spec.calendarSpan())?.map(\.range) ?? (try? spec.period.range())) : nil
@@ -338,6 +339,7 @@ struct CanvasDayCard: View {
             case .week: return "No work this week."
             case .month: return "No work this month."
             case .day: return "No work that day."
+            case .sinceMeeting: return "No work since the last meeting."
             }
         }
     }

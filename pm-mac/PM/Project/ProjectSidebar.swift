@@ -257,14 +257,13 @@ struct ProjectSidebar: View {
     /// This was hand-built once — a `ScrollView` of rows with their own hover state, click handling,
     /// range maths and arrow-key navigation — and every one of those was a worse copy of what `List`
     /// already does. A native list brings click / ⇧-click / ⌘-click, arrow keys, type-select,
-    /// scrolling (including scrolling the selection into view), the three-state selection highlight
-    /// that dims when the pane or window loses focus, and the accessibility that comes with a real
-    /// table. It's a flat list of selectable rows: exactly what `List` is for.
+    /// scrolling (including scrolling the selection into view), and the accessibility that comes with
+    /// a real table. It's a flat list of selectable rows: exactly what `List` is for.
     ///
-    /// The source-list style is what gives a row its own identity: the selection and hover highlights
-    /// are inset rounded rectangles rather than full-bleed squared bands, so each project reads as a
-    /// discrete item the way a Finder sidebar entry does. It also supplies the row insets, the section
-    /// header treatment and the collapse affordance, so none of those are set by hand here.
+    /// The one thing taken back from it is the highlight. Each row draws `RowSelectionBand`, the task
+    /// rows' band, with the table's own fill switched off — see `NativeHighlightSuppressor` — so both
+    /// panes select the same way and a row's colours survive being selected. The source-list style
+    /// still supplies the row insets, the section header treatment and the collapse affordance.
     ///
     /// The one bit of the window own dressing kept on top: the scroll background is dropped, since the
     /// split view's sidebar item already draws the material behind this and two would stack.
@@ -289,6 +288,7 @@ struct ProjectSidebar: View {
                         UpNextCard(
                             entry: entry,
                             isSelected: state.projectSelection.contains(entry.projectKey),
+                            isEmphasized: listFocused,
                             showsCode: showsCode,
                             liveProgress: entry.projectKey == store.projectKey ? store.progress : nil
                         )
@@ -310,7 +310,7 @@ struct ProjectSidebar: View {
                         }
                     }
                 } header: {
-                    SidebarEyebrow("Up Next")
+                    BriefLabel("Up next")
                 }
             }
             ForEach(groups) { group in
@@ -320,6 +320,7 @@ struct ProjectSidebar: View {
                             entry: entry,
                             isFocusedProject: entry.projectKey == store.projectKey,
                             isSelected: state.projectSelection.contains(entry.projectKey),
+                            isEmphasized: listFocused,
                             showsCode: showsCode,
                             liveProgress: entry.projectKey == store.projectKey ? store.progress : nil,
                             isNested: group.nested.contains(entry.projectKey)
@@ -342,12 +343,12 @@ struct ProjectSidebar: View {
                         }
                     }
                 } header: {
-                    SidebarEyebrow(group.title)
+                    BriefLabel(group.title)
                 }
             }
             if groups.isEmpty {
                 Text(store.allProjects.isEmpty ? "No projects" : "None \(status.rawValue)")
-                    .font(.caption)
+                    .font(FolioType.meta)
                     .foregroundStyle(.tertiary)
                     .listRowSeparator(.hidden)
             }
@@ -637,13 +638,46 @@ struct SidebarBottomBar: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            arrangeMenu
+            newProjectButton
             Spacer(minLength: 0)
+            kindSwitch
+            Spacer(minLength: 0)
+            arrangeMenu
         }
         // AppKit already insets the accessory from the pane's edges, so this is only the gap between
         // the bar's own edge and the control in it.
         .padding(.horizontal, 6)
         .frame(height: 24)
+    }
+
+    /// Which kinds the list shows, out on the bar rather than a submenu down: it's the filter reached
+    /// for through the day, the way Reeder keeps Starred / Unread / All at the foot of its sources.
+    /// Status stays in the menu — archived projects are somewhere you visit, not a view you work in.
+    private var kindSwitch: some View {
+        Picker("Show", selection: $kindFilter) {
+            Image(systemName: "shippingbox").help("Projects").tag(ProjectKindFilter.projects)
+            Image(systemName: "circle.dotted").help("Areas").tag(ProjectKindFilter.areas)
+            Image(systemName: "square.stack.3d.up").help("Projects & Areas").tag(ProjectKindFilter.all)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+        .fixedSize()
+    }
+
+    /// File ▸ New Project…, where a source list keeps its add button.
+    private var newProjectButton: some View {
+        Button {
+            NSApp.sendAction(#selector(AppDelegate.newProject), to: nil, from: nil)
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .help("New Project")
     }
 
     /// Status / grouping / sorting, one submenu each — the shape the Finder's View menu uses for the
@@ -662,15 +696,7 @@ struct SidebarBottomBar: View {
                     Label("All", systemImage: "square.stack").tag(ProjectStatusFilter.all)
                 }
                 .pickerStyle(.inline)
-                // Two pickers in one submenu, because both answer "which rows". Status and kind are
-                // independent — an area can be archived — so they can't be one list.
-                Divider()
-                Picker("Kind", selection: $kindFilter) {
-                    Label("Projects", systemImage: "shippingbox").tag(ProjectKindFilter.projects)
-                    Label("Areas", systemImage: "circle.dotted").tag(ProjectKindFilter.areas)
-                    Label("Everything", systemImage: "square.stack.3d.up").tag(ProjectKindFilter.all)
-                }
-                .pickerStyle(.inline)
+                // Kind is the bar's switch (`kindSwitch`), not a second picker here.
             } label: {
                 Label("Show", systemImage: "line.3.horizontal.decrease.circle")
             }
@@ -729,8 +755,8 @@ struct SidebarBottomBar: View {
 }
 
 /// A single project row: completion ring, name, and the project's next task beneath it. The row draws
-/// only its content — selection, hover and focus highlighting all belong to the enclosing `List`,
-/// which gets the active/inactive and emphasized/unemphasized states right for free. The project the
+/// its own selection and hover — `RowSelectionBand`, the task rows' band — over a `List` whose own
+/// highlight is switched off (`NativeHighlightSuppressor`), so the two panes select alike. The project the
 /// window is on also reads semibold; normally that's the selected row too, and the weight only says
 /// anything of its own while a multiple selection is up. Archived projects (visible under the Archived
 /// / All filters) read a step quieter than active ones.
@@ -738,9 +764,10 @@ private struct ProjectSidebarRow: View {
     let entry: PMStore.ProjectEntry
     /// Whether this is the project the window is currently showing.
     let isFocusedProject: Bool
-    /// Whether the row sits in the list's selection — the due date's tint has to stand down on the
-    /// highlight, where a red or orange word doesn't read.
+    /// Whether the row sits in the list's selection.
     let isSelected: Bool
+    /// Whether the list holds focus — accent band when it does, grey when it doesn't.
+    let isEmphasized: Bool
     /// Whether the name keeps its "CODE-NNN " prefix (`ProjectCodes`).
     let showsCode: Bool
     /// Live (done, total) for the focused project, which the cached scan can lag behind. Nil for every
@@ -748,6 +775,8 @@ private struct ProjectSidebarRow: View {
     let liveProgress: (done: Int, total: Int)?
     /// Drawn indented, as a member under the master above it.
     var isNested = false
+
+    @State private var isHovering = false
 
     /// The live count replaces this project's own share only: a master's members are still added on.
     private var total: Int { liveProgress.map { $0.total + entry.total - entry.ownTotal } ?? entry.total }
@@ -771,7 +800,7 @@ private struct ProjectSidebarRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
-            KindMark(entry: entry, fraction: fraction, total: total, isSelected: isSelected)
+            KindMark(entry: entry, fraction: fraction, total: total)
             VStack(alignment: .leading, spacing: 1) {
                 // The due date rides the name line rather than the task line: `nextDue` is the
                 // earliest due across the project's open tasks, which needn't be the next task's own.
@@ -779,26 +808,26 @@ private struct ProjectSidebarRow: View {
                 // section heading spelled out per row.
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(title)
-                        .font(.system(size: 13, weight: isFocusedProject ? .semibold : .regular))
+                        .font(isFocusedProject ? FolioType.bodyEmphasis : FolioType.body)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 0)
                     if let due = entry.nextDue {
-                        SidebarDueLabel(due: due, isSelected: isSelected)
+                        SidebarDueLabel(due: due)
                     } else if !entry.showsProgress, entry.detailsLoaded {
                         // Nothing with a ring has room for this, and nothing without a ring has a due
                         // date — so the slot the date rides in carries the one time signal an area
                         // does have: when it was last written to. It also explains the order the list
                         // is in when sorting by recency, which is the default.
                         Text(Self.lastTouched(entry.modified))
-                            .font(.system(size: 11))
+                            .font(FolioType.meta)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
                 }
                 if let task = entry.nextTask {
                     Text(task)
-                        .font(.system(size: 11))
+                        .font(FolioType.meta)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -817,16 +846,23 @@ private struct ProjectSidebarRow: View {
         .padding(.vertical, 4)
         // A member sits a step in from its master, the way a source list shows a child.
         .padding(.leading, isNested ? 16 : 0)
+        // Archived projects stay legible but recede, so a mixed ("All") list still reads at a glance.
+        // Before the band, so a selected archived row's band is as strong as any other.
+        .opacity(entry.isArchived ? 0.6 : 1)
+        .background {
+            RowSelectionBand(isSelected: isSelected, isEmphasized: isEmphasized, isHovering: isHovering)
+                .padding(.horizontal, -SidebarBand.outset)
+        }
         // The whole row is the click target, not just its text.
         .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
         // Carve the row out of the focus panel window-drag region, or AppKit's drag-tracking loop eats the
         // mouse-down and the row never registers the click. This has to sit on the row rather than
         // behind the `List` (where it was): a `List` builds its own scroll and table views, and those
         // are in front of anything the list's SwiftUI `.background` puts down — so the excluder was
         // never the view AppKit hit-tested. Inside the row it *is* the deepest view under the pointer.
         .background(WindowDragExcluder())
-        // Archived projects stay legible but recede, so a mixed ("All") list still reads at a glance.
-        .opacity(entry.isArchived ? 0.6 : 1)
+        .background(NativeHighlightSuppressor())
         .help(helpText)
         // Two text lines and a ring read as one row, with the tooltip's fuller description as its
         // label. The list supplies the row's selected state and actions.
@@ -855,19 +891,17 @@ private struct ProjectSidebarRow: View {
 /// small inset shapes; a filled capsule inside one reads as a badge on a badge, and the menubar's pill
 /// earns its background because it sits on a flat menu row with no shape of its own.
 ///
-/// The tint stands down on a selected row: `.secondary` is the one style that resolves correctly
-/// against all three of the list's highlights (accent, unemphasized grey, none), where a fixed red or
-/// white is wrong for two of them. This is the same trade the pill makes when it inverts.
+/// The tint holds on a selected row: the band under it is a tint, not a solid accent, so red and orange
+/// still read there — as a task row's due chip does on the same band.
 private struct SidebarDueLabel: View {
     let due: String
-    let isSelected: Bool
 
     var body: some View {
         Text(RelativeDue.short(due))
-            .font(.system(size: 11))
+            .font(FolioType.meta)
             .monospacedDigit()
             .lineLimit(1)
-            .foregroundStyle(isSelected ? Color.secondary : tint)
+            .foregroundStyle(tint)
             // A long project name truncates before the date gives up any of its width — the date is
             // three or four characters and the name has ellipsis to fall back on.
             .layoutPriority(1)
@@ -904,15 +938,15 @@ private struct SidebarDueLabel: View {
 /// web convention no system app draws, and the app already owns two ways of saying "late" that cost
 /// nothing to reuse.
 ///
-/// Selected, the card gives up its fill, its border and its tint and lets the list's own highlight
-/// through. That's the same trade `SidebarDueLabel` makes and for the same reason — a red or orange
-/// wash resolves against exactly one of the list's three highlight states — and it's what keeps a card
-/// from reading as a permanently-selected row while it sits directly above real ones. `DuePillView`
-/// already knows how to invert onto the highlight; it only needs telling.
+/// Selected, the card trades its wash and border for the rows' band, in the card's own shape
+/// — the same shape and radius as a row's band, so a selection reads the same on a card as on a row.
+/// The pill keeps its colours on the band, as a row's due date does.
 private struct UpNextCard: View {
     let entry: PMStore.ProjectEntry
-    /// Whether the row sits in the list's selection. Drives the stand-down described above.
+    /// Whether the row sits in the list's selection.
     let isSelected: Bool
+    /// Whether the list holds focus — accent band when it does, grey when it doesn't.
+    let isEmphasized: Bool
     /// Whether the name keeps its "CODE-NNN " prefix (`ProjectCodes`), as the rows do.
     let showsCode: Bool
     /// Live (done, total) when this is the window's own project, which the cached scan can lag behind.
@@ -924,23 +958,25 @@ private struct UpNextCard: View {
     private var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
     private var title: String { showsCode ? entry.name : entry.shortName }
 
+    @State private var isHovering = false
+
     var body: some View {
         HStack(alignment: .top, spacing: 7) {
             // An area reaches this card whenever a task inside it has a date, so it needs the mark too.
-            KindMark(entry: entry, fraction: fraction, total: total, isSelected: isSelected)
+            KindMark(entry: entry, fraction: fraction, total: total)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     // Semibold is what marks the promotion. The rows below stay regular, so a carded
                     // project reads heavier than its own row without needing a different size.
                     Text(title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(FolioType.bodyEmphasis)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 0)
                     if let due = entry.nextDue {
                         DuePillView(text: RelativeDue.short(due),
                                     state: DueState(due: due, own: true),
-                                    selected: isSelected)
+                                    selected: false)
                             // The name truncates before the pill gives up any width: the pill is three
                             // or four characters and the name has ellipsis to fall back on.
                             .layoutPriority(1)
@@ -949,34 +985,42 @@ private struct UpNextCard: View {
                 }
                 if let task = entry.nextTask {
                     Text(task)
-                        .font(.system(size: 11))
+                        .font(FolioType.meta)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
             }
         }
-        // The row's own 4×6 plus the point the border takes.
+        // Taller than a row, which is most of what makes it a card. No horizontal padding: the shape
+        // stands out past the text by the band's outset, so a card's words line up with the rows'.
         .padding(.vertical, 7)
-        .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            // Radius 8, a step above the ~5 the source list's selection shape uses, so a card reads as
-            // a container rather than as a selected row.
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(fill)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(border, lineWidth: 0.5)
+            // The band's own shape and radius, so selecting a card and selecting a row look the same.
+            let shape = RoundedRectangle(cornerRadius: ReadableWidth.bandCornerRadius, style: .continuous)
+            ZStack {
+                if isSelected {
+                    RowSelectionFill(isSelected: true, isEmphasized: isEmphasized, isHovering: false)
+                } else {
+                    // Hover is the band's whisper over the wash, not in place of it.
+                    fill
+                    RowSelectionFill(isSelected: false, isEmphasized: false, isHovering: isHovering)
                 }
+            }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(isSelected ? .clear : border, lineWidth: 0.5) }
+            .padding(.horizontal, -SidebarBand.outset)
         }
         // Outside the shape, so it's the gap *between* cards rather than more padding inside them —
         // sidebar list rows are contiguous, and without this two cards would touch.
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
         // See `ProjectSidebarRow`: without this AppKit's window-drag tracking eats the mouse-down and
         // the card never registers the click.
         .background(WindowDragExcluder())
+        .background(NativeHighlightSuppressor())
         .help(helpText)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(helpText)
@@ -991,7 +1035,6 @@ private struct UpNextCard: View {
     }
 
     private var fill: Color {
-        guard !isSelected else { return .clear }
         switch severity {
         case .overdue: return Color(nsColor: .systemRed).opacity(0.09)
         case .soon: return Color(nsColor: .systemOrange).opacity(0.10)
@@ -1002,7 +1045,6 @@ private struct UpNextCard: View {
     }
 
     private var border: Color {
-        guard !isSelected else { return .clear }
         switch severity {
         case .overdue: return Color(nsColor: .systemRed).opacity(0.16)
         case .soon: return Color(nsColor: .systemOrange).opacity(0.18)
@@ -1126,6 +1168,12 @@ private struct ProjectMenu: View {
     }
 }
 
+/// How far a sidebar band stands out past its row's text on either side — the margin the list's own
+/// highlight used to leave, and the one a card's shape takes so its words line up with the rows'.
+private enum SidebarBand {
+    static let outset: CGFloat = 8
+}
+
 /// The mark at the head of a sidebar row: a completion ring for a project, and for an area a dotted
 /// circle — the same shape with no end to fill toward.
 ///
@@ -1140,11 +1188,10 @@ private struct KindMark: View {
     let entry: PMStore.ProjectEntry
     let fraction: Double
     let total: Int
-    let isSelected: Bool
 
-    /// The project's colour, which the mark takes — except on the highlight, where a blue ring on a
-    /// blue selection would vanish and the row's own foreground reads instead.
-    private var tint: Color? { isSelected ? nil : entry.color?.swiftUIColor }
+    /// The project's colour, which the mark takes — on the band too, which is a tint the ring still
+    /// reads against.
+    private var tint: Color? { entry.color?.swiftUIColor }
 
     var body: some View {
         if let icon = entry.icon, ProjectIconMark.canDraw(icon) {
@@ -1175,21 +1222,6 @@ private struct KindMark: View {
                 // Matched to the ring image's box so both kinds of row line their text up.
                 .frame(width: 16, height: 16)
         }
-    }
-}
-
-/// An editorial section label: uppercase, letter-spaced, tertiary — the sidebar's echo of the details
-/// brief's eyebrow.
-private struct SidebarEyebrow: View {
-    let title: String
-    init(_ title: String) { self.title = title }
-    var body: some View {
-        Text(title)
-            .font(.system(size: 10, weight: .semibold))
-            .textCase(.uppercase)
-            .tracking(0.9)
-            .foregroundStyle(.tertiary)
-            .lineLimit(1)
     }
 }
 

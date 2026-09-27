@@ -696,6 +696,20 @@ the plain list, and how, waits until they've been seen on the rail. Copy as Text
        focused project's.
      - Auto-naming a sitting started during an event is not built: a name nobody chose, and only on
        sittings the app starts.
+   - ✓ **Since the last meeting**, built 2026-09-25 — the event half of D2's anchored period. The
+     sitting half (`since:[[…]]`) is not built.
+     - `pmPeriod: since-meeting:[[Team 1-1s]]`. Offered on a Day card's Period menu (Since the Last
+       Meeting ▸ each project with `pm-events`) and on Leftovers' (Before the Last Meeting).
+     - The meeting (`lastMeeting`, PmLib): the latest to have ended by now, so the next 1:1, on or
+       about to be, counts from the one before. Never all-day. Looked back 120 days.
+     - Day: from the start of the meeting's day, since sittings are dated by the day and its notes
+       belong at the top, to the end of today. A list only; captions each day, sittings as ledes.
+       Headed "Since 1:1 Priya · Tue, Sep 22".
+     - Leftovers: cut off at the meeting's day — what was left open before you met.
+     - Found on the main actor from EventKit as each card looks (`MeetingAnchors`), kept in
+       `CanvasMeetingAnchors` for the period's range to read on any queue.
+     - No meeting to count from (none yet, nothing linked, no access): the card says "No meeting yet
+       in <project>'s calendars."
 
 ## No inbox, by decision
 

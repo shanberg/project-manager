@@ -191,6 +191,7 @@
 		739CBFDC4342E91E456EC8B2 /* SessionPicks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DAF694D06EA74A49555934 /* SessionPicks.swift */; };
 		739FAA9C215674B5EA1F5BB6 /* CanvasCardPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B466E68351649C62FC289A04 /* CanvasCardPreview.swift */; };
 		749F9EBFDA20C8319ED224B7 /* CanvasDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DBEF0C051683508E6C2D9F1 /* CanvasDocumentStore.swift */; };
+		759BF67E3037F44DD14446AE /* MeetingAnchors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 804A02FC888A335BAD85C00A /* MeetingAnchors.swift */; };
 		760E56D3DEF256FDB04DCCF8 /* CanvasSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 571876A037F38CB125519DF2 /* CanvasSearch.swift */; };
 		779A498CA7A5CDFF63FB0D9E /* DisplayTicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83B7F290C0DA5A1B7C427DB /* DisplayTicker.swift */; };
 		780D130EC97948646027446C /* WorkspaceNamePrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = E59F99BD09C494E1E7D6CC64 /* WorkspaceNamePrompt.swift */; };
@@ -200,6 +201,7 @@
 		792C8CB0D759B880B4ED3CBB /* CanvasTexture.swift in Sources */ = {isa = PBXBuildFile; fileRef = D79CDCB044685D22AA50DC34 /* CanvasTexture.swift */; };
 		7967712E9CD10FA654BD9D9B /* CanvasTileHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E675A538A5C14D2BBE362A01 /* CanvasTileHandleView.swift */; };
 		7980EFFA963C22C522E28B46 /* CanvasSignInWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48E83921151014B0A0E215A0 /* CanvasSignInWindow.swift */; };
+		7AB8141EBD42665CFB447197 /* FolioType.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBBE74620B47E8414B209A08 /* FolioType.swift */; };
 		7AC5560D4C638BED749CD1C9 /* CanvasLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3C2CFE40B2026943B5E8059 /* CanvasLayout.swift */; };
 		7AF54697440A9A67AFF12C87 /* CanvasTidyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4212AEE1C33B2959ACDED00 /* CanvasTidyTests.swift */; };
 		7C033DF457015062D2F77CD1 /* CanvasDrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FD61ED8BD3E04B223F2FA78 /* CanvasDrop.swift */; };
@@ -621,6 +623,7 @@
 		7EA2EC2B829AE947997FD11C /* CanvasPageSnapshots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPageSnapshots.swift; sourceTree = "<group>"; };
 		7F98EC8845AFA8A1476458F3 /* CanvasVisibleCardsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasVisibleCardsTests.swift; sourceTree = "<group>"; };
 		7FD1105C811101E44B91CD44 /* HiddenPaneGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HiddenPaneGeometryTests.swift; sourceTree = "<group>"; };
+		804A02FC888A335BAD85C00A /* MeetingAnchors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingAnchors.swift; sourceTree = "<group>"; };
 		8119E7D9DA295AE78BC5EF5D /* CanvasDropTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDropTests.swift; sourceTree = "<group>"; };
 		819D546D01432ADD10CAFD15 /* ProjectTabTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTabTests.swift; sourceTree = "<group>"; };
 		829F0009E848C60888743B4B /* MentionPopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionPopover.swift; sourceTree = "<group>"; };
@@ -773,6 +776,7 @@
 		EAB8898C08D2730345688C09 /* HeaderMenuButtonTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeaderMenuButtonTests.swift; sourceTree = "<group>"; };
 		EAD443CC703258050F7EC610 /* CanvasPageDragOriginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPageDragOriginTests.swift; sourceTree = "<group>"; };
 		EB0B459EB3C100D07716A611 /* CanvasOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasOverlayView.swift; sourceTree = "<group>"; };
+		EBBE74620B47E8414B209A08 /* FolioType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolioType.swift; sourceTree = "<group>"; };
 		ED144519BADFC5F999653A16 /* CanvasSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSelectionTests.swift; sourceTree = "<group>"; };
 		EDC7E15FF269CB566FAAFAE1 /* CanvasPageHandover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPageHandover.swift; sourceTree = "<group>"; };
 		EEEDE19C6B6B80451B973E49 /* CanvasPictureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPictureView.swift; sourceTree = "<group>"; };
@@ -1001,6 +1005,7 @@
 				95CDFFCA4CCB643F40910496 /* FolioServices.swift */,
 				20AA79016760E53C63826A34 /* LinkTitleLoader.swift */,
 				84A8DE07C53FA9ECB9C061BC /* Log.swift */,
+				804A02FC888A335BAD85C00A /* MeetingAnchors.swift */,
 				68F2B4C2116B0B1C0993F76E /* MeetingNotes.swift */,
 				B358A62B026F88C33AA9FF42 /* MenubarRing.swift */,
 				17912D894364C3FC66AC8134 /* ObsidianLink.swift */,
@@ -1155,6 +1160,7 @@
 				B5EA2C568B8EE5A4722910B4 /* CrossingBench.swift */,
 				CBDFED4C5CC568ED9A02844D /* DisplayModes.swift */,
 				C83B7F290C0DA5A1B7C427DB /* DisplayTicker.swift */,
+				EBBE74620B47E8414B209A08 /* FolioType.swift */,
 				E973D36CA5E6F39110E907DE /* FrameMeter.swift */,
 				AE94A27BEC038FA8D6A21C77 /* Motion.swift */,
 				2E52B44B7F4AC0E0782F167C /* MouseMonitors.swift */,
@@ -1567,6 +1573,7 @@
 				ACB9FD4F00C994B9E09610E1 /* FocusPanelRequests.swift in Sources */,
 				D7206A459F3E4EB3669D1CA6 /* FocusPanelView.swift in Sources */,
 				49A95BB70B1150E2172D0AAE /* FolioServices.swift in Sources */,
+				7AB8141EBD42665CFB447197 /* FolioType.swift in Sources */,
 				E7E72625A1DDBBC28E057302 /* FrameMeter.swift in Sources */,
 				DAF071EEEA64B7FE8722D6DB /* GlassBackground.swift in Sources */,
 				86C6B8BD4E1D8B8040540D71 /* HotKey.swift in Sources */,
@@ -1581,6 +1588,7 @@
 				C1920D4ABB2E832B9F975126 /* Log.swift in Sources */,
 				173B371DDE759BC440514326 /* MainMenu.swift in Sources */,
 				A31F5E7E03CD4DC12A3D4B47 /* MarkdownTextEditor.swift in Sources */,
+				759BF67E3037F44DD14446AE /* MeetingAnchors.swift in Sources */,
 				3963CF1F59B7F7CBA7CD6A11 /* MeetingNotes.swift in Sources */,
 				8160DFD7CDF04EB531FD0223 /* MentionPopover.swift in Sources */,
 				9D473605CD7C3F57BBE67E83 /* MenuPictures.swift in Sources */,
