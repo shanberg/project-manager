@@ -349,7 +349,8 @@ private final class DockButton: NSButton {
 
 /// One workspace's mark in the dock, drawn as a Mac app icon: a squircle in the project's colour, lit
 /// from above and set off by a rim and a soft shadow, with the project's icon in white — or the
-/// workspace's initial, for a project with none — and the count of windows out as a badge.
+/// workspace's initial, for a project with none. No badge: the flyout lists the windows, and a count on
+/// every mark was a number to read that told you nothing you'd act on. VoiceOver still hears it.
 @MainActor
 private final class DockMark: NSView {
     let groupKey: String
@@ -358,7 +359,6 @@ private final class DockMark: NSView {
     private let color: NSColor
     private let glyph: NSImage?
     private let initial: String
-    private let count: Int
     private var hovered = false { didSet { needsDisplay = true } }
 
     init(group: CanvasSatelliteDock.Group) {
@@ -367,7 +367,6 @@ private final class DockMark: NSView {
         color = (first?.projectColor ?? .systemGray).usingColorSpace(.sRGB) ?? .systemGray
         glyph = first?.projectMarkIcon.flatMap(Self.white)
         initial = String((group.workspace.isEmpty ? first?.projectTitle ?? "C" : group.workspace).prefix(1)).uppercased()
-        count = group.satellites.count
         let side = CanvasSatelliteDock.markSize
         super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
         translatesAutoresizingMaskIntoConstraints = false
@@ -376,6 +375,7 @@ private final class DockMark: NSView {
         let workspace = group.workspace.isEmpty ? "Canvas" : group.workspace
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
+        let count = group.satellites.count
         setAccessibilityLabel("\(workspace), \(first?.projectTitle ?? ""), \(count) \(count == 1 ? "window" : "windows")")
     }
 
@@ -435,21 +435,6 @@ private final class DockMark: NSView {
             let size = text.size()
             text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2))
         }
-
-        guard count > 1 else { return }
-        let badge = NSAttributedString(string: "\(count)", attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white,
-        ])
-        let size = badge.size()
-        let width = max(16, size.width + 8)
-        let pill = NSRect(x: bounds.maxX - width, y: 0, width: width, height: 16)
-        let capsule = NSBezierPath(roundedRect: pill, xRadius: 8, yRadius: 8)
-        NSColor(white: 0.22, alpha: 0.95).setFill()
-        capsule.fill()
-        NSColor.white.withAlphaComponent(0.85).setStroke()
-        capsule.lineWidth = 1
-        capsule.stroke()
-        badge.draw(at: NSPoint(x: pill.midX - size.width / 2, y: pill.midY - size.height / 2))
     }
 
     override func updateTrackingAreas() {
