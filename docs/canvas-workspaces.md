@@ -1531,7 +1531,7 @@ Built 2026-09-26.
   - Shown for: Pin Tile, Pin, Autoplay, Mute, Keep Running, Pin Address.
   - Not shown for: anything that moves, closes or restores a tile. You see it happen.
   - Opting in: `shows: false` on `store.change`, `setAddress`, or a tiling step.
-- **Still no undo:** prose text size, line width and font, site settings, the refresh interval, satellite windows, page navigation.
+- **Still no undo:** prose text size, line width and font, site settings, the refresh interval, satellite windows (Pop Out, and Gather's windows; Gather's rearranging is undoable), page navigation.
 
 ## 8. What this does to the backlog
 

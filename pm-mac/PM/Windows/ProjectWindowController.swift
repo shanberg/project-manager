@@ -165,6 +165,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         }
         split.ensureCanvas = { [weak self] in self?.ensureProjectCanvas() }
         split.tabModel.openWorkspaceInNewWindow = { [weak self] name in self?.openWorkspaceInNewWindow(name) }
+        split.tabModel.popOutWorkspace = { [weak self] name in self?.split.popOutWorkspace(name) }
         split.replaceCanvas = { [weak self] in self?.replaceUnreadableProjectCanvas() }
         watchCanvasPath()
         watchColor()
@@ -436,6 +437,15 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         let other = WindowManager.shared.open(projectKey: projectKey, reusingExistingWindow: false,
                                               canvas: openedCanvas)
         other.split.openTab(.board(.workspace(name)))
+    }
+
+    /// A window on a project — or on a canvas file, for a board with no project — with one of its
+    /// workspaces up: the project's window if it has one, else a new one. For satellites whose board
+    /// has lost its window (`CanvasSatelliteKeeper.reopen`).
+    static func showWorkspace(_ name: String, projectKey: String?, canvas: URL) {
+        let controller = projectKey.map { WindowManager.shared.open(projectKey: $0) }
+            ?? WindowManager.shared.open(canvas: canvas)
+        controller?.split.openTab(name.isEmpty ? .board(.whole) : .board(.workspace(name)))
     }
 
     func openProjectCanvas() {

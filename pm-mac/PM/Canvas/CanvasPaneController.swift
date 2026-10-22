@@ -161,9 +161,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             self?.refreshTileCommand()
             self?.pageStateChanged()
         }
+        header.popOut = { [weak self] in self?.scroll.board.popOutWorkspace() }
         scroll.board.onTilingChanged = { [weak self] in
             guard let self else { return }
             header.tiling = scroll.board.tilingSummary
+            header.canPopOut = (scroll.board.tiling?.ids.count ?? 0) > 1
             refreshTileCommand()
             rememberViewState()
             keepNamedWorkspaceUpToDate()
@@ -1742,7 +1744,16 @@ extension CanvasPaneController: ProjectTabContent {
         focusBoard()
     }
 
-    func paneWillClose() { teardown() }
+    /// Torn down — unless the window is going on to another project while this board has satellites
+    /// out, which keeps it for them (`CanvasSatelliteKeeper`). Kept, it stops following the window it
+    /// has left and leaves its pages running: those are out in the satellites.
+    func paneWillClose() {
+        guard CanvasSatelliteKeeper.keep(self) else { return teardown() }
+        stopWatchingTheWindow()
+    }
+
+    /// The board this pane shows.
+    var board: CanvasBoardView { scroll.board }
 }
 
 // MARK: - Focus mode

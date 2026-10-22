@@ -208,6 +208,7 @@ targets:
       - path: PM/Canvas/CanvasCardSize.swift
       - path: PM/Canvas/CanvasTiling.swift
       - path: PM/Canvas/CanvasTileSession.swift
+      - path: PM/Canvas/CanvasSatelliteGather.swift
       - path: PM/Canvas/CanvasViewState.swift
       - path: PM/Canvas/CanvasPresentation.swift
       - path: PM/Canvas/CanvasWorkspaces.swift

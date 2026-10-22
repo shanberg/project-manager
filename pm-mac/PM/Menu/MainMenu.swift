@@ -459,6 +459,12 @@ enum MainMenu {
         // The same, by where the cards sit — ⌥B on the canvas. Retitled while it is up.
         menu.addItem(withTitle: "Pick Cards on Canvas", action: #selector(CanvasBoardView.pickCardsOnBoard(_:)),
                      keyEquivalent: "")
+        // The workspace, not a tile: every tile out into a window of its own, and back. See
+        // `CanvasBoardView.popOutWorkspace`.
+        menu.addItem(withTitle: "Pop Out Workspace", action: #selector(CanvasBoardView.popOutWorkspace(_:)),
+                     keyEquivalent: "")
+        menu.addItem(withTitle: "Gather Workspace", action: #selector(CanvasBoardView.gatherWorkspace(_:)),
+                     keyEquivalent: "")
         // Rename with no Name beside it: a workspace is made named (docs/canvas-workspaces.md §7i).
         menu.addItem(withTitle: "Rename Workspace\u{2026}", action: #selector(CanvasBoardView.renameWorkspace(_:)),
                      keyEquivalent: "")

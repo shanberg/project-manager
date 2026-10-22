@@ -55,6 +55,11 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     private var markWidth: NSLayoutConstraint?
     private let titleLabel = NSTextField(labelWithString: "")
     private let hostLabel = NSTextField(labelWithString: "")
+    /// The workspace's name, after the card's: windows from two workspaces of one project share its
+    /// colour, and this is what tells them apart.
+    private let workspaceLabel = NSTextField(labelWithString: "")
+    private let bringBack = NSButton()
+    private let gather = NSButton()
     private let tabs = CanvasSatelliteTabs()
     private var barHeight: NSLayoutConstraint?
     private var backLeading: NSLayoutConstraint?
@@ -63,9 +68,15 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     private var pageWatches: [NSKeyValueObservation] = []
     private var linkPress: URL?
     private var linkMonitor: Any?
-    private var projectTitle: String?
+    /// The project's name, colour and icon, as the header draws them — and the dock, which groups
+    /// satellites by workspace and wants each group dressed as its project.
+    private(set) var projectTitle: String?
+    var projectColor: NSColor? { wash.color?.nsColor }
+    var projectMark: NSImage? { mark.image }
+    /// The project's icon itself, for the dock to draw at its own size and in its own colour.
+    private(set) var projectMarkIcon: ProjectIcon?
 
-    static let headerHeight: CGFloat = 38
+    static let headerHeight: CGFloat = 28
 
     /// Lend `cards` to a new window. Nil when none of them had anything to lend.
     static func open(_ cards: [CanvasNodeView], showing: String?, frame: NSRect?, on board: CanvasBoardView)
@@ -95,18 +106,16 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 320, height: 240)
         window.tabbingMode = .disallowed
-        // An empty compact toolbar, for its title bar: the traffic lights centred in a band the height of
-        // the header, as the project window's unified one centres them in its own. See `fitToTitleBar`.
-        let toolbar = NSToolbar(identifier: "PMSatelliteTitlebar")
-        toolbar.allowsUserCustomization = false
-        toolbar.showsBaselineSeparator = false
-        window.toolbar = toolbar
-        window.toolbarStyle = .unifiedCompact
+        // **A plain title bar, no toolbar**: the header is the title bar's own height, the shortest a
+        // window's top can be. It sat in an empty compact toolbar's taller band, which centred the lights
+        // in 38 points — a satellite is a card on its own, and its top was taking more than a tile's.
+        // See `fitToTitleBar`.
         super.init(window: window)
         window.delegate = self
         window.contentView = content()
         fitToTitleBar()
         watchLinks()
+        watchHover()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -168,6 +177,36 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         }
         if first != cardIDs.first { CanvasSatellites.forget(first, canvas: canvas, workspace: workspace) }
         showTab(min(shown, cards.count - 1))
+        CanvasSatelliteDock.shared.refresh()
+    }
+
+    /// This window as a tile of `session`, for Gather: its cards, the one showing, and the side its
+    /// tabs were on.
+    func tile(in session: CanvasTileSession) -> CanvasTiling.Tile {
+        let ids = cardIDs.filter(session.cards.contains)
+        let showing = shownCard.flatMap { ids.firstIndex(of: $0.node.id) } ?? 0
+        return CanvasTiling.Tile(ids, showing: showing, tabsOnSide: ids.first.map(session.tabsOnSide) ?? false)
+    }
+
+    /// Show — from the card's slot, or the dock: this window forward, at the card's tab.
+    func reveal(_ card: CanvasNodeView) {
+        if let index = cards.firstIndex(where: { $0 === card }), index != shown { showTab(index) }
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Bring Back — from the card's slot: the card home, into the slot it kept. The window's last card
+    /// takes the window with it; one of several leaves its tab, and the rest stay out.
+    func giveBack(_ card: CanvasNodeView) {
+        guard cards.contains(where: { $0 === card }) else { return }
+        guard cards.count > 1 else { return close() }
+        let id = card.node.id
+        let first = cardIDs.first ?? ""
+        card.takeBack()
+        cards.removeAll { $0 === card }
+        if first != cardIDs.first { CanvasSatellites.forget(first, canvas: canvas, workspace: workspace) }
+        showTab(min(shown, cards.count - 1))
+        board?.satelliteReturned([id], showing: id, from: workspace)
+        CanvasSatelliteDock.shared.refresh()
     }
 
     private func showTab(_ index: Int) {
@@ -205,9 +244,11 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
 
         configure(back, "chevron.backward", "Back", #selector(goBack))
         configure(reload, "arrow.clockwise", "Reload", #selector(reloadPage))
-        let home = NSButton()
-        configure(home, "arrow.down.right.and.arrow.up.left", "Put this back in its workspace",
-                  #selector(returnToWorkspace))
+        configure(bringBack, "arrow.down.left", "Bring Back to Workspace", #selector(returnToWorkspace))
+        configure(gather, "rectangle.grid.2x2", "Gather Workspace", #selector(gatherWorkspace))
+        showButtons(false)
+        let home = NSStackView(views: [gather, bringBack])
+        home.spacing = 0
 
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -217,13 +258,17 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         hostLabel.textColor = .secondaryLabelColor
         hostLabel.lineBreakMode = .byTruncatingMiddle
         hostLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        workspaceLabel.font = .systemFont(ofSize: 12)
+        workspaceLabel.textColor = .secondaryLabelColor
+        workspaceLabel.lineBreakMode = .byTruncatingTail
+        workspaceLabel.setContentCompressionResistancePriority(.defaultLow - 2, for: .horizontal)
         mark.translatesAutoresizingMaskIntoConstraints = false
         let markWidth = mark.widthAnchor.constraint(equalToConstant: 16)
         self.markWidth = markWidth
         NSLayoutConstraint.activate([markWidth, mark.heightAnchor.constraint(equalToConstant: 16)])
         tabs.onSelect = { [weak self] in self?.showTab($0) }
         tabs.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
-        let words = NSStackView(views: [mark, titleLabel, hostLabel, tabs])
+        let words = NSStackView(views: [mark, titleLabel, hostLabel, tabs, workspaceLabel])
         words.orientation = .horizontal
         words.alignment = .centerY
         words.spacing = 6
@@ -278,10 +323,11 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         button.bezelStyle = .accessoryBarAction
         button.isBordered = false
         button.imagePosition = .imageOnly
-        button.symbolConfiguration = .init(pointSize: 14, weight: .regular)
+        button.symbolConfiguration = .init(pointSize: 13, weight: .regular)
         button.contentTintColor = .secondaryLabelColor
-        button.widthAnchor.constraint(equalToConstant: 28).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        // Sized for the plain title bar's 28 points, with room above and below.
+        button.widthAnchor.constraint(equalToConstant: 26).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 22).isActive = true
     }
 
     /// One tab per card, when there is more than one: its icon and name. See `CanvasSatelliteTabs`.
@@ -310,7 +356,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
 
     func windowDidExitFullScreen(_ notification: Notification) { fitToTitleBar() }
 
-    private static func symbol(for kind: CanvasItem.Kind?) -> NSImage? {
+    static func symbol(for kind: CanvasItem.Kind?) -> NSImage? {
         let name: String
         switch kind {
         case .page(let host)?:
@@ -354,6 +400,10 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         back.isHidden = page == nil
         reload.isHidden = page == nil
         back.isEnabled = page?.canGoBack == true
+        workspaceLabel.stringValue = workspace.isEmpty ? "" : "· \(workspace)"
+        workspaceLabel.isHidden = workspace.isEmpty
+        bringBack.toolTip = workspace.isEmpty ? "Bring Back" : "Bring Back to \(workspace)"
+        gather.toolTip = workspace.isEmpty ? "Gather" : "Gather \(workspace)"
         rebuildTabs()
         // The Window menu and Mission Control have only this to go on, so it names the project too.
         let named = title.isEmpty ? "Card" : title
@@ -370,6 +420,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         let icon = CanvasProjectNoteCard.notes(forCanvasAt: board.store.url).flatMap { notes in
             (try? String(contentsOf: notes, encoding: .utf8)).flatMap { projectIcon(rawText: $0, notesPath: notes.path) }
         }
+        projectMarkIcon = icon.flatMap { ProjectIconMark.canDraw($0) ? $0 : nil }
         let tint = wash.color?.swiftUIColor
         let drawn: AnyView? = if let icon, ProjectIconMark.canDraw(icon) {
             AnyView(ProjectIconMark(icon: icon, size: 14, tint: tint))
@@ -389,11 +440,56 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         projectTitle = board.boardProject?.title
         mark.toolTip = projectTitle
         describe()
+        CanvasSatelliteDock.shared.refresh()
+    }
+
+    /// ⌘1…⌘9, the same menu items a project window answers: this window's tabs by position, ⌘9 the last.
+    /// Not answered at one card, where there is no row to move along, so the key goes on to whoever
+    /// else wants it.
+    @objc func selectProjectTabByIndex(_ sender: Any?) {
+        guard let slot = (sender as? NSMenuItem)?.tag, cards.count > 1 else { return }
+        showTab(slot == 8 ? cards.count - 1 : slot)
+    }
+
+    /// Nine slots retitled on validation with the tabs' own names, as a project window's are.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard item.action == #selector(selectProjectTabByIndex(_:)) else { return true }
+        let last = item.tag == 8
+        let index = last ? cards.count - 1 : item.tag
+        guard cards.count > 1, index >= 0, index < cards.count else {
+            item.title = last ? "Last Tab" : "Tab \(item.tag + 1)"
+            item.state = .off
+            return false
+        }
+        item.title = last ? "Last Tab" : board?.describeCard(cards[index].node.id)?.title ?? "Card"
+        item.state = index == shown ? .on : .off
+        return true
     }
 
     @objc private func goBack() { page?.goBack() }
     @objc private func reloadPage() { page?.reload() }
     @objc private func returnToWorkspace() { close() }
+    @objc private func gatherWorkspace() { board?.gatherWorkspace() }
+
+    /// The header's two buttons are there only while the pointer is over the window — the title bar
+    /// included: they are for the moment you reach for them, and the rest of the time the header is the
+    /// card's. Tracked on the window's frame view rather than the content, because the title bar is laid
+    /// over the content and took the pointer off it: the buttons went as you reached up for them.
+    private func watchHover() {
+        guard let frame = window?.contentView?.superview else { return }
+        frame.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                             owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { showButtons(true) }
+    override func mouseExited(with event: NSEvent) { showButtons(false) }
+
+    private func showButtons(_ shown: Bool) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            for button in [bringBack, gather] { button.animator().alphaValue = shown ? 1 : 0 }
+        }
+    }
 
     /// Put the window away with its workspace: the content goes back into the cards, and the window is
     /// remembered so the workspace can bring it out again.
@@ -448,7 +544,9 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         if !puttingAway { CanvasSatellites.forget(ids.first ?? "", canvas: canvas, workspace: workspace) }
         for card in cards { card.takeBack() }
         cards = []
-        if !puttingAway { board?.satelliteReturned(ids, showing: showing) }
+        if !puttingAway { board?.satelliteReturned(ids, showing: showing, from: workspace) }
+        CanvasSatelliteDock.shared.refresh()
+        if let board { CanvasSatelliteKeeper.releaseIfDone(board) }
     }
 
     func windowDidMove(_ notification: Notification) { remember() }
@@ -506,6 +604,22 @@ enum CanvasSatellites {
         change(canvas, workspace, in: defaults) { $0[first] = nil }
     }
 
+    /// The workspaces whose window is put away because every tile is out — so a relaunch that brings
+    /// their satellites back puts the window away again, rather than showing a window of Empties.
+    static let poppedOutKey = "PMCanvasPoppedOut"
+
+    static func isPoppedOut(canvas: URL, workspace: String, in defaults: UserDefaults = .standard) -> Bool {
+        defaults.stringArray(forKey: poppedOutKey)?.contains(key(canvas, workspace)) ?? false
+    }
+
+    static func setPoppedOut(_ poppedOut: Bool, canvas: URL, workspace: String, in defaults: UserDefaults = .standard) {
+        var all = Set(defaults.stringArray(forKey: poppedOutKey) ?? [])
+        let key = key(canvas, workspace)
+        guard all.contains(key) != poppedOut else { return }
+        if poppedOut { all.insert(key) } else { all.remove(key) }
+        defaults.set(all.sorted(), forKey: poppedOutKey)
+    }
+
     private static func change(_ canvas: URL, _ workspace: String, in defaults: UserDefaults,
                                _ edit: (inout [String: Data]) -> Void) {
         var all = defaults.dictionary(forKey: defaultsKey) ?? [:]
@@ -523,13 +637,6 @@ enum CanvasSatellites {
 
 // MARK: - The board's half
 
-/// Where a tile moved out to a satellite goes back to: beside which tile, and — for a tab pulled out
-/// of a tile of several — at which place among its tabs.
-struct CanvasSatelliteHome {
-    var placement: CanvasTileSession.Placement?
-    var tabIndex: Int?
-}
-
 extension CanvasBoardView {
     /// Which workspace a satellite belongs to: the named one that is up, or the canvas's own tiling.
     var satelliteScope: String { workspaceName ?? "" }
@@ -539,30 +646,43 @@ extension CanvasBoardView {
         CanvasSatelliteWindow.open.filter { $0.board === self }
     }
 
-    /// Move cards into a window of their own, as its tabs. They leave the tiling, so the rest close up
-    /// round the gap — unless nothing would be left, which a tiling can't be, so they stay as a tile
-    /// that says where its cards have gone.
+    /// Whether every card in the tiling is out in a satellite — a popped-out workspace, however it got
+    /// that way.
+    var isAllOut: Bool {
+        guard let tiling, !tiling.cards.isEmpty else { return false }
+        return tiling.cards.allSatisfy { nodeViews[$0]?.lentTo != nil }
+    }
+
+    /// Move cards into a window of their own, as its tabs.
+    ///
+    /// **They keep their place in the tiling.** Each card's tile stays where it was and shows what is
+    /// out and where (`CanvasSatelliteEmpty`), so the window still says the card belongs here and Bring
+    /// Back has a slot to fill. Taking them out of the tiling — the rest closing up over the gap — left
+    /// people unable to say where a card had gone.
+    ///
+    /// **The last tile out takes the window with it**, as Pop Out does: a window of nothing but Empties
+    /// is in the way of the windows it lists, and the dock is the way back to it. Not for a workspace of
+    /// one tile — the notes, moved out to write beside something, would take the whole project window
+    /// with them — and not while satellites are being brought back out (`restoring`), which put the
+    /// window away only if it was away before (`restoreSatellites`).
     ///
     /// - Parameter frame: where the window goes, in screen coordinates; nil centres it.
     @discardableResult
-    func moveToWindow(_ ids: [String], showing: String? = nil, frame: NSRect? = nil) -> CanvasSatelliteWindow? {
+    func moveToWindow(_ ids: [String], showing: String? = nil, frame: NSRect? = nil,
+                      restoring: Bool = false) -> CanvasSatelliteWindow? {
         let cards = ids.compactMap { nodeViews[$0] }.filter { $0.lentTo == nil }
         guard !cards.isEmpty else { return nil }
-        let home = returnPlacement(for: cards.map(\.node.id))
-        let tabIndex = tiling.flatMap { t in cards.first.map { t.tabs(of: $0.node.id) } }
-            .flatMap { tabs in cards.first.flatMap { tabs.firstIndex(of: $0.node.id) } }
-        // The content goes out first: a tile leaving the tiling is a card the board may stop keeping,
-        // and being lent out is what tells the board to keep it (`isHeldElsewhere`).
-        guard let satellite = CanvasSatelliteWindow.open(cards, showing: showing, frame: frame, on: self)
-        else { return nil }
-        if let tiling {
-            let tiled = satellite.cardIDs.filter(tiling.cards.contains)
-            if !tiled.isEmpty, tiling.cards.count > tiled.count {
-                for id in tiled { satelliteHomes[id] = CanvasSatelliteHome(placement: home, tabIndex: tabIndex) }
-                removeFromTiling(tiled)
-            }
-        }
+        let satellite = CanvasSatelliteWindow.open(cards, showing: showing, frame: frame, on: self)
+        CanvasSatelliteDock.shared.refresh()
+        if !restoring, isAllOut, (tiling?.ids.count ?? 0) > 1 { putWindowAway() }
         return satellite
+    }
+
+    /// The workspace's window off the screen while every tile is out, remembered so a relaunch does the
+    /// same. `showWorkspaceWindow` is the way back.
+    func putWindowAway() {
+        window?.orderOut(nil)
+        CanvasSatellites.setPoppedOut(true, canvas: store.url, workspace: satelliteScope)
     }
 
     /// Move the whole tile holding `id` — every tab of it — into a window of its own.
@@ -573,32 +693,98 @@ extension CanvasBoardView {
         return moveToWindow(tile.cards, showing: tile.shown, frame: frame)
     }
 
-    /// A satellite has come home: its cards go back as one tile of tabs, beside the tile they were next
-    /// to — or into it, for a tab pulled out of one.
-    func satelliteReturned(_ ids: [String], showing: String?) {
-        let homes = ids.compactMap { satelliteHomes.removeValue(forKey: $0) }
-        guard var session = tiling else { return }
-        let back = ids.filter { !session.cards.contains($0) && document.node(id: $0) != nil }
-        guard let first = back.first else { return }
-        let placement = homes.first?.placement.flatMap { session.cards.contains($0.target) ? $0 : nil } ?? nextPlacement
-        session.add(first, at: placement)
-        for id in back.dropFirst() { session.add(id, at: .init(target: first, side: .tab)) }
-        let front = showing.flatMap { back.contains($0) ? $0 : nil } ?? first
-        // A tab goes back to its place among the tabs it left, not onto the end of them.
-        if placement?.side == .tab, let index = homes.first?.tabIndex {
-            for (offset, id) in back.enumerated() { _ = session.moveTab(id, to: index + offset) }
+    /// A satellite has come home. Its cards kept their slots, so there is nothing to place: the tile is
+    /// picked out, at the card that was showing, and the window comes back if Pop Out put it away.
+    ///
+    /// A card whose tile was removed while it was out goes back in beside the selection, as a new card
+    /// would. And nothing is placed when the board has gone on to another workspace since — `scope` is
+    /// where the satellite came from: its cards are in that workspace's saved tiling, and come back
+    /// with it.
+    func satelliteReturned(_ ids: [String], showing: String?, from scope: String) {
+        guard var session = tiling, scope == satelliteScope else { return }
+        let missing = ids.filter { !session.cards.contains($0) && document.node(id: $0) != nil }
+        if let first = missing.first {
+            session.add(first, at: nextPlacement)
+            for id in missing.dropFirst() { session.add(id, at: .init(target: first, side: .tab)) }
+            tiling = session
+            setLayout(session.layout, animated: true)
+            onTilingChanged?()
+            announceTiling()
         }
-        tiling = session
+        if let window, !window.isVisible, !isAllOut {
+            window.orderFront(nil)
+            CanvasSatellites.setPoppedOut(false, canvas: store.url, workspace: satelliteScope)
+        }
+        guard let front = showing.flatMap({ ids.contains($0) ? $0 : nil }) ?? ids.first,
+              session.cards.contains(front) else { return }
         select([front])
-        setLayout(session.layout, animated: true)
-        onTilingChanged?()
-        announceTiling()
-        if back.count > 1 || placement?.side == .tab { showTab(front) }
+        if session.hasTabs(front) { showTab(front) }
     }
 
-    /// Put this board's satellites away, remembering them — its workspace has gone behind another, or
-    /// its window is closing.
+    /// Pop Out Workspace: every tile into a window of its own, each opened over the tile it was — a
+    /// tile of tabs as a window of tabs — and the workspace's window put away, leaving the cards
+    /// themselves on screen. The tiles stay behind as Empties for Gather and Bring Back to fill, and the
+    /// dock (`CanvasSatelliteDock`) is the way back to the window.
+    func popOutWorkspace() {
+        guard (tiling?.ids.count ?? 0) > 1, let window else { return }
+        restoreMaximizedTile(animated: false)
+        guard let session = tiling else { return }
+        let frames = session.tileFrames
+        for tile in session.columns.flatMap(\.tiles) {
+            guard tile.cards.contains(where: { nodeViews[$0]?.lentTo == nil }), let frame = frames[tile.shown]
+            else { continue }
+            moveToWindow(tile.cards, showing: tile.shown,
+                         frame: window.convertToScreen(convert(viewRect(frame), to: nil)), restoring: true)
+        }
+        if isAllOut { putWindowAway() }
+    }
+
+    /// Gather Workspace: every satellite of this workspace home, and its window back.
+    ///
+    /// **With every tile out, the tiling is rebuilt from where the windows are** — columns left to
+    /// right, tiles top to bottom within one (`CanvasSatelliteGather.columns`) — so arranging the
+    /// windows and gathering them is a way of rearranging the workspace. A workspace popped out and left alone
+    /// gathers back into the tiling it came from. With only some out, each fills the slot it kept.
+    /// The rearranging is one step of ⌘Z; the windows are not part of it.
+    func gatherWorkspace() {
+        let out = satellites
+        guard !out.isEmpty else { return showWorkspaceWindow() }
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Gather Workspace", from: undoFrom) }
+        let rebuilt = isAllOut ? tiling.flatMap { session in
+            CanvasSatelliteGather.columns(from: out.compactMap { satellite in
+                satellite.window.map { (satellite.tile(in: session), $0.frame) }
+            })
+        } : nil
+        for satellite in out { satellite.close() }
+        if let rebuilt, var session = tiling,
+           rebuilt.flatMap({ $0.tiles.flatMap(\.cards) }).sorted() == session.cards.sorted() {
+            session.columns = rebuilt
+            session.maximized = nil
+            tiling = session
+            setLayout(session.layout, animated: true)
+            onTilingChanged?()
+            announceTiling()
+        }
+        showWorkspaceWindow()
+    }
+
+    /// This workspace's window forward, at this workspace's tab — from the dock, or Gather.
+    ///
+    /// A board that has lost its window — its window went on to another project while its satellites
+    /// were out (`CanvasSatelliteKeeper`) — asks for a window on its project at this workspace, and the
+    /// board that comes up there takes the satellites over.
+    func showWorkspaceWindow() {
+        CanvasSatellites.setPoppedOut(false, canvas: store.url, workspace: satelliteScope)
+        guard let window else { return CanvasSatelliteKeeper.reopen(self) }
+        if isHiddenOrHasHiddenAncestor, let workspaceName { onGoToWorkspace(workspaceName) }
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Put this board's satellites away, remembering them — the board is leaving its window: the window
+    /// is closing, or the tab it was in has gone. Its tab merely going behind another leaves them out.
     func putSatellitesAway() {
+        guard !CanvasSatelliteKeeper.isKeeping else { return }
         for satellite in satellites { satellite.putAway() }
     }
 
@@ -610,11 +796,20 @@ extension CanvasBoardView {
         guard isTiled else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, window != nil, !isHiddenOrHasHiddenAncestor, isTiled else { return }
+            // A board kept from a window that went on to another project hands its windows over: put
+            // away where they are, and brought out again below on this board.
+            CanvasSatelliteKeeper.adopt(by: self)
+            let out = CanvasSatelliteWindow.open.filter { $0.canvas == self.store.url && $0.workspace == self.satelliteScope }
             for record in CanvasSatellites.records(canvas: store.url, workspace: satelliteScope) {
                 let ids = record.cards.filter { self.document.node(id: $0) != nil }
-                guard !ids.isEmpty, !ids.contains(where: { self.nodeViews[$0]?.lentTo != nil }) else { continue }
+                guard !ids.isEmpty, !ids.contains(where: { self.nodeViews[$0]?.lentTo != nil }),
+                      // Already out from another board on this workspace — a second window on it.
+                      !out.contains(where: { !Set($0.cardIDs).isDisjoint(with: ids) }) else { continue }
                 if ids.contains(where: { self.nodeViews[$0] == nil }) { refreshNodeViews() }
-                moveToWindow(ids, showing: record.showing, frame: record.rect)
+                moveToWindow(ids, showing: record.showing, frame: record.rect, restoring: true)
+            }
+            if isAllOut, CanvasSatellites.isPoppedOut(canvas: store.url, workspace: satelliteScope) {
+                window?.orderOut(nil)
             }
         }
     }
@@ -626,29 +821,6 @@ extension CanvasBoardView {
         if let file = card as? CanvasFileNodeView, let undo = file.projectDisplay.noteUndo { return undo }
         if let content = card.cardContent,
            let undo = CanvasUndoRoute.typingUndo(in: content, boardUndo: store.undoManager) { return undo }
-        return nil
-    }
-
-    /// The place a tile would go back to: into the tile a tab was pulled from, else beside a neighbour
-    /// in its column, else beside the next column.
-    private func returnPlacement(for ids: [String]) -> CanvasTileSession.Placement? {
-        guard let tiling, let first = ids.first, let at = tiling.position(of: first) else { return nil }
-        let column = tiling.columns[at.column].tiles
-        if let stays = column[at.tile].cards.first(where: { !ids.contains($0) }) {
-            return .init(target: stays, side: .tab)
-        }
-        func other(_ tile: CanvasTiling.Tile) -> String? { tile.cards.first { !ids.contains($0) } }
-        if at.tile > 0, let above = other(column[at.tile - 1]) { return .init(target: above, side: .below) }
-        if at.tile + 1 < column.count, let below = other(column[at.tile + 1]) {
-            return .init(target: below, side: .above)
-        }
-        if at.column > 0, let left = tiling.columns[at.column - 1].tiles.first.flatMap(other) {
-            return .init(target: left, side: .right)
-        }
-        if at.column + 1 < tiling.columns.count,
-           let right = tiling.columns[at.column + 1].tiles.first.flatMap(other) {
-            return .init(target: right, side: .left)
-        }
         return nil
     }
 }
@@ -867,4 +1039,21 @@ final class CanvasSatelliteTabButton: NSButton {
             layer?.backgroundColor = hovered && !showing ? NSColor.labelColor.withAlphaComponent(0.07).cgColor : nil
         }
     }
+}
+
+/// A view that says when the pointer comes over it and goes, wherever in it — the satellite's root, for
+/// the header buttons that show on hover.
+@MainActor
+final class CanvasHoverView: NSView {
+    var onHover: (Bool) -> Void = { _ in }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHover(true) }
+    override func mouseExited(with event: NSEvent) { onHover(false) }
 }

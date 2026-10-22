@@ -886,21 +886,21 @@ class CanvasNodeView: NSView {
         return zone.url
     }
 
-    /// Lend the content to `satellite`, leaving word in the card of where it has gone. Nil when there
-    /// is nothing to lend, or it is already out.
+    /// Lend the content to `satellite`, leaving the card's slot to say where it has gone — see
+    /// `CanvasSatelliteEmpty`. Nil when there is nothing to lend, or it is already out.
     func lend(to satellite: CanvasSatelliteWindow) -> NSView? {
         let wasSimplified = isSimplified
         guard lentTo == nil, let content = clip.subviews.first else { return nil }
         lentTo = satellite
         lentContent = content
         content.removeFromSuperview()
-        let away = NSTextField(labelWithString: "In its own window")
-        away.textColor = .secondaryLabelColor
-        away.alignment = .center
+        let away = CanvasSatelliteEmpty(card: self)
         away.translatesAutoresizingMaskIntoConstraints = false
         clip.addSubview(away)
-        NSLayoutConstraint.activate([away.centerXAnchor.constraint(equalTo: clip.centerXAnchor),
-                                     away.centerYAnchor.constraint(equalTo: clip.centerYAnchor)])
+        NSLayoutConstraint.activate([
+            away.topAnchor.constraint(equalTo: clip.topAnchor), away.bottomAnchor.constraint(equalTo: clip.bottomAnchor),
+            away.leadingAnchor.constraint(equalTo: clip.leadingAnchor), away.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
+        ])
         // A card zoomed out to its name comes into the window as itself.
         if wasSimplified { simplificationChanged() }
         return lentContent

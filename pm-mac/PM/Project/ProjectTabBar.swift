@@ -63,6 +63,8 @@ struct ProjectTabBar: View {
     var renameTab: (String, String) -> Void
     /// A second window on this project, showing the workspace.
     var openWorkspaceInNewWindow: (String) -> Void = { _ in }
+    /// Every tile of the workspace out into a window of its own — see `CanvasBoardView.popOutWorkspace`.
+    var popOutWorkspace: (String) -> Void = { _ in }
 
     /// The chip under the pointer, which is the only one that offers its close button. A row of tabs
     /// each carrying a permanent × is a row of things to click by accident — **the current one
@@ -261,6 +263,7 @@ struct ProjectTabBar: View {
         if let name = item.workspaceName {
             WorkspaceCommands(name: name,
                               openInNewWindow: { openWorkspaceInNewWindow(name) },
+                              popOut: { popOutWorkspace(name) },
                               rename: { renameWorkspace(name) },
                               duplicate: { duplicateWorkspace(name) },
                               delete: { deleteWorkspace(name) })
@@ -534,6 +537,9 @@ final class ProjectTabModel {
     /// A second window on the same project, showing this workspace — see `WorkspaceCommands`.
     @ObservationIgnored
     var openWorkspaceInNewWindow: (String) -> Void = { _ in }
+    /// Pop the workspace out, from its chip — see `ProjectSplitViewController.popOutWorkspace`.
+    @ObservationIgnored
+    var popOutWorkspace: (String) -> Void = { _ in }
     /// A chip's label, typed rather than picked. By tab id, because it covers both naming and renaming
     /// and only the tab knows which it was.
     @ObservationIgnored
@@ -568,7 +574,8 @@ struct ProjectTabBarHost: View {
                       duplicateWorkspace: model.duplicateWorkspace,
                       deleteWorkspace: model.deleteWorkspace,
                       renameTab: model.renameTab,
-                      openWorkspaceInNewWindow: model.openWorkspaceInNewWindow)
+                      openWorkspaceInNewWindow: model.openWorkspaceInNewWindow,
+                      popOutWorkspace: model.popOutWorkspace)
     }
 }
 
@@ -589,6 +596,8 @@ struct WorkspaceCommands: View {
     /// belongs to the canvas, not to a window, so there is nothing to take from here. Moving a tab out
     /// waits on whether the row goes back to native tabs, which would bring AppKit's own.
     var openInNewWindow: (() -> Void)?
+    /// Every tile out into a window of its own. A verb on the workspace — never on a tile.
+    var popOut: (() -> Void)?
     var rename: () -> Void
     var duplicate: () -> Void
     var delete: () -> Void
@@ -596,6 +605,11 @@ struct WorkspaceCommands: View {
     var body: some View {
         if let openInNewWindow {
             Button("Open in New Window", action: openInNewWindow)
+        }
+        if let popOut {
+            Button("Pop Out “\(name)”", action: popOut)
+        }
+        if openInNewWindow != nil || popOut != nil {
             Divider()
         }
         Button("Rename “\(name)”…", action: rename)

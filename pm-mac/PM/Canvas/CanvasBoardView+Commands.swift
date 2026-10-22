@@ -1620,6 +1620,9 @@ extension CanvasBoardView {
         restoringMaximized { moveTileToWindow(id) }
     }
 
+    @objc func popOutWorkspace(_ sender: Any?) { popOutWorkspace() }
+    @objc func gatherWorkspace(_ sender: Any?) { gatherWorkspace() }
+
     @objc func moveMenuTabToWindow(_ sender: Any?) {
         guard let id = menuTile else { return }
         restoringMaximized { moveToWindow([id]) }
@@ -2974,6 +2977,10 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             return canRunTileCommand
         case #selector(showCardActions(_:)):
             return actionsTarget != nil
+        case #selector(popOutWorkspace(_:)):
+            return (tiling?.ids.count ?? 0) > 1 && !isAllOut
+        case #selector(gatherWorkspace(_:)):
+            return !satellites.isEmpty
         case #selector(maximizeTile(_:)):
             (item as? NSMenuItem)?.title = maximizeTileTitle
             // Live whenever there is something to put back, or a tile picked out of several to fill

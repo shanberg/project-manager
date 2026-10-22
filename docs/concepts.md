@@ -170,7 +170,16 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Stored on this Mac (UserDefaults `PMCanvasWorkspaces`, by canvas path), never in the `.canvas`.
 - Tabs in a tile: ⌥[ and ⌥]; dragged along the strip or off it.
 - Maximize fills the window with one tile or card. It isn't saved.
-- A satellite is a tile moved out into a window of its own; a tile of tabs becomes a window of tabs. Its content is lent to the window, not reloaded. Satellites are put away and brought back with their workspace (UserDefaults `PMCanvasSatellites`).
+- A satellite is a tile moved out into a window of its own; a tile of tabs becomes a window of tabs. Its content is lent to the window, not reloaded.
+- A tile out keeps its slot in the tiling, shown as an Empty: the card's icon and name, "In a window", Show, Bring Back. Bring Back and closing the window put the card back into that slot.
+- Satellites stay out while another workspace is up, and while their window shows another project: the board they came from is kept, off screen, until their last one comes home or a window shows that workspace again, which takes them over where they are (`CanvasSatelliteKeeper`). They are put away when their window closes or their workspace's tab goes, and brought back with it (UserDefaults `PMCanvasSatellites`).
+- The last tile out — by Pop Out or by hand — puts the workspace's window away. Not for a workspace of one tile. Remembered (UserDefaults `PMCanvasPoppedOut`): a relaunch that brings the satellites back keeps the window away. Showing the window forgets it.
+- Satellite header: the title bar's own height (28 pt, no toolbar). The card's name, then the workspace's. Bring Back (↙) and Gather show while the pointer is over the window, title bar included.
+- Pop Out Workspace: every tile into its own satellite, opened over its tile; the workspace's window is put away. A verb on the workspace, never a tile: the header's button (workspaces of two or more tiles), a workspace chip's menu, and the menu bar's workspace items.
+- Gather Workspace: every satellite of the workspace home, and its window back. With every tile out, the tiling is rebuilt from where the windows are: columns left to right, tiles top to bottom. With some out, each fills its slot. The rearranging is one undo step.
+- Satellite dock: a floating panel at the screen's leading edge while any satellite is out, whichever app is in front, on every Space. Liquid Glass, as the Mac's Dock. One mark per workspace with windows out, any project, drawn as an app icon: a squircle in the project's colour with its icon (or the workspace's initial) in white, the window count as a badge. The flyout is glass tinted toward the project. Hover opens a flyout to the right: workspace and project, Show Window, Gather; a button per window. Clicking the mark shows the window; for a workspace no window shows, it opens the project's window at that workspace.
+- Dock buttons draw their own tooltips (`CanvasDockTip`): the panel never activates Folio, and AppKit shows tooltips only in the active app.
+- Focus hint: hovering a window's button in the flyout rings that window on screen in the project's colour, until the pointer leaves (`CanvasFocusHint`). Used nowhere else.
 
 ## Web card
 

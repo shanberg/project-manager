@@ -408,6 +408,20 @@ final class ProjectSplitViewController: NSSplitViewController {
         applySelectedTab()
     }
 
+    /// Pop Out from a workspace's chip: its tab up, then every tile out. A board just built for the tab
+    /// lays its tiles out a turn or more after it is shown (`CanvasPaneController.goToWorkspace`), so
+    /// this waits for them, briefly.
+    func popOutWorkspace(_ name: String) {
+        openTab(.board(.workspace(name)))
+        func attempt(_ left: Int) {
+            guard let board = canvasPane?.board, board.workspaceName == name else { return }
+            if board.isTiled { return board.popOutWorkspace() }
+            guard left > 0 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { attempt(left - 1) }
+        }
+        attempt(20)
+    }
+
     /// ⌃⇥ / ⌃⇧⇥.
     func cycleTabs(by step: Int) {
         guard tabs.tabs.count > 1 else { return }
@@ -931,7 +945,9 @@ final class ProjectSplitViewController: NSSplitViewController {
         // Every tab was a view of the *old* project, so none of them survive. The window follows this
         // with the new project's own remembered tabs; rebuilding here as well is what keeps the column
         // from being empty for the turn of the run loop in between.
-        contentPane.dropAll()
+        // Satellites stay out across the switch: a board with any out is kept for them rather than torn
+        // down. See `CanvasSatelliteKeeper`.
+        CanvasSatelliteKeeper.keepingSatellitesOut { contentPane.dropAll() }
         applySelectedTab()
         // The sidebar's selection *is* the window's project (see `ProjectSidebar`), so a switch moves
         // it — including a switch that came from somewhere else entirely, like Open Recent. Written

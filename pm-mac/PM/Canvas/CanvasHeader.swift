@@ -41,6 +41,12 @@ final class CanvasHeaderModel {
     /// lines between them gone, looks exactly like a board most of which has been deleted — and the
     /// moment you think that is the moment you stop trusting the feature.
     var tiling: (long: String, short: String)?
+    /// Whether the workspace that is up can be popped out — tiled, with more than one tile. The button
+    /// is the window's, since popping out is a verb on the workspace and never on a tile. See
+    /// `CanvasBoardView.popOutWorkspace`.
+    var canPopOut = false
+    @ObservationIgnored
+    var popOut: () -> Void = {}
     /// The focused tile's controls, or nil when there is no one tile to act on: an untiled board, a
     /// workspace of one tile, or several tiles picked at once. See `CanvasTileCapsule`.
     var focusedTile: TileControls?
@@ -398,6 +404,9 @@ struct CanvasControlCapsule: View {
             // Gone while the field is up: the field is find, and a button beside it that opens find is
             // a second control for the thing you are already doing. ⌘F still pulls the keyboard back.
             // Back only once the field has gone, so the two are never in the capsule together.
+            if model.canPopOut, model.showsBoardControls {
+                HeaderSymbolButton(symbol: "macwindow.on.rectangle", help: "Pop Out Workspace") { model.popOut() }
+            }
             if find.shown == nil, model.showsBoardControls {
                 HeaderSymbolButton(symbol: "magnifyingglass", help: "Find on this canvas") {
                     model.find.isShowing = true
