@@ -74,7 +74,9 @@ final class CanvasSatelliteDock: NSObject {
     static let markSize: CGFloat = 44
     static let markSpacing: CGFloat = 4
     static let dockInset: CGFloat = 6
-    static let dockRadius: CGFloat = 22
+    /// Concentric with the icons: an icon's own corner, plus the distance from its edge to the dock's —
+    /// the 2 points its mark leaves for its shadow and the dock's inset.
+    static var dockRadius: CGFloat { DockMark.cornerRadius + 2 + dockInset }
     static let flyoutRadius: CGFloat = 16
     private var flyoutSize = NSSize.zero
 
@@ -162,6 +164,21 @@ final class CanvasSatelliteDock: NSObject {
 
     private func makePanel() -> NSPanel {
         let panel = Self.floatingPanel()
+        // Dragged by any mark, or the glass between them; where it is left is remembered (`Place`).
+        panel.isMovableByWindowBackground = true
+        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.remember() }
+        }
+        // A display plugged in, unplugged or rearranged: the dock checks it is still somewhere it can be
+        // seen, on the screen it was left on if that is still here.
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let panel = self.panel, panel.isVisible else { return }
+                self.closeFlyout()
+                self.place(panel)
+            }
+        }
         column.orientation = .vertical
         column.spacing = Self.markSpacing
         let inset = Self.dockInset
@@ -172,23 +189,69 @@ final class CanvasSatelliteDock: NSObject {
         return panel
     }
 
-    /// At the leading edge of the screen the pointer is on, halfway down.
+    /// Where the dock was dragged to: which screen, how far in from its leading edge, and where its
+    /// middle sits as a fraction of the screen's height — so a screen of another size, or the same one
+    /// arranged differently, keeps it roughly where it was put.
+    struct Place: Codable, Equatable {
+        var screen: String
+        var x: Double
+        var middle: Double
+    }
+
+    static let placeKey = "PMSatelliteDockPlace"
+    /// Set while the dock moves itself, which is not a place to remember.
+    private var placing = false
+
+    static func id(of screen: NSScreen) -> String {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber).map { "\($0)" }
+            ?? screen.localizedName
+    }
+
+    /// Where it was put, if that screen is here; else at the leading edge of the screen the pointer is
+    /// on, halfway down. Always wholly inside the screen's visible frame.
     private func place(_ panel: NSPanel) {
         let size = column.fittingSize
-        let pointer = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main
-        else { return }
-        let visible = screen.visibleFrame
-        let origin = NSPoint(x: visible.minX + Self.margin, y: (visible.midY - size.height / 2).rounded())
-        // Not moved for a change of size alone once it is up: it grows about its middle, and only a
-        // first showing or a change of screen sends it to the edge again.
-        if panel.isVisible, let current = panel.screen, current == screen {
-            let middle = panel.frame.midY
-            panel.setFrame(NSRect(x: panel.frame.minX, y: (middle - size.height / 2).rounded(),
-                                  width: size.width, height: size.height), display: true)
+        let saved = UserDefaults.standard.data(forKey: Self.placeKey).flatMap { try? JSONDecoder().decode(Place.self, from: $0) }
+        var frame: NSRect
+        if let saved, let screen = NSScreen.screens.first(where: { Self.id(of: $0) == saved.screen }) {
+            let visible = screen.visibleFrame
+            let middle = visible.minY + visible.height * saved.middle
+            frame = NSRect(x: visible.minX + saved.x, y: middle - size.height / 2, width: size.width, height: size.height)
+            frame = Self.clamp(frame, into: visible)
         } else {
-            panel.setFrame(NSRect(origin: origin, size: size), display: true)
+            let pointer = NSEvent.mouseLocation
+            guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main else { return }
+            let visible = screen.visibleFrame
+            // Grown about its middle while it is up on a screen still here; sent to the edge otherwise.
+            if panel.isVisible, let current = panel.screen, NSScreen.screens.contains(current) {
+                frame = NSRect(x: panel.frame.minX, y: panel.frame.midY - size.height / 2, width: size.width, height: size.height)
+                frame = Self.clamp(frame, into: current.visibleFrame)
+            } else {
+                frame = NSRect(x: visible.minX + Self.margin, y: visible.midY - size.height / 2,
+                               width: size.width, height: size.height)
+            }
         }
+        frame.origin.y = frame.origin.y.rounded()
+        placing = true
+        panel.setFrame(frame, display: true)
+        placing = false
+    }
+
+    /// The dock has been dragged: remember where, on the screen it was left on.
+    private func remember() {
+        guard !placing, let panel, let screen = panel.screen else { return }
+        let visible = screen.visibleFrame
+        let place = Place(screen: Self.id(of: screen), x: Double(panel.frame.minX - visible.minX),
+                          middle: Double((panel.frame.midY - visible.minY) / max(1, visible.height)))
+        if let data = try? JSONEncoder().encode(place) { UserDefaults.standard.set(data, forKey: Self.placeKey) }
+        closeFlyout()
+    }
+
+    static func clamp(_ frame: NSRect, into visible: NSRect) -> NSRect {
+        var frame = frame
+        frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
+        frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
+        return frame
     }
 
     // MARK: The flyout
@@ -203,7 +266,11 @@ final class CanvasSatelliteDock: NSObject {
         }
         let markOnScreen = anchor.convertToScreen(mark.convert(mark.bounds, to: nil))
         let size = flyoutSize
-        let origin = NSPoint(x: anchor.frame.maxX + 6, y: (markOnScreen.maxY - size.height + 2).rounded())
+        // To the right of the dock, unless the dock has been dragged to where there is no room there.
+        let visible = anchor.screen?.visibleFrame ?? .infinite
+        let right = anchor.frame.maxX + 6
+        let x = right + size.width <= visible.maxX ? right : anchor.frame.minX - 6 - size.width
+        let origin = NSPoint(x: x, y: (markOnScreen.maxY - size.height + 2).rounded())
         flyout.setFrame(NSRect(origin: origin, size: size), display: true)
         flyout.orderFront(nil)
     }
@@ -218,6 +285,7 @@ final class CanvasSatelliteDock: NSObject {
     private func closeFlyout() {
         hideFlyout?.cancel()
         CanvasFocusHint.shared.hide()
+        CanvasWindowGhost.shared.end()
         CanvasDockTip.shared.hide()
         flyout?.orderOut(nil)
         flyoutKey = nil
@@ -242,8 +310,7 @@ final class CanvasSatelliteDock: NSObject {
 
         let name = NSTextField(labelWithString: group.title)
         name.font = .systemFont(ofSize: 13, weight: .semibold)
-        name.lineBreakMode = .byTruncatingTail
-        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        Self.fitted(name, upTo: 260)
         let show = Self.button("macwindow", "Show Window") { [weak self] in self?.show(group) }
         let header = NSStackView(views: [name, Self.spacer(), show])
         header.spacing = 6
@@ -257,16 +324,18 @@ final class CanvasSatelliteDock: NSObject {
         flyoutSize = NSSize(width: max(220, fitted.width), height: fitted.height)
         // Glass tinted toward the project's colour: a flavour of its board, as its windows' headers lie
         // on its wash.
+        // The window takes its new size first, keeping its top where it was, and only then the glass is
+        // laid in, filling it. The other way round, the glass went in at the new size inside a content
+        // view still at the old one, and the resize after added the difference to it a second time — a
+        // flyout refilled at another size drew its contents too big, clipped at its edges.
+        var frame = flyout.frame
+        frame.origin.y += frame.height - flyoutSize.height
+        frame.size = flyoutSize
+        flyout.setFrame(frame, display: false)
         let glass = Self.glass(radius: Self.flyoutRadius, tint: group.color, holding: rows)
-        glass.frame = NSRect(origin: .zero, size: flyoutSize)
+        glass.frame = content.bounds
         glass.autoresizingMask = [.width, .height]
         content.addSubview(glass)
-        if flyout.isVisible {
-            var frame = flyout.frame
-            frame.origin.y += frame.height - flyoutSize.height
-            frame.size = flyoutSize
-            flyout.setFrame(frame, display: true)
-        }
     }
 
     /// A workspace with windows out: its name, a button per window — ringing that window on the screen
@@ -275,8 +344,7 @@ final class CanvasSatelliteDock: NSObject {
         let label = NSTextField(labelWithString: workspace.name.isEmpty ? "Canvas" : workspace.name)
         label.font = .systemFont(ofSize: 11)
         label.textColor = .secondaryLabelColor
-        label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        Self.fitted(label, upTo: 140)
         let buttons: [NSView] = workspace.satellites.map { satellite in
             let id = satellite.shownCard?.node.id
             let described = id.flatMap { satellite.board?.describeCard($0) }
@@ -284,14 +352,19 @@ final class CanvasSatelliteDock: NSObject {
             let more = satellite.cards.count > 1 ? " and \(satellite.cards.count - 1) more" : ""
             let button = Self.button(nil, title + more) { [weak satellite] in
                 CanvasFocusHint.shared.hide()
+                CanvasWindowGhost.shared.keep()
                 guard let satellite, let card = satellite.shownCard else { return }
                 satellite.reveal(card)
             }
+            // Which window it is: a ring round it, and — if other windows are over it — the window
+            // itself brought up, faintly, until the pointer leaves.
             button.onHover = { [weak satellite] over in
                 if over, let window = satellite?.window {
+                    CanvasWindowGhost.shared.show(window)
                     CanvasFocusHint.shared.show(around: window, color: satellite?.projectColor)
                 } else {
                     CanvasFocusHint.shared.hide()
+                    CanvasWindowGhost.shared.end()
                 }
             }
             button.image = CanvasSatelliteWindow.symbol(for: described?.kind)?
@@ -305,6 +378,16 @@ final class CanvasSatelliteDock: NSObject {
         row.spacing = 2
         row.setCustomSpacing(8, after: label)
         return row
+    }
+
+    /// A label measured at its full width, up to `limit`, past which it truncates. The flyout is sized
+    /// by its fitting size, the smallest its constraints allow, and a label that was allowed to give way
+    /// was measured narrower than its words and drawn clipped.
+    private static func fitted(_ label: NSTextField, upTo limit: CGFloat) {
+        label.lineBreakMode = .byTruncatingTail
+        let width = label.widthAnchor.constraint(equalToConstant: min(limit, ceil(label.intrinsicContentSize.width)))
+        width.priority = .init(999)
+        width.isActive = true
     }
 
     private static func spacer() -> NSView {
@@ -429,6 +512,9 @@ private final class DockMark: NSView {
     private let initial: String
     private var hovered = false { didSet { needsDisplay = true } }
 
+    /// The icon's corner: a Mac app icon's proportion of corner to side.
+    static var cornerRadius: CGFloat { (CanvasSatelliteDock.markSize - 4) * 0.225 }
+
     init(group: CanvasSatelliteDock.Group) {
         groupKey = group.key
         color = (group.color ?? .systemGray).usingColorSpace(.sRGB) ?? .systemGray
@@ -460,8 +546,7 @@ private final class DockMark: NSView {
 
     override func draw(_ dirty: NSRect) {
         let tile = bounds.insetBy(dx: 2, dy: 2)
-        // The proportion of a Mac app icon's corner to its side.
-        let radius = tile.width * 0.225
+        let radius = Self.cornerRadius
         let shape = NSBezierPath(roundedRect: tile, xRadius: radius, yRadius: radius)
 
         NSGraphicsContext.saveGraphicsState()
@@ -522,9 +607,29 @@ private final class DockMark: NSView {
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) {}
+
+    /// A press that moves more than a few points drags the dock — the marks are most of it — and one
+    /// that doesn't is a click.
+    private var press: NSEvent?
+    private var dragging = false
+
+    override func mouseDown(with event: NSEvent) {
+        press = event
+        dragging = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !dragging, let press, let window else { return }
+        let start = press.locationInWindow, now = event.locationInWindow
+        guard hypot(now.x - start.x, now.y - start.y) > 3 else { return }
+        dragging = true
+        onHover(false)
+        window.performDrag(with: press)
+    }
+
     override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick(groupKey) }
+        defer { press = nil }
+        if !dragging, bounds.contains(convert(event.locationInWindow, from: nil)) { onClick(groupKey) }
     }
 }
 
@@ -605,13 +710,20 @@ final class CanvasFocusHint {
 
     static let outset: CGFloat = 4
     static let lineWidth: CGFloat = 3
+    /// Room round the ring for its glow, which was cut off flat at the overlay's edges when the overlay
+    /// was only as big as the ring.
+    static let glow: CGFloat = 12
+    /// A plain titled window's corner (a satellite has no toolbar). The ring follows it, concentric.
+    static let windowRadius: CGFloat = 16
 
     func show(around window: NSWindow, color: NSColor?) {
         let panel = self.panel ?? makePanel()
-        let frame = window.frame.insetBy(dx: -Self.outset, dy: -Self.outset)
+        let margin = Self.outset + Self.glow
+        let frame = window.frame.insetBy(dx: -margin, dy: -margin)
         panel.setFrame(frame, display: false)
-        let bounds = CGRect(origin: .zero, size: frame.size).insetBy(dx: Self.lineWidth / 2, dy: Self.lineWidth / 2)
-        let radius = 12 + Self.outset
+        let inset = Self.glow + Self.lineWidth / 2
+        let bounds = CGRect(origin: .zero, size: frame.size).insetBy(dx: inset, dy: inset)
+        let radius = Self.windowRadius + Self.outset - Self.lineWidth / 2
         ring.frame = CGRect(origin: .zero, size: frame.size)
         ring.path = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
         let tint = color ?? .controlAccentColor
@@ -648,5 +760,80 @@ final class CanvasFocusHint {
         panel.contentView = view
         self.panel = panel
         return panel
+    }
+}
+
+/// A window under others, brought up for as long as the pointer is on its button in the dock's flyout —
+/// faint, a ghost of itself — and put back exactly where it was in the stack when the pointer leaves.
+/// Clicking the button keeps it up, as the window it is (`keep`).
+///
+/// Only for a window that is hidden: wholly covered, or with as much as 40% of it under windows above
+/// it. One you can already see is shown by the ring alone (`CanvasFocusHint`).
+@MainActor
+final class CanvasWindowGhost {
+    static let shared = CanvasWindowGhost()
+    private weak var window: NSWindow?
+    /// The window that was just above it, to put it back under.
+    private var above: Int?
+    private var alpha: CGFloat = 1
+
+    static let opacity: CGFloat = 0.85
+    static let coveredEnough: CGFloat = 0.4
+
+    var ghosted: NSWindow? { window }
+
+    func show(_ window: NSWindow) {
+        end()
+        guard window.isVisible, Self.isHidden(window) else { return }
+        self.window = window
+        above = Self.windowJustAbove(window)
+        alpha = window.alphaValue
+        window.alphaValue = Self.opacity
+        window.orderFrontRegardless()
+    }
+
+    /// Back where it was, as it was.
+    func end() {
+        guard let window else { return }
+        window.alphaValue = alpha
+        if let above { window.order(.below, relativeTo: above) }
+        self.window = nil
+        above = nil
+    }
+
+    /// Chosen: it stays up, solid.
+    func keep() {
+        window?.alphaValue = alpha
+        window = nil
+        above = nil
+    }
+
+    /// The windows over this one, front to back, as the window server has them: other apps' too.
+    private static func windowsAbove(_ window: NSWindow) -> [[String: Any]] {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .excludeDesktopElements],
+                                              CGWindowID(window.windowNumber)) as? [[String: Any]] ?? []
+        // Ordinary windows only: not the menu bar, the dock's own panels, or anything else floating.
+        return list.filter { ($0[kCGWindowLayer as String] as? Int) == 0 && ($0[kCGWindowAlpha as String] as? Double ?? 1) > 0 }
+    }
+
+    static func isHidden(_ window: NSWindow) -> Bool {
+        if !window.occlusionState.contains(.visible) { return true }
+        guard let primary = NSScreen.screens.first?.frame.height else { return false }
+        let frame = window.frame
+        let area = frame.width * frame.height
+        guard area > 0 else { return false }
+        // The window server measures from the top of the primary screen; AppKit from the bottom.
+        let covered = windowsAbove(window).compactMap { info -> CGFloat? in
+            guard let bounds = info[kCGWindowBounds as String] as? [String: Double],
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return nil }
+            let flipped = NSRect(x: rect.minX, y: primary - rect.maxY, width: rect.width, height: rect.height)
+            let overlap = flipped.intersection(frame)
+            return overlap.isNull ? 0 : overlap.width * overlap.height
+        }.max() ?? 0
+        return covered >= area * coveredEnough
+    }
+
+    private static func windowJustAbove(_ window: NSWindow) -> Int? {
+        windowsAbove(window).last?[kCGWindowNumber as String] as? Int
     }
 }
