@@ -51,6 +51,8 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// Watches the project's undo stack, which is how this card knows an edit happened to it — from
     /// here, from the project's own window, or from anywhere else holding the same store.
     private var projectEdits: ObservationRelay?
+    /// Wakes a note that drew as prose because the project scan hadn't landed yet.
+    private var indexWatch: ObservationRelay?
     private var lastUndoDepth = 0
     /// The listing this card shows when its path is a folder, watched while the card is up. See
     /// `CanvasFolderCard`.
@@ -61,6 +63,18 @@ final class CanvasFileNodeView: CanvasNodeView {
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
         contentChanged()
+        // Whether a note is a project card turns on `ProjectIndex.waitRoots`, which a background scan
+        // fills in. A card built before the scan lands (launch, workspace restore) resolves no project
+        // and draws its file as prose, and nothing else would ask it to look again.
+        //
+        // Only a *newly resolvable* project rebuilds. A scan that comes back empty must not flip a card
+        // that is already formatted back to prose.
+        indexWatch = ObservationRelay(tracking: { _ = ProjectIndex.shared.waitRoots }) { [weak self] in
+            guard let self, projectStore == nil,
+                  let url = location.url,
+                  CanvasProjectSource.projectKey(for: url) != nil else { return }
+            contentChanged()
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

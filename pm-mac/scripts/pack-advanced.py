@@ -21,10 +21,13 @@ Emitted shape, keyed by domain, "*" for rules that apply everywhere:
     ["ht",  selector, text]      :has-text(...) — hide matches whose text contains `text`
     ["jp",  paths, required]     json-prune — delete `paths` from parsed JSON carrying `required`
     ["xhr", pattern]             no-xhr-if — answer matching XHRs with an empty 200
+    ["xp",  match, required, url]
+                                 xml-prune — remove `match` (a selector, or xpath(...)) from XML
+                                 fetched from `url`, when it carries `required`
 
-An optional third argument names a list taken *only* for json-prune and no-xhr-if. AdGuard Base is
-used this way: it is the list that keeps up with streaming sites' server-stitched ads, which only
-those two can reach, but the whole of it would be twice the rules PM ships today.
+An optional third argument names a list taken *only* for json-prune, no-xhr-if and xml-prune.
+AdGuard Base is used this way: it is the list that keeps up with streaming sites' server-stitched
+ads, which only those three can reach, but the whole of it would be twice the rules PM ships today.
 """
 import collections
 import json
@@ -41,8 +44,9 @@ HAS_TEXT = re.compile(r'^(.*?):has-text\(\s*(.*?)\s*\)\s*$')
 KEEP = {"ubo-set-cookie": "c", "ubo-set-cookie-reload": "c",
         "ubo-set-local-storage-item": "l", "ubo-set-session-storage-item": "s",
         "ubo-json-prune": "jp", "json-prune": "jp",
-        "ubo-no-xhr-if": "xhr", "prevent-xhr": "xhr"}
-DATA_RULES = {"jp", "xhr"}
+        "ubo-no-xhr-if": "xhr", "prevent-xhr": "xhr",
+        "ubo-xml-prune": "xp", "xml-prune": "xp"}
+DATA_RULES = {"jp", "xhr", "xp"}
 
 
 def entry(kind, args):
@@ -62,6 +66,10 @@ def entry(kind, args):
         if len(args) > 2 and args[2].strip():
             return None, "no-xhr-if with response"
         return ["xhr", args[1]], None
+    if kind == "xp":
+        if len(args) < 2 or not args[1].strip():
+            return None, "xml-prune without selector"
+        return ["xp", args[1], args[2] if len(args) > 2 else "", args[3] if len(args) > 3 else ""], None
     if len(args) < 3:
         return None, args[0]
     return [kind, args[1], args[2]], None

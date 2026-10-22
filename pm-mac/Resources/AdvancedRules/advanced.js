@@ -59,17 +59,28 @@
     // Streaming sites stitch their ads into the video server-side, so no request can be refused and
     // no element hidden. What can be done is to edit the playback data before the player reads it:
     // delete the ad-stitched manifest and the player falls back to the clean one. Paths are dotted,
-    // with "*" or "[]" standing for every key or element at that level.
+    // with "*" or "[]" standing for every key or element at that level. "[-]" is uBO's array form:
+    // `a.[-].b` takes out the elements of `a` that have `b`, rather than deleting `b` from each.
     var pruneRules = [];
 
     function pathsOf(list) {
         return String(list || "").split(/\s+/).filter(Boolean).map(function (p) { return p.split("."); });
     }
 
-    // Visit every value `parts` names below `node`; `leaf(owner, key)` is handed each one found.
+    // Visit every value `parts` names below `node`; `leaf(owner, key, splice)` is handed each one
+    // found, with `splice` set when it is an array element "[-]" picked out to be removed whole.
     function walk(node, parts, index, leaf) {
         if (node === null || typeof node !== "object") return;
         var key = parts[index];
+        if (key === "[-]") {
+            if (!Array.isArray(node)) return;
+            var rest = parts.slice(index + 1);
+            // Back to front, so removing one leaves the indices still to visit where they were.
+            for (var n = node.length - 1; n >= 0; n--) {
+                if (rest.length === 0 || has(node[n], rest)) leaf(node, n, true);
+            }
+            return;
+        }
         var keys = key === "*" || key === "[]" ? Object.keys(node) : [key];
         for (var i = 0; i < keys.length; i++) {
             if (!Object.prototype.hasOwnProperty.call(node, keys[i])) continue;
@@ -91,7 +102,10 @@
                 var rule = pruneRules[i];
                 if (!rule.required.every(function (p) { return has(value, p); })) continue;
                 for (var j = 0; j < rule.remove.length; j++) {
-                    walk(value, rule.remove[j], 0, function (owner, key) { delete owner[key]; });
+                    walk(value, rule.remove[j], 0, function (owner, key, splice) {
+                        if (splice) owner.splice(key, 1);
+                        else delete owner[key];
+                    });
                 }
             }
         } catch (e) {}   // never let a rule break the page's own parse
@@ -158,6 +172,144 @@
                 });
             }, 0);
         };
+    }
+
+    // ---- xml-prune ----------------------------------------------------------------------------
+    // The same idea as json-prune, for players whose ads are stitched into the DASH manifest
+    // itself: take the ad Periods out of the .mpd before the player reads it. A rule names what to
+    // remove — a CSS selector, or `xpath(...)`, which can also pick out attributes — an optional
+    // selector the document must carry first, and the URLs it applies to.
+    var xmlRules = [];
+
+    // The rules whose URL pattern `url` matches, or none.
+    function xmlRulesFor(url) {
+        var target = String(url || "");
+        return xmlRules.filter(function (rule) { return rule.url.test(target); });
+    }
+
+    // `text` with every rule in `matched` applied, or `text` itself when none of them removed
+    // anything — so a manifest no rule touches reaches the player byte for byte as it was sent.
+    function pruneXML(text, matched) {
+        if (matched.length === 0 || typeof text !== "string" || text.trim().charAt(0) !== "<") return text;
+        try {
+            var doc = new DOMParser().parseFromString(text, "text/xml");
+            if (doc.getElementsByTagName("parsererror").length > 0) return text;
+            var removed = 0;
+            for (var i = 0; i < matched.length; i++) {
+                var rule = matched[i];
+                if (rule.required && !doc.querySelector(rule.required)) continue;
+                var nodes = [];
+                if (rule.xpath) {
+                    var found = doc.evaluate(rule.xpath, doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+                    for (var j = 0; j < found.snapshotLength; j++) nodes.push(found.snapshotItem(j));
+                } else {
+                    nodes = Array.prototype.slice.call(doc.querySelectorAll(rule.selector));
+                }
+                // All found before any is removed: one expression can name a Period and an
+                // attribute of the same Period, and the second must not be looked for in a hole.
+                for (var k = 0; k < nodes.length; k++) {
+                    var node = nodes[k];
+                    if (node.nodeType === 2) {
+                        if (node.ownerElement) node.ownerElement.removeAttributeNode(node);
+                    } else if (node.parentNode) {
+                        node.parentNode.removeChild(node);
+                    }
+                    removed++;
+                }
+            }
+            return removed > 0 ? new XMLSerializer().serializeToString(doc) : text;
+        } catch (e) {
+            return text;                        // never let a rule break the player's manifest
+        }
+    }
+
+    function installXMLPrune() {
+        if (xmlRules.length === 0) return;
+
+        if (window.fetch && window.Response) {
+            var fetch = window.fetch;
+            window.fetch = function (input) {
+                var requested = input instanceof Request ? input.url : String(input);
+                var matched = xmlRulesFor(requested);
+                var pending = fetch.apply(this, arguments);
+                if (matched.length === 0) return pending;
+                return pending.then(function (response) {
+                    return response.clone().text().then(function (text) {
+                        var pruned = pruneXML(text, matched);
+                        if (pruned === text) return response;
+                        var edited = new Response(pruned, {
+                            status: response.status, statusText: response.statusText,
+                            headers: response.headers,
+                        });
+                        // A new Response has no URL of its own, and a DASH player resolves the
+                        // manifest's relative BaseURLs against it.
+                        try {
+                            Object.defineProperties(edited, {
+                                url: { value: response.url }, type: { value: response.type },
+                                redirected: { value: response.redirected },
+                            });
+                        } catch (e) {}
+                        return edited;
+                    }, function () { return response; });
+                });
+            };
+        }
+
+        if (window.XMLHttpRequest) {
+            var proto = XMLHttpRequest.prototype;
+            var open = proto.open;
+            var textOf = Object.getOwnPropertyDescriptor(proto, "responseText").get;
+            var responseOf = Object.getOwnPropertyDescriptor(proto, "response").get;
+            proto.open = function (method, url) {
+                var matched = xmlRulesFor(url);
+                // An XHR can be opened again for another URL; what was set up for the last one
+                // must not outlive it.
+                try {
+                    delete this.responseText;
+                    delete this.response;
+                } catch (e) {}                  // no-xhr-if's answer is fixed; nothing to undo
+                if (matched.length > 0) {
+                    // Getters on the instance rather than a listener: the player's own listener
+                    // may well be registered first, and a getter is read whenever it reads.
+                    var text = null;
+                    var buffer = null;
+                    var prunedText = function (xhr) {
+                        if (text === null) text = pruneXML(textOf.call(xhr), matched);
+                        return text;
+                    };
+                    // Players that parse manifests themselves often ask for bytes, not text.
+                    var prunedBuffer = function (xhr) {
+                        if (buffer !== null) return buffer;
+                        var raw = responseOf.call(xhr);
+                        buffer = raw;
+                        if (!(raw instanceof ArrayBuffer) || !window.TextDecoder) return buffer;
+                        var decoded = new TextDecoder().decode(raw);
+                        var pruned = pruneXML(decoded, matched);
+                        if (pruned !== decoded) buffer = new TextEncoder().encode(pruned).buffer;
+                        return buffer;
+                    };
+                    try {
+                        Object.defineProperty(this, "responseText", {
+                            configurable: true,
+                            get: function () {
+                                return this.readyState === 4 ? prunedText(this) : textOf.call(this);
+                            },
+                        });
+                        Object.defineProperty(this, "response", {
+                            configurable: true,
+                            get: function () {
+                                if (this.readyState !== 4) return responseOf.call(this);
+                                var type = this.responseType;
+                                if (type === "" || type === "text") return prunedText(this);
+                                if (type === "arraybuffer") return prunedBuffer(this);
+                                return responseOf.call(this);
+                            },
+                        });
+                    } catch (e) {}
+                }
+                return open.apply(this, arguments);
+            };
+        }
     }
 
     // ---- stylesheet ---------------------------------------------------------------------------
@@ -255,12 +407,22 @@
             var xhrPattern = patternOf(rule[1]);
             if (xhrPattern) xhrPatterns.push(xhrPattern);
             break;
+        case "xp":
+            var match = rule[1];
+            var xpath = /^xpath\(([\s\S]*)\)$/.exec(match);
+            var urlPattern = patternOf(rule[3] || "");
+            if (urlPattern) {
+                xmlRules.push({ xpath: xpath ? xpath[1] : null, selector: xpath ? null : match,
+                                required: rule[2] || "", url: urlPattern });
+            }
+            break;
         }
     }
 
     // Before anything else: these have to be in place before the page's first script runs.
     installPrune();
     installXHR();
+    installXMLPrune();
 
     if (document.head || document.documentElement) {
         flushStyle();

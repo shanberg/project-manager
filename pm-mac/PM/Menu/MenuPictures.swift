@@ -24,8 +24,12 @@ enum MenuPictures {
         return parent
     }
 
-    static func symbol(_ name: String, _ label: String) -> NSImage? {
-        NSImage(systemSymbolName: name, accessibilityDescription: label)
+    /// A symbol as a menu draws it. Left at its defaults a symbol is body-sized and regular, which
+    /// sits heavier and larger beside menu text than the text does: one size and weight for every
+    /// menu icon, so they read as the same family.
+    static func symbol(_ name: String, _ label: String?) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: label)?
+            .withSymbolConfiguration(.init(pointSize: 12, weight: .light, scale: .medium))
     }
 
     // MARK: What each choice looks like

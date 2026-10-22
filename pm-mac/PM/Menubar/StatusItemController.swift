@@ -288,7 +288,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func submenu(_ title: String, symbol: String?) -> (item: NSMenuItem, menu: NSMenu) {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         if let symbol {
-            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            item.image = MenuPictures.symbol(symbol, nil)
             Self.forceImageVisible(item)
         }
         let sub = NSMenu(title: title)
@@ -372,7 +372,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 r.image = MenubarRing.image(fraction: recent.fraction, hasProject: true,
                                             showsProgress: recent.kind.showsProgress, tint: nil)
             } else {
-                r.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
+                r.image = MenuPictures.symbol("clock.arrow.circlepath", nil)
             }
             Self.forceImageVisible(r)
             if #available(macOS 14.4, *) { r.subtitle = recentSubtitle(recent) }
@@ -614,7 +614,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if !key.isEmpty { item.keyEquivalentModifierMask = modifiers }
         item.target = self
         if let symbol {
-            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            item.image = MenuPictures.symbol(symbol, nil)
             Self.forceImageVisible(item)
         }
         return item

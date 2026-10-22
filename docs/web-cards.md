@@ -238,6 +238,28 @@ How stable `_suspendPage:` is:
 - `_isSuspended` read 0 while the test page was suspended, so it can't be relied on.
 - If built: check `responds(to:)` and fall back to freezing; route every call on a suspended card's view through one wrapper that resumes first; offer it per site only. Decided 2026-09-25: not now.
 
+## Frame rate, and what filtering costs a page
+
+Measured 2026-09-30 on an M1 Max with a 120 Hz display, with scratch harnesses.
+
+- WebKit rounds page rendering to about 60 fps by default (`PreferPageRenderingUpdatesNear60FPSEnabled`), in a `WKWebView` as in Safari. Figma's desktop app and Chrome run at 120.
+- The card you have stepped into, which includes the focused tile and a card in a satellite, runs at full rate. Every other card stays at 60. See `CanvasPageView.setFullFrameRate`.
+- An animating page at 60 fps: 8% GPU process, 7% web process. At 120: 15% and 12%. A page that isn't animating draws nothing at either rate.
+- A running page reads the preference only when its visibility changes. The card makes WebKit see a one-frame visibility change without hiding anything, so the page gets `visibilitychange` to hidden and back, and keeps focus.
+- Board zoom, a tile's shape mask and the card shadow cost nothing measurable.
+
+| Content rules on a page | Style recalc, 12,000 elements |
+|---|---|
+| none | 17.6 ms |
+| network rules only (119,517) | 17.8 ms |
+| generic hiding only (596 rules, 55,715 selectors) | 20.8 ms |
+| as shipped | 20.8–23.0 ms |
+
+- Generic hiding rules (`css-display-none` without `if-domain`) go into every filtered page as one stylesheet, and every style recalc pays for them. Network rules cost nothing per recalc.
+- Nothing about this has a frequency to lower: the stylesheet is matched on each recalc, and WebKit indexes the selectors.
+- The same selectors run from a script with `querySelectorAll` took 2.7 s per pass on 4,000 elements and 7.9 s on 12,000.
+- Rule lists attach when a page is built, so which pages get generic hiding can only change with a rebuild.
+
 ## Which of the two addresses each command means
 
 Every command on a web card has to answer this, and the answer is not the same one twice in a row. It

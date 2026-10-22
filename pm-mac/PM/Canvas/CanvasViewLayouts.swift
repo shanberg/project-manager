@@ -134,7 +134,7 @@ struct CanvasDayWeek: View {
                                           perHour: perHour, gridHeight: gridHeight, columnWidth: columnWidth)
                                 .padding(.horizontal, 2)
                                 .frame(maxWidth: .infinity, minHeight: gridHeight, maxHeight: gridHeight, alignment: .topLeading)
-                                .background(alignment: .leading) { Rectangle().fill(Color.primary.opacity(0.08)).frame(width: 0.5) }
+                                .background(alignment: .leading) { Rectangle().fill(Color.primary.opacity(0.06)).frame(width: 1) }
                             }
                         }
                         .background(alignment: .topLeading) { hourLines(hours, perHour: perHour) }

@@ -802,11 +802,11 @@ extension CanvasBoardView {
         switch kind {
         case .page(let host):
             return FaviconLoader.shared.menuIcon(for: host)
-                ?? NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
+                ?? MenuPictures.symbol("globe", nil)
         case .file(let symbol), .view(let symbol):
-            return NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            return MenuPictures.symbol(symbol, nil)
         case .text:
-            return NSImage(systemSymbolName: "text.alignleft", accessibilityDescription: nil)
+            return MenuPictures.symbol("text.alignleft", nil)
         }
     }
 

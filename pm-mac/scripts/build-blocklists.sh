@@ -74,7 +74,7 @@ for entry in "${lists[@]}"; do
   printf "    %-14s %7s rules -> %s\n" "$name" "$count" "$packed"
 done
 
-# AdGuard Base, for its json-prune and no-xhr-if rules only: they are how streaming sites'
+# AdGuard Base, for its json-prune, xml-prune and no-xhr-if rules only: they are how streaming sites'
 # server-stitched video ads get removed, and AdGuard is who keeps them current. The rest of the list
 # is not shipped — its network rules alone would double what PM compiles.
 curl -fsSL -o "$work/adguard-base.txt" "https://filters.adtidy.org/extension/safari/filters/2.txt"

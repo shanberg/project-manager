@@ -260,6 +260,71 @@ final class CanvasPageView: WKWebView {
         return answer as? Bool ?? false
     }
 
+    // MARK: Frame rate
+
+    /// Whether the page draws at the display's full rate — 120 Hz on ProMotion — rather than WebKit's
+    /// default of about 60. On for the card you have stepped into, off for the rest.
+    ///
+    /// - WebKit's `PreferPageRenderingUpdatesNear60FPSEnabled` feature is on by default in a `WKWebView`,
+    ///   as in Safari. Figma in a card ran at 60 fps; its desktop app and Chrome run at 120.
+    /// - Measured 2026-09-30 on an M1 Max at 120 Hz: an animating page at 60 fps cost 8% GPU process
+    ///   and 7% web process; at 120, 15% and 12%. Pages that aren't animating draw nothing either way.
+    /// - Private API (`WKPreferences._features`, `_setEnabled:forFeature:`). Checked with
+    ///   `responds(to:)`; missing, pages stay at 60.
+    /// - The setter takes a `BOOL`. `perform(_:with:with:)` passes an `NSNumber` pointer, which reads
+    ///   as true whatever its value — hence the typed call.
+    static func setFullFrameRate(_ on: Bool, in preferences: WKPreferences) {
+        guard let feature = near60Feature else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
+        let setter = unsafeBitCast(preferences.method(for: setEnabled), to: Setter.self)
+        setter(preferences, setEnabled, !on, feature)
+    }
+
+    private static let setEnabled = NSSelectorFromString("_setEnabled:forFeature:")
+
+    private static let near60Feature: NSObject? = {
+        let list = NSSelectorFromString("_features")
+        guard WKPreferences.responds(to: list), WKPreferences.instancesRespond(to: setEnabled),
+              let features = (WKPreferences.self as AnyObject).perform(list)?.takeUnretainedValue()
+                as? [NSObject]
+        else { return nil }
+        return features.first { ($0.value(forKey: "key") as? String) == "PreferPageRenderingUpdatesNear60FPSEnabled" }
+    }()
+
+    /// Change the frame rate of the page already running.
+    ///
+    /// - A running page ignores the preference until its throttling is recomputed, which on macOS
+    ///   means a visibility change. A resize, a reparent, a screen-change notification or
+    ///   `_suspendPage:` doesn't do it.
+    /// - Really hiding the view does, but takes first responder: the page gets `blur`, so a Figma
+    ///   text edit you had just clicked into would end.
+    /// - So the view says it is hidden (`isHiddenOrHasHiddenAncestor`) and tells WebKit, for one
+    ///   frame. Nothing is hidden: first responder, focus and the layers are untouched. The page sees
+    ///   `visibilitychange` to hidden and back, as on a Safari tab switch.
+    /// - Measured: 60.6 → 120.6 fps and back, and the focused `<input>` kept focus.
+    func setFullFrameRate(_ on: Bool) {
+        guard on != fullFrameRate else { return }
+        fullFrameRate = on
+        Self.setFullFrameRate(on, in: configuration.preferences)
+        guard window != nil, !super.isHiddenOrHasHiddenAncestor, !reportsHidden else { return }
+        reportsHidden = true
+        viewDidHide()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+            guard let self, reportsHidden else { return }
+            reportsHidden = false
+            viewDidUnhide()
+        }
+    }
+
+    /// Whether the page is at full frame rate: what it was built with, then what `setFullFrameRate`
+    /// last set. Whoever builds the view with `setFullFrameRate(_:in:)` records it here.
+    var fullFrameRate = false
+
+    /// True for the frame `setFullFrameRate` spends telling WebKit the page is hidden.
+    private var reportsHidden = false
+
+    override var isHiddenOrHasHiddenAncestor: Bool { reportsHidden || super.isHiddenOrHasHiddenAncestor }
+
     // MARK: Pointer lock
 
     /// Whether the page has the pointer — a game or a 3D view that asked for raw mouse movement. Kept by

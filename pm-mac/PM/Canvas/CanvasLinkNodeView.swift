@@ -390,6 +390,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         (view as? CanvasPageView)?.linkHost = self
         view.alphaValue = handover.revealed ? 1 : 0
         web = view
+        (view as? CanvasPageView)?.setFullFrameRate(isEngaged)
         capturingTitle = handover.capturingTitle
         watchTitle(of: view)
         applyContentZoom()
@@ -820,8 +821,11 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         // the probe only fires on a view with something actually drawn on it, and the placeholder
         // cross-fades out over that rather than cutting.
         configuration.suppressesIncrementalRendering = false
+        // Full frame rate for the card you are in, WebKit's 60 for the rest. See `CanvasPageView.setFullFrameRate`.
+        CanvasPageView.setFullFrameRate(isEngaged, in: configuration.preferences)
 
         let view = CanvasPageView(frame: .zero, configuration: configuration)
+        view.fullFrameRate = isEngaged
         // A link dropped on the page makes a card, unless there is a field under it to type into.
         view.dropFallback = board
         // And a link right-clicked or middle-clicked can make one too.
@@ -1137,6 +1141,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// the board's own keys — ⌫ to delete a card, the arrows to nudge one — go on being typed into a
     /// web page that is no longer listening for them.
     override func engagementChanged() {
+        (web as? CanvasPageView)?.setFullFrameRate(isEngaged)
         if isEngaged {
             // Stepping in is where a card stops adopting names. Clicking a link is the only way a page
             // goes somewhere the card didn't send it, and a click is only possible from in here — so
