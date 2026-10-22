@@ -103,6 +103,16 @@ enum CanvasPageKeys {
         ("r", [.command, .option]),                                            // Hard Reload
     ]
 
+    /// ⌘Z is undo (true), ⇧⌘Z redo (false); anything else is neither.
+    static func undoing(key: String, modifiers: NSEvent.ModifierFlags) -> Bool? {
+        guard key == "z" else { return nil }
+        switch shape(modifiers) {
+        case [.command]: return true
+        case [.command, .shift]: return false
+        default: return nil
+        }
+    }
+
     /// Should PM wait for this keystroke to be pressed a second time before answering it?
     static func asksForASecondPress(key: String, modifiers: NSEvent.ModifierFlags) -> Bool {
         let pressed = shape(modifiers)
@@ -176,6 +186,12 @@ final class PageFirstMenu: NSMenu {
     /// `NSEvent` that comes back, and remembering two numbers keeps a dead event out of the menu bar.
     private var offered: (timestamp: TimeInterval, code: UInt16)?
 
+    /// Whether undo (true) or redo (false) in this window would close windows — a card out in a window
+    /// of its own taken away by the step. Set by the app, which knows the windows; see
+    /// `CanvasSatelliteWindow.undoClosesWindows`. Such a step waits for a second press, as ⌘R does: ⌘Z
+    /// is pressed without looking, and a window vanishing is not what anybody pressing it expects.
+    static var undoClosesWindows: (_ undoing: Bool, _ window: NSWindow?) -> Bool = { _, _ in false }
+
     private let hint = KeyHint()
     private lazy var doubleTap = DoubleTap { [weak self] text in
         guard let self else { return }
@@ -194,6 +210,10 @@ final class PageFirstMenu: NSMenu {
             return false
         }
         if handedBack, CanvasPageKeys.asksForASecondPress(key: key, modifiers: event.modifierFlags) {
+            return waitForASecondPress(event, key: key)
+        }
+        if let undoing = CanvasPageKeys.undoing(key: key, modifiers: event.modifierFlags),
+           Self.undoClosesWindows(undoing, NSApp.keyWindow) {
             return waitForASecondPress(event, key: key)
         }
         return super.performKeyEquivalent(with: event)

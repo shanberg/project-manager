@@ -335,7 +335,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     /// What this window is of: the file it was opened on, or the project. The header's pill says this.
-    private var windowName: String {
+    var windowName: String {
         // A window opened on a file is named for the file.
         if let openedCanvas { return openedCanvas.deletingPathExtension().lastPathComponent }
         let title = store.notes?.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -356,7 +356,16 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     ///
     /// **The system's title only.** The header's pill names the board, and is `windowName` without the
     /// workspace — the workspace already has its chip beside it.
+    /// This window as the satellite dock lists it — see `CanvasSatelliteDock.OpenProject`.
+    var dockEntry: CanvasSatelliteDock.OpenProject {
+        CanvasSatelliteDock.OpenProject(
+            canvas: openedCanvas ?? store.canvasPath.map { URL(fileURLWithPath: $0) },
+            title: windowName, color: store.color?.nsColor, icon: store.icon, window: window,
+            show: { [weak self] in self?.show() })
+    }
+
     func applyTitle() {
+        CanvasSatelliteDock.shared.refresh()
         guard let window else { return }
         let workspace = split.tabs.selected.view.workspaceName.map { " \u{2014} \($0)" } ?? ""
         window.title = windowName + workspace
@@ -491,6 +500,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             if let name = self?.store.projectName { _ = ProjectAppearancePreview.shared.byProject[name] }
         }) { [weak self] in
             afterCurrentUpdate { [weak self] in self?.split.projectColorChanged() }
+            CanvasSatelliteDock.shared.refresh()
         }
     }
 

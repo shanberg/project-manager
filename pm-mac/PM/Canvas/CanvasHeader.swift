@@ -41,7 +41,7 @@ final class CanvasHeaderModel {
     /// lines between them gone, looks exactly like a board most of which has been deleted — and the
     /// moment you think that is the moment you stop trusting the feature.
     var tiling: (long: String, short: String)?
-    /// Whether the workspace that is up can be popped out — tiled, with more than one tile. The button
+    /// Whether the workspace that is up can be popped out — any workspace, a single tile included. The button
     /// is the window's, since popping out is a verb on the workspace and never on a tile. See
     /// `CanvasBoardView.popOutWorkspace`.
     var canPopOut = false

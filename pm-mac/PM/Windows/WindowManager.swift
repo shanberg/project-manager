@@ -41,6 +41,7 @@ final class WindowManager {
         }
         let controller = makeController(projectKey: projectKey, canvas: canvas)
         controllers.append(controller)
+        CanvasSatelliteDock.shared.refresh()
         Log.write("window opened: \(projectKey ?? "no project") (\(controllers.count) open)")
         if let frame, !frame.isEmpty, let window = controller.window {
             // Where it was last time — set before it is shown, so it doesn't open in one place and jump.
@@ -210,6 +211,7 @@ final class WindowManager {
 
     private func windowClosed(_ controller: ProjectWindowController) {
         controllers.removeAll { $0 === controller }
+        CanvasSatelliteDock.shared.refresh()
         Log.write("window \(Self.name(controller)) closed: \(controller.projectKey ?? "no project")"
             + " (\(controllers.count) open); windows now \(windowSummary)")
         StoreRegistry.shared.release(controller.projectKey)
@@ -224,6 +226,8 @@ final class WindowManager {
     private var quitting = false
 
     private init() {
+        // The dock lists every open project — see `CanvasSatelliteDock.openProjects`.
+        CanvasSatelliteDock.shared.openProjects = { [weak self] in self?.controllers.map(\.dockEntry) ?? [] }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {

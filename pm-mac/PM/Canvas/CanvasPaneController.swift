@@ -165,7 +165,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         scroll.board.onTilingChanged = { [weak self] in
             guard let self else { return }
             header.tiling = scroll.board.tilingSummary
-            header.canPopOut = (scroll.board.tiling?.ids.count ?? 0) > 1
+            header.canPopOut = scroll.board.isTiled
             refreshTileCommand()
             rememberViewState()
             keepNamedWorkspaceUpToDate()

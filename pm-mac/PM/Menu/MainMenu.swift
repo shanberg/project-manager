@@ -28,6 +28,7 @@ enum MainMenu {
         // Everything the page doesn't want comes straight back here, and Reload waits for a second
         // press — see `CanvasPageKeys` and `DoubleTap`.
         let mainMenu = PageFirstMenu()
+        PageFirstMenu.undoClosesWindows = CanvasSatelliteWindow.undoClosesWindows
         mainMenu.addItem(appMenuItem(target: target))
         mainMenu.addItem(fileMenuItem(target: target))
         mainMenu.addItem(editMenuItem())

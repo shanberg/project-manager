@@ -2,20 +2,22 @@ import AppKit
 import PmLib
 import SwiftUI
 
-/// Where the satellites are: a column at the screen's edge, one mark per workspace with windows out.
+/// The open projects, and where their satellites are: a column at the screen's edge, one mark per
+/// project.
 ///
 /// **One for the app, not one per window.** Satellites stay out when their window goes on to another
-/// workspace (`CanvasBoardView.viewWillMove`), and a popped-out workspace puts its window away
-/// (`popOutWorkspace`), so workspaces with windows out outnumber the windows showing them. Something
-/// has to say where they all are and how to get them back, whichever project they belong to.
+/// workspace or project (`CanvasSatelliteKeeper`), and a popped-out workspace puts its window away
+/// (`popOutWorkspace`), so a project's windows are not always where its window is. The dock lists every
+/// open project — each project window, and any project with windows out and no window of its own — and
+/// says where its windows are and how to get them back.
 ///
-/// **A mark per workspace, folded.** The mark is dressed as the project — its colour, its icon — with
-/// the number of windows out. Hovering opens a flyout to the mark's right: the workspace and the
-/// project on one row, a button per window on the next, and Show Window and Gather. Out to the side and
-/// over the screen, so the column itself never changes size and nothing in it moves under the pointer.
-/// Clicking the mark shows the workspace's window.
+/// **A mark per project, folded.** The mark is dressed as the project — its colour, its icon. Hovering
+/// opens a flyout to the mark's right: the project and Show Window on one row, then a row per workspace
+/// with windows out — its name, a button per window, Gather. Out to the side and over the screen, so
+/// the column itself never changes size and nothing in it moves under the pointer. Clicking the mark
+/// shows the project's window.
 ///
-/// **Dressed as the Mac's own Dock**: a column of Liquid Glass, and each workspace an app icon — a
+/// **Dressed as the Mac's own Dock**: a column of Liquid Glass, and each project an app icon — a
 /// squircle in the project's colour, lit from above, with its icon in white — so a row of them reads as
 /// things you go to, not controls. The flyout is glass too, tinted toward the project.
 ///
@@ -26,13 +28,37 @@ import SwiftUI
 final class CanvasSatelliteDock: NSObject {
     static let shared = CanvasSatelliteDock()
 
+    /// A project window, as the dock needs it — handed over by whoever keeps the windows
+    /// (`WindowManager`), so the dock asks for them rather than knowing that type.
+    @MainActor struct OpenProject {
+        var canvas: URL?
+        var title: String
+        var color: NSColor?
+        var icon: ProjectIcon?
+        weak var window: NSWindow?
+        var show: () -> Void
+    }
+
+    /// The project windows open, in the order they opened. Set by `WindowManager`.
+    var openProjects: () -> [OpenProject] = { [] }
+
     /// One workspace's windows out: where they came from, and the windows.
-    @MainActor struct Group {
-        var canvas: URL
-        var workspace: String
+    @MainActor struct Workspace {
+        var name: String
         var satellites: [CanvasSatelliteWindow]
         var board: CanvasBoardView? { satellites.first?.board }
-        var key: String { canvas.path + "\u{1F}" + workspace }
+    }
+
+    /// One project: its window if it has one, and its workspaces with windows out.
+    @MainActor struct Group {
+        var key: String
+        var canvas: URL?
+        var title: String
+        var color: NSColor?
+        var icon: ProjectIcon?
+        var project: OpenProject?
+        var workspaces: [Workspace] = []
+        var windowCount: Int { workspaces.reduce(0) { $0 + $1.satellites.count } }
     }
 
     private(set) var groups: [Group] = []
@@ -64,21 +90,46 @@ final class CanvasSatelliteDock: NSObject {
         }
     }
 
-    /// The satellites up, by workspace, in the order their first window came out.
-    static func groups(of open: [CanvasSatelliteWindow]) -> [Group] {
-        var groups: [Group] = []
+    /// A group per open project, in the order the windows opened, then one for each project with
+    /// windows out and no window of its own; each with its workspaces' satellites, in the order their
+    /// first window came out.
+    static func groups(projects: [OpenProject], open: [CanvasSatelliteWindow]) -> [Group] {
+        func key(_ url: URL?) -> String? { url?.standardizedFileURL.path }
+        var groups = projects.enumerated().map { index, project in
+            Group(key: key(project.canvas) ?? "window \(index)", canvas: project.canvas, title: project.title,
+                  color: project.color, icon: project.icon, project: project)
+        }
         for satellite in open where satellite.board != nil && !satellite.cards.isEmpty {
-            if let index = groups.firstIndex(where: { $0.canvas == satellite.canvas && $0.workspace == satellite.workspace }) {
-                groups[index].satellites.append(satellite)
+            let canvas = key(satellite.canvas)
+            var index = groups.firstIndex { $0.key == canvas }
+            if index == nil {
+                groups.append(Group(key: canvas ?? satellite.canvas.path, canvas: satellite.canvas,
+                                    title: satellite.projectTitle ?? satellite.canvas.deletingPathExtension().lastPathComponent,
+                                    color: satellite.projectColor, icon: satellite.projectMarkIcon))
+                index = groups.count - 1
+            }
+            guard let index else { continue }
+            if let at = groups[index].workspaces.firstIndex(where: { $0.name == satellite.workspace }) {
+                groups[index].workspaces[at].satellites.append(satellite)
             } else {
-                groups.append(Group(canvas: satellite.canvas, workspace: satellite.workspace, satellites: [satellite]))
+                groups[index].workspaces.append(Workspace(name: satellite.workspace, satellites: [satellite]))
             }
         }
         return groups
     }
 
+    /// A project's window forward: the workspace Pop Out put away, if one did — its window comes back at
+    /// that workspace — else the window as it is; else, for a project whose window went on to another,
+    /// a window opened on it (`CanvasBoardView.showWorkspaceWindow`).
+    func show(_ group: Group) {
+        let away = group.workspaces.first { $0.board?.window.map { !$0.isVisible } ?? false }
+        if let board = away?.board { return board.showWorkspaceWindow() }
+        if let project = group.project { return project.show() }
+        group.workspaces.first?.board?.showWorkspaceWindow()
+    }
+
     private func rebuild() {
-        groups = Self.groups(of: CanvasSatelliteWindow.open)
+        groups = Self.groups(projects: openProjects(), open: CanvasSatelliteWindow.open)
         guard !groups.isEmpty else {
             closeFlyout()
             panel?.orderOut(nil)
@@ -92,7 +143,10 @@ final class CanvasSatelliteDock: NSObject {
                 guard let self, let mark else { return }
                 over ? openFlyout(for: mark.groupKey, beside: mark) : scheduleFlyoutHide()
             }
-            mark.onClick = { [weak self] key in self?.group(key)?.board?.showWorkspaceWindow() }
+            mark.onClick = { [weak self] key in
+                guard let self, let found = self.group(key) else { return }
+                show(found)
+            }
             column.addArrangedSubview(mark)
         }
         place(panel)
@@ -180,27 +234,50 @@ final class CanvasSatelliteDock: NSObject {
         return panel
     }
 
-    /// Two rows: the workspace and its project, with Show Window and Gather; then a button per window.
+    /// The project and Show Window; then, for each workspace with windows out, its name, a button per
+    /// window, and Gather.
     private func fillFlyout(_ key: String) {
         guard let flyout, let content = flyout.contentView, let group = group(key) else { return }
         content.subviews.forEach { $0.removeFromSuperview() }
 
-        let name = NSTextField(labelWithString: group.workspace.isEmpty ? "Canvas" : group.workspace)
+        let name = NSTextField(labelWithString: group.title)
         name.font = .systemFont(ofSize: 13, weight: .semibold)
-        let project = NSTextField(labelWithString: group.satellites.first?.projectTitle ?? "")
-        project.font = .systemFont(ofSize: 11)
-        project.textColor = .secondaryLabelColor
-        project.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        let show = Self.button("macwindow", "Show Window") { group.board?.showWorkspaceWindow() }
-        let gather = Self.button("rectangle.grid.2x2", "Gather \(name.stringValue)") { group.board?.gatherWorkspace() }
-        let label = NSStackView(views: [name, project, spacer, show, gather])
-        label.spacing = 6
-        label.setCustomSpacing(12, after: spacer)
-        label.setCustomSpacing(0, after: show)
+        name.lineBreakMode = .byTruncatingTail
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let show = Self.button("macwindow", "Show Window") { [weak self] in self?.show(group) }
+        let header = NSStackView(views: [name, Self.spacer(), show])
+        header.spacing = 6
 
-        let windows = NSStackView(views: group.satellites.map { satellite in
+        let rows = NSStackView(views: [header] + group.workspaces.map(Self.row))
+        rows.orientation = .vertical
+        rows.alignment = .width
+        rows.spacing = 2
+        rows.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 6, right: 10)
+        let fitted = rows.fittingSize
+        flyoutSize = NSSize(width: max(220, fitted.width), height: fitted.height)
+        // Glass tinted toward the project's colour: a flavour of its board, as its windows' headers lie
+        // on its wash.
+        let glass = Self.glass(radius: Self.flyoutRadius, tint: group.color, holding: rows)
+        glass.frame = NSRect(origin: .zero, size: flyoutSize)
+        glass.autoresizingMask = [.width, .height]
+        content.addSubview(glass)
+        if flyout.isVisible {
+            var frame = flyout.frame
+            frame.origin.y += frame.height - flyoutSize.height
+            frame.size = flyoutSize
+            flyout.setFrame(frame, display: true)
+        }
+    }
+
+    /// A workspace with windows out: its name, a button per window — ringing that window on the screen
+    /// while the pointer is on it (`CanvasFocusHint`) — and Gather.
+    private static func row(_ workspace: Workspace) -> NSView {
+        let label = NSTextField(labelWithString: workspace.name.isEmpty ? "Canvas" : workspace.name)
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let buttons: [NSView] = workspace.satellites.map { satellite in
             let id = satellite.shownCard?.node.id
             let described = id.flatMap { satellite.board?.describeCard($0) }
             let title = described?.title ?? "Card"
@@ -210,7 +287,6 @@ final class CanvasSatelliteDock: NSObject {
                 guard let satellite, let card = satellite.shownCard else { return }
                 satellite.reveal(card)
             }
-            // Which window it is, on the screen: a ring round it while the pointer is on its button.
             button.onHover = { [weak satellite] over in
                 if over, let window = satellite?.window {
                     CanvasFocusHint.shared.show(around: window, color: satellite?.projectColor)
@@ -222,28 +298,20 @@ final class CanvasSatelliteDock: NSObject {
                 .withSymbolConfiguration(.init(pointSize: 15, weight: .regular))
             button.setAccessibilityLabel(title)
             return button
-        })
-        windows.spacing = 2
-
-        let rows = NSStackView(views: [label, windows])
-        rows.orientation = .vertical
-        rows.alignment = .leading
-        rows.spacing = 4
-        rows.edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 8, right: 12)
-        let fitted = rows.fittingSize
-        flyoutSize = NSSize(width: max(220, fitted.width), height: fitted.height)
-        // Glass tinted toward the project's colour: a flavour of its board, as its windows' headers lie
-        // on its wash.
-        let glass = Self.glass(radius: Self.flyoutRadius, tint: group.satellites.first?.projectColor, holding: rows)
-        glass.frame = NSRect(origin: .zero, size: flyoutSize)
-        glass.autoresizingMask = [.width, .height]
-        content.addSubview(glass)
-        if flyout.isVisible {
-            var frame = flyout.frame
-            frame.origin.y += frame.height - flyoutSize.height
-            frame.size = flyoutSize
-            flyout.setFrame(frame, display: true)
         }
+        let board = workspace.board
+        let gather = Self.button("rectangle.grid.2x2", "Gather \(label.stringValue)") { board?.gatherWorkspace() }
+        let row = NSStackView(views: [label] + buttons + [Self.spacer(), gather])
+        row.spacing = 2
+        row.setCustomSpacing(8, after: label)
+        return row
+    }
+
+    private static func spacer() -> NSView {
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        return spacer
     }
 
     // MARK: Pieces
@@ -347,9 +415,9 @@ private final class DockButton: NSButton {
     }
 }
 
-/// One workspace's mark in the dock, drawn as a Mac app icon: a squircle in the project's colour, lit
-/// from above and set off by a rim and a soft shadow, with the project's icon in white — or the
-/// workspace's initial, for a project with none. No badge: the flyout lists the windows, and a count on
+/// One project's mark in the dock, drawn as a Mac app icon: a squircle in the project's colour, lit
+/// from above and set off by a rim and a soft shadow, with the project's icon in white — or its
+/// initial, for a project with none. No badge: the flyout lists the windows, and a count on
 /// every mark was a number to read that told you nothing you'd act on. VoiceOver still hears it.
 @MainActor
 private final class DockMark: NSView {
@@ -363,20 +431,19 @@ private final class DockMark: NSView {
 
     init(group: CanvasSatelliteDock.Group) {
         groupKey = group.key
-        let first = group.satellites.first
-        color = (first?.projectColor ?? .systemGray).usingColorSpace(.sRGB) ?? .systemGray
-        glyph = first?.projectMarkIcon.flatMap(Self.white)
-        initial = String((group.workspace.isEmpty ? first?.projectTitle ?? "C" : group.workspace).prefix(1)).uppercased()
+        color = (group.color ?? .systemGray).usingColorSpace(.sRGB) ?? .systemGray
+        glyph = group.icon.flatMap { ProjectIconMark.canDraw($0) ? $0 : nil }.flatMap(Self.white)
+        initial = String(group.title.prefix(1)).uppercased()
         let side = CanvasSatelliteDock.markSize
         super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
         translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([widthAnchor.constraint(equalToConstant: side),
                                      heightAnchor.constraint(equalToConstant: side)])
-        let workspace = group.workspace.isEmpty ? "Canvas" : group.workspace
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        let count = group.satellites.count
-        setAccessibilityLabel("\(workspace), \(first?.projectTitle ?? ""), \(count) \(count == 1 ? "window" : "windows")")
+        let count = group.windowCount
+        setAccessibilityLabel(count == 0 ? group.title
+            : "\(group.title), \(count) \(count == 1 ? "window" : "windows") out")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

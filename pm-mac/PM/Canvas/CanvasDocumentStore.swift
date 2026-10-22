@@ -177,7 +177,12 @@ final class CanvasDocumentStore {
             MainActor.assumeIsolated { store.replace(with: previous, actionName: actionName, shows: shows) }
         }
         undoManager.setActionName(actionName)
+        undoManager.setActionUserInfoValue(CanvasUndoStep(document: previous, store: self), forKey: Self.undoStepKey)
     }
+
+    /// Where a step on the undo stack says what it would put back — for ⌘Z to read before it acts.
+    /// See `CanvasUndoStep`.
+    static let undoStepKey = UndoManager.UserInfoKey("PMCanvasDocumentStep")
 
     /// Undo or redo of a change nothing on screen shows, as a line for the HUD: "Undo Mute Card".
     /// Without it ⌘Z on one looks like a beep that didn't happen.
@@ -266,5 +271,21 @@ final class CanvasDocumentStore {
 
     private static func modified(_ url: URL) -> Date? {
         (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+    }
+}
+
+/// What a step of the board's undo would put back: the whole document, and the store it is for.
+///
+/// Read off the top of the stack before ⌘Z runs (`UndoManager.undoActionUserInfoValue`), so a step
+/// whose undoing would take away a card that is out in a window of its own — closing the window — can
+/// be asked for twice first. See `PageFirstMenu.undoClosesWindows`.
+@MainActor
+final class CanvasUndoStep {
+    let document: CanvasDocument
+    weak var store: CanvasDocumentStore?
+
+    init(document: CanvasDocument, store: CanvasDocumentStore) {
+        self.document = document
+        self.store = store
     }
 }

@@ -47,6 +47,9 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     /// Set while the window is going away because its workspace is — which puts it away rather than
     /// sending it home, so it comes back with the workspace.
     private var puttingAway = false
+    /// Set while the window is going because Bring Back was asked for — which brings the workspace's
+    /// window back with it. Closing it with its close button doesn't: see `satelliteReturned`.
+    private var bringingBack = false
     private let stage = NSView()
     private let wash = CanvasColorWash()
     /// The project's icon, drawn once into a picture: a hosted SwiftUI view in an AppKit row sizes and
@@ -63,6 +66,10 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     private let tabs = CanvasSatelliteTabs()
     private var barHeight: NSLayoutConstraint?
     private var backLeading: NSLayoutConstraint?
+    /// The title's room on the leading side: clear of Back and Reload when a page shows them, clear of
+    /// the traffic lights alone when not. One of the two is on — see `describe`.
+    private var clearOfLights: NSLayoutConstraint?
+    private var clearOfPage: NSLayoutConstraint?
     private let back = NSButton()
     private let reload = NSButton()
     private var pageWatches: [NSKeyValueObservation] = []
@@ -77,6 +84,19 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     private(set) var projectMarkIcon: ProjectIcon?
 
     static let headerHeight: CGFloat = 28
+
+    /// Whether the next undo (or redo) in `window` would take away a card that is out in a satellite,
+    /// closing its window: the step on top of the stack says what document it would put back
+    /// (`CanvasUndoStep`), and a card out here that isn't in it is a window that goes. For
+    /// `PageFirstMenu`, which then asks for the key twice.
+    static func undoClosesWindows(undoing: Bool, in window: NSWindow?) -> Bool {
+        guard let window, let manager = (window.firstResponder ?? window).undoManager else { return false }
+        let value = undoing ? manager.undoActionUserInfoValue(forKey: CanvasDocumentStore.undoStepKey)
+            : manager.redoActionUserInfoValue(forKey: CanvasDocumentStore.undoStepKey)
+        guard let step = value as? CanvasUndoStep, let store = step.store else { return false }
+        let kept = Set(step.document.nodes.map(\.id))
+        return open.contains { $0.canvas == store.url && $0.cardIDs.contains { !kept.contains($0) } }
+    }
 
     /// Lend `cards` to a new window. Nil when none of them had anything to lend.
     static func open(_ cards: [CanvasNodeView], showing: String?, frame: NSRect?, on board: CanvasBoardView)
@@ -198,14 +218,14 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     /// takes the window with it; one of several leaves its tab, and the rest stay out.
     func giveBack(_ card: CanvasNodeView) {
         guard cards.contains(where: { $0 === card }) else { return }
-        guard cards.count > 1 else { return close() }
+        guard cards.count > 1 else { return returnToWorkspace() }
         let id = card.node.id
         let first = cardIDs.first ?? ""
         card.takeBack()
         cards.removeAll { $0 === card }
         if first != cardIDs.first { CanvasSatellites.forget(first, canvas: canvas, workspace: workspace) }
         showTab(min(shown, cards.count - 1))
-        board?.satelliteReturned([id], showing: id, from: workspace)
+        board?.satelliteReturned([id], showing: id, from: workspace, raisingWindow: true)
         CanvasSatelliteDock.shared.refresh()
     }
 
@@ -289,6 +309,11 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         self.backLeading = backLeading
         let centred = words.centerXAnchor.constraint(equalTo: bar.centerXAnchor)
         centred.priority = .defaultLow
+        let clearOfLights = words.leadingAnchor.constraint(greaterThanOrEqualTo: back.leadingAnchor, constant: 4)
+        let clearOfPage = words.leadingAnchor.constraint(greaterThanOrEqualTo: reload.trailingAnchor, constant: 8)
+        clearOfLights.isActive = true
+        self.clearOfLights = clearOfLights
+        self.clearOfPage = clearOfPage
         NSLayoutConstraint.activate([
             bar.topAnchor.constraint(equalTo: root.topAnchor),
             bar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -305,8 +330,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
             home.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             centred,
             words.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            words.leadingAnchor.constraint(greaterThanOrEqualTo: back.leadingAnchor, constant: 64),
-            words.trailingAnchor.constraint(lessThanOrEqualTo: home.leadingAnchor, constant: -12),
+            words.trailingAnchor.constraint(lessThanOrEqualTo: home.leadingAnchor, constant: -6),
             stage.topAnchor.constraint(equalTo: bar.bottomAnchor),
             stage.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             stage.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -399,6 +423,8 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         hostLabel.isHidden = many || page == nil || pageTitle.isEmpty
         back.isHidden = page == nil
         reload.isHidden = page == nil
+        clearOfPage?.isActive = page != nil
+        clearOfLights?.isActive = page == nil
         back.isEnabled = page?.canGoBack == true
         workspaceLabel.stringValue = workspace.isEmpty ? "" : "· \(workspace)"
         workspaceLabel.isHidden = workspace.isEmpty
@@ -468,7 +494,10 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
 
     @objc private func goBack() { page?.goBack() }
     @objc private func reloadPage() { page?.reload() }
-    @objc private func returnToWorkspace() { close() }
+    @objc private func returnToWorkspace() {
+        bringingBack = true
+        close()
+    }
     @objc private func gatherWorkspace() { board?.gatherWorkspace() }
 
     /// The header's two buttons are there only while the pointer is over the window — the title bar
@@ -544,7 +573,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         if !puttingAway { CanvasSatellites.forget(ids.first ?? "", canvas: canvas, workspace: workspace) }
         for card in cards { card.takeBack() }
         cards = []
-        if !puttingAway { board?.satelliteReturned(ids, showing: showing, from: workspace) }
+        if !puttingAway { board?.satelliteReturned(ids, showing: showing, from: workspace, raisingWindow: bringingBack) }
         CanvasSatelliteDock.shared.refresh()
         if let board { CanvasSatelliteKeeper.releaseIfDone(board) }
     }
@@ -700,7 +729,11 @@ extension CanvasBoardView {
     /// would. And nothing is placed when the board has gone on to another workspace since — `scope` is
     /// where the satellite came from: its cards are in that workspace's saved tiling, and come back
     /// with it.
-    func satelliteReturned(_ ids: [String], showing: String?, from scope: String) {
+    ///
+    /// **Bring Back raises the window; the close button doesn't.** Closing a window is putting it away,
+    /// not asking for another — so a workspace window that Pop Out put away stays away while others are
+    /// still out, and comes back behind everything once none are.
+    func satelliteReturned(_ ids: [String], showing: String?, from scope: String, raisingWindow: Bool) {
         guard var session = tiling, scope == satelliteScope else { return }
         let missing = ids.filter { !session.cards.contains($0) && document.node(id: $0) != nil }
         if let first = missing.first {
@@ -711,8 +744,8 @@ extension CanvasBoardView {
             onTilingChanged?()
             announceTiling()
         }
-        if let window, !window.isVisible, !isAllOut {
-            window.orderFront(nil)
+        if let window, !window.isVisible, !isAllOut, raisingWindow || satellites.isEmpty {
+            if raisingWindow { window.orderFront(nil) } else { window.orderBack(nil) }
             CanvasSatellites.setPoppedOut(false, canvas: store.url, workspace: satelliteScope)
         }
         guard let front = showing.flatMap({ ids.contains($0) ? $0 : nil }) ?? ids.first,
@@ -726,7 +759,7 @@ extension CanvasBoardView {
     /// themselves on screen. The tiles stay behind as Empties for Gather and Bring Back to fill, and the
     /// dock (`CanvasSatelliteDock`) is the way back to the window.
     func popOutWorkspace() {
-        guard (tiling?.ids.count ?? 0) > 1, let window else { return }
+        guard isTiled, let window else { return }
         restoreMaximizedTile(animated: false)
         guard let session = tiling else { return }
         let frames = session.tileFrames

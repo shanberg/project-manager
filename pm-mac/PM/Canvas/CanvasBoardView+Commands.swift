@@ -2978,7 +2978,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
         case #selector(showCardActions(_:)):
             return actionsTarget != nil
         case #selector(popOutWorkspace(_:)):
-            return (tiling?.ids.count ?? 0) > 1 && !isAllOut
+            return isTiled && !isAllOut
         case #selector(gatherWorkspace(_:)):
             return !satellites.isEmpty
         case #selector(maximizeTile(_:)):
