@@ -46,7 +46,12 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
     /// Where a drag of the header began: the pointer and the panel's origin, both on the screen.
     private var dragStart: (pointer: NSPoint, origin: NSPoint)?
     private var releaseWatch: Timer?
-    private lazy var ghost = SnapGhostWindow()
+    /// The drop preview, two of them: a new corner fades one in while the other fades out where it was.
+    /// `SnapGhostWindow` glides one window between anchors, which across a satellite's width read as the
+    /// preview warping over the screen.
+    private lazy var ghosts = [SnapGhostWindow(), SnapGhostWindow()]
+    private var ghostShown = 0
+    private var ghostAnchor: CanvasCompanionPlacement.Anchor?
     /// The corner it is at, so a change of corner glides rather than jumps.
     private var anchor: CanvasCompanionPlacement.Anchor?
     /// Bumped by every show and hide, so a fade-out that finishes after the panel was shown again
@@ -311,12 +316,22 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
         guard let geo = geometry(),
               let anchor = CanvasCompanionPlacement.nearest(to: panel.frame, size: openSize, window: geo.window,
                                                             screen: geo.screen, header: CanvasSatelliteWindow.headerHeight)
-        else { return ghost.hide() }
+        else { return hideGhost() }
+        guard anchor != ghostAnchor else { return }
+        hideGhost()
+        ghostAnchor = anchor
+        ghostShown = 1 - ghostShown
         let (window, screen) = geo
         let target = CanvasCompanionPlacement.frame(at: anchor, size: contentSize, window: window, screen: screen)
         let toCentre = CGVector(dx: screen.midX - target.midX, dy: screen.midY - target.midY)
         let length = max(hypot(toCentre.dx, toCentre.dy), 0.0001)
-        ghost.show(at: target, fadingToward: CGVector(dx: toCentre.dx / length, dy: toCentre.dy / length), below: panel)
+        ghosts[ghostShown].show(at: target, fadingToward: CGVector(dx: toCentre.dx / length, dy: toCentre.dy / length),
+                                below: panel)
+    }
+
+    private func hideGhost() {
+        if ghostAnchor != nil { ghosts[ghostShown].hide() }
+        ghostAnchor = nil
     }
 
     /// Let go: the nearest corner with room becomes this window's spot, and the panel glides into it.
@@ -325,7 +340,7 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
     private func endDrag(snapping: Bool) {
         guard dragStart != nil else { return }
         dragStart = nil
-        ghost.hide()
+        hideGhost()
         guard let panel, let window = satellite?.window else { return }
         if snapping, let key = spotKey, let geo = geometry(),
            let anchor = CanvasCompanionPlacement.nearest(to: panel.frame, size: openSize, window: geo.window,
