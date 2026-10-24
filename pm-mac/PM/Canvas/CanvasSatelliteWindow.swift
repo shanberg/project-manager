@@ -551,7 +551,10 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
 
     // MARK: NSWindowDelegate
 
-    func windowDidBecomeKey(_ notification: Notification) { shownCard?.engage(true) }
+    func windowDidBecomeKey(_ notification: Notification) {
+        shownCard?.engage(true)
+        CanvasSatelliteCompanion.shared.satelliteBecameKey(self)
+    }
 
     func windowDidResignKey(_ notification: Notification) {
         if shownCard?.isEngaged == true { shownCard?.engage(false) }
