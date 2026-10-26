@@ -15,11 +15,11 @@ import AppKit
 /// they are and brought out again on the board that can show them (`CanvasBoardView.restoreSatellites`).
 /// The dock's Show Window, for a kept board, is what asks for that window (`reopen`).
 ///
-/// Only a project switch keeps anything. A window closing, or a tab closing, still puts its
-/// satellites away, to come back with it.
+/// **A window closing keeps them too**: closing one window changes nothing else on screen. Only a
+/// tab closing puts its satellites away, to come back with it.
 @MainActor
 enum CanvasSatelliteKeeper {
-    /// Set while a window is dropping its panes for a project switch.
+    /// Set while a window is dropping its panes for a project switch or its own close.
     private(set) static var isKeeping = false
     private static var kept: [CanvasPaneController] = []
 

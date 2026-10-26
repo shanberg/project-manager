@@ -723,9 +723,10 @@ final class CanvasBoardView: NSView {
     }
 
     // **A workspace's satellites stay out while another workspace is up** (see `CanvasSatelliteWindow`):
-    // its tab going behind another only hides this board, and the dock is how they're found. Its window
-    // closing, or its tab going, takes the board out of the window; then the satellites are put away
-    // and remembered, and come back out when the board is up again.
+    // its tab going behind another only hides this board, and the dock is how they're found. Its tab
+    // going takes the board out of the window; then the satellites are put away and remembered, and
+    // come back out when the board is up again. Its window closing or switching project keeps the
+    // board for them instead (`CanvasSatelliteKeeper`).
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow == nil { putSatellitesAway() }
         super.viewWillMove(toWindow: newWindow)

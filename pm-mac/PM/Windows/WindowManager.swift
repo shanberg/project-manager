@@ -222,8 +222,9 @@ final class WindowManager {
         if !quitting { rememberOpenProjects() }
     }
 
-    /// Set once the app has said it is terminating. See `windowClosed`.
-    private var quitting = false
+    /// Set once the app has said it is terminating. See `windowClosed`, and `CanvasSatelliteWindow`'s
+    /// close, which puts a satellite away rather than forgetting it.
+    private(set) var quitting = false
 
     private init() {
         // The dock lists every open project — see `CanvasSatelliteDock.openProjects`.

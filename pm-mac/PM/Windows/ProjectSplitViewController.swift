@@ -1058,8 +1058,9 @@ final class ProjectSplitViewController: NSSplitViewController {
         resizeObservation = nil
         // A board showing here holds the canvas document open, and the last holder is what saves it and
         // stops it polling the file. A window closing on a board must give that hold back — for every
-        // tab that has one, not only the one on screen.
-        contentPane.dropAll()
+        // tab that has one, not only the one on screen. Satellites stay out, as across a project
+        // switch: a board with any out is kept for them (`CanvasSatelliteKeeper`).
+        CanvasSatelliteKeeper.keepingSatellitesOut { contentPane.dropAll() }
         if holdsProjectScan {
             holdsProjectScan = false
             ProjectIndex.shared.release()

@@ -1771,8 +1771,8 @@ extension CanvasPaneController: ProjectTabContent {
         focusBoard()
     }
 
-    /// Torn down — unless the window is going on to another project while this board has satellites
-    /// out, which keeps it for them (`CanvasSatelliteKeeper`). Kept, it stops following the window it
+    /// Torn down — unless the window is closing or going on to another project while this board has
+    /// satellites out, which keeps it for them (`CanvasSatelliteKeeper`). Kept, it stops following the window it
     /// has left and leaves its pages running: those are out in the satellites.
     func paneWillClose() {
         guard CanvasSatelliteKeeper.keep(self) else { return teardown() }

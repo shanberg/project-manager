@@ -48,7 +48,8 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     /// sending it home, so it comes back with the workspace.
     private var puttingAway = false
     /// Set while the window is going because Bring Back was asked for — which brings the workspace's
-    /// window back with it. Closing it with its close button doesn't: see `satelliteReturned`.
+    /// window back with it and picks the card out there. Closing it with its close button changes
+    /// nothing else: see `satelliteReturned`.
     private var bringingBack = false
     private let stage = NSView()
     private let wash = CanvasColorWash()
@@ -588,6 +589,9 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        // AppKit closes every window on the way out. Quitting puts a satellite away, to come back on
+        // the next launch; its project window no longer does that for it (`CanvasSatelliteKeeper`).
+        if WindowManager.shared.quitting { puttingAway = true }
         if let linkMonitor { NSEvent.removeMonitor(linkMonitor) }
         linkMonitor = nil
         pageWatches = []
@@ -746,17 +750,18 @@ extension CanvasBoardView {
         return moveToWindow(tile.cards, showing: tile.shown, frame: frame)
     }
 
-    /// A satellite has come home. Its cards kept their slots, so there is nothing to place: the tile is
-    /// picked out, at the card that was showing, and the window comes back if Pop Out put it away.
+    /// A satellite has come home. Its cards kept their slots, so there is nothing to place.
     ///
     /// A card whose tile was removed while it was out goes back in beside the selection, as a new card
     /// would. And nothing is placed when the board has gone on to another workspace since — `scope` is
     /// where the satellite came from: its cards are in that workspace's saved tiling, and come back
     /// with it.
     ///
-    /// **Bring Back raises the window; the close button doesn't.** Closing a window is putting it away,
-    /// not asking for another — so a workspace window that Pop Out put away stays away while others are
-    /// still out, and comes back behind everything once none are.
+    /// **Bring Back brings the card home; the close button only closes.** Bring Back raises the window
+    /// if Pop Out put it away, and picks the tile out at the card that was showing. Closing a window
+    /// changes nothing else on screen: no window comes back or forward, the board's selection and
+    /// tabs stay as they were, and a workspace window Pop Out put away stays away — the dock is the way
+    /// back to it.
     func satelliteReturned(_ ids: [String], showing: String?, from scope: String, raisingWindow: Bool) {
         guard var session = tiling, scope == satelliteScope else { return }
         let missing = ids.filter { !session.cards.contains($0) && document.node(id: $0) != nil }
@@ -768,8 +773,9 @@ extension CanvasBoardView {
             onTilingChanged?()
             announceTiling()
         }
-        if let window, !window.isVisible, !isAllOut, raisingWindow || satellites.isEmpty {
-            if raisingWindow { window.orderFront(nil) } else { window.orderBack(nil) }
+        guard raisingWindow else { return }
+        if let window, !window.isVisible, !isAllOut {
+            window.orderFront(nil)
             CanvasSatellites.setPoppedOut(false, canvas: store.url, workspace: satelliteScope)
         }
         guard let front = showing.flatMap({ ids.contains($0) ? $0 : nil }) ?? ids.first,
