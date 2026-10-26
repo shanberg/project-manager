@@ -565,6 +565,16 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) {
         shownCard?.engage(true)
         CanvasSatelliteCompanion.shared.satelliteBecameKey(self)
+        focusProject()
+    }
+
+    /// The board's project becomes the focused one, as a project window's does on becoming main
+    /// (`ProjectWindowController.pushFocusToDisk`). A canvas that is no project's board moves nothing.
+    private func focusProject() {
+        guard let key = board?.boardProject?.key, key != PMFiles.focusedProjectKey() else { return }
+        PMStore.setGlobalFocus(key: key) {
+            (NSApp.delegate as? AppDelegate)?.syncFocusedStore()
+        }
     }
 
     func windowDidResignKey(_ notification: Notification) {
