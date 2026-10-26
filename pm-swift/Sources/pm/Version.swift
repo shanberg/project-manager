@@ -1,4 +1,4 @@
 import Foundation
 
 /// CLI version. Keep in sync with package.json "version" (used by release script).
-let pmVersion = "0.51.4"
+let pmVersion = "0.52.0"
