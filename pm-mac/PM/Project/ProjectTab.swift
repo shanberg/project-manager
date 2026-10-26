@@ -402,6 +402,18 @@ enum ProjectTabMemory {
         UserDefaults.standard.set(all, forKey: defaultsKey)
     }
 
+    /// A project's stored row as it is, for putting back with `restore` — nil where it has none.
+    static func stored(for projectKey: String?) -> Data? {
+        projectKey.flatMap { stored()[$0] }
+    }
+
+    static func restore(_ row: Data?, for projectKey: String?) {
+        guard let projectKey else { return }
+        var all = stored()
+        all[projectKey] = row
+        UserDefaults.standard.set(all, forKey: defaultsKey)
+    }
+
     /// **Decodes rows written before the canvas was permanent and before `dismissed` went**, both by
     /// ignoring what it does not know: a stored `dismissed` array is simply not read any more, and a
     /// row with no canvas tab in it is given one by `ProjectTabSet.init(tabs:selectedID:)`. Neither is

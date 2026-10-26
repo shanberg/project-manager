@@ -119,6 +119,12 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - `task.diveIn` focuses the first open leaf under the focused task. A new task takes focus.
 - `project.focus` also starts timing that project. See [Time](#time).
 
+## Windows
+
+- Restore (Settings, on by default): every window open at quit comes back — project windows, windows on a canvas file, windows on no project — each at its frame and screen, in its place in the stack, minimized or in full screen if it was (UserDefaults `PMWindowOpenWindows`; read from `PMWindowOpenProjects` and `PMWindowOpenFrames` once).
+- A full-screen window is remembered at the frame it comes back to.
+- Tabs come back per project (`ProjectTabMemory`), not per window: two windows on one project reopen alike.
+
 ## Waiting
 
 ([links.md](links.md) — about waiting, not project links)
@@ -176,6 +182,7 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - The last tile out — by Pop Out or by hand — puts the workspace's window away. Not for a workspace of one tile. Remembered (UserDefaults `PMCanvasPoppedOut`): a relaunch that brings the satellites back keeps the window away. Showing the window forgets it.
 - Closing a satellite, or its workspace's window, changes nothing else on screen: no window comes back or forward, and the board's selection and tabs stay. A popped-out window stays away after the last satellite closes; the dock brings it back. Bring Back raises the window and picks out the card's tile.
 - ⌘Z or ⇧⌘Z whose step would take away a card that is out in a satellite (closing its window) waits for a second press, as ⌘R does: "Press ⌘Z again to Undo …". Read from the step before it runs (`CanvasUndoStep`, `PageFirstMenu.undoClosesWindows`).
+- Quit and relaunch bring back every satellite — those whose workspace is in a window, and those out with no window — at its windowed frame, minimized or in full screen if it was (`CanvasSatellites.Record`). A satellite of a workspace in a background tab comes back when that tab is shown. With no window: a window that is never shown brings them out and closes (`CanvasSatelliteKeeper.restoreKept`, UserDefaults `PMCanvasKeptWorkspaces`).
 - A satellite becoming key makes its board's project the focused project, as a project window becoming main does. A canvas that is no project's board changes nothing.
 - Satellite header: the title bar's own height (28 pt, no toolbar). The title clears only the controls showing. The card's name, then the workspace's. Bring Back (↙) and Gather show while the pointer is over the window, title bar included.
 - Pop Out Workspace: every tile into its own satellite, opened over its tile; the workspace's window is put away. A verb on the workspace, never a tile: the header's button (any workspace, a single tile included), a workspace chip's menu, and the menu bar's workspace items.

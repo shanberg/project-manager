@@ -31,18 +31,22 @@ final class WindowManager {
     /// what restoring a saved session means when the same project was open in two windows last time.
     ///
     /// `frame` is where a restored window was, as `NSWindow.frameDescriptor`; nil places it the usual way.
+    ///
+    /// `carrier` opens a window that is never shown — see `ProjectWindowController.isCarrier`.
     @discardableResult
     func open(projectKey: String?, reusingExistingWindow: Bool = true,
-              canvas: URL? = nil, frame: String? = nil) -> ProjectWindowController {
+              canvas: URL? = nil, frame: String? = nil, carrier: Bool = false) -> ProjectWindowController {
         if reusingExistingWindow,
-           let existing = controllers.first(where: { $0.projectKey == projectKey }) {
+           let existing = controllers.first(where: { $0.projectKey == projectKey && !$0.isCarrier }) {
             existing.show()
             return existing
         }
         let controller = makeController(projectKey: projectKey, canvas: canvas)
+        controller.isCarrier = carrier
         controllers.append(controller)
         CanvasSatelliteDock.shared.refresh()
-        Log.write("window opened: \(projectKey ?? "no project") (\(controllers.count) open)")
+        Log.write("window opened: \(projectKey ?? "no project")\(carrier ? ", unshown" : "") (\(controllers.count) open)")
+        if carrier { return controller }
         if let frame, !frame.isEmpty, let window = controller.window {
             // Where it was last time — set before it is shown, so it doesn't open in one place and jump.
             window.setFrame(from: frame)
@@ -93,7 +97,7 @@ final class WindowManager {
     @discardableResult
     func open(canvas url: URL) -> ProjectWindowController? {
         let key = url.standardizedFileURL
-        if let existing = controllers.first(where: { $0.openedCanvas == key }) {
+        if let existing = controllers.first(where: { $0.openedCanvas == key && !$0.isCarrier }) {
             existing.show()
             return existing
         }
@@ -228,7 +232,9 @@ final class WindowManager {
 
     private init() {
         // The dock lists every open project — see `CanvasSatelliteDock.openProjects`.
-        CanvasSatelliteDock.shared.openProjects = { [weak self] in self?.controllers.map(\.dockEntry) ?? [] }
+        CanvasSatelliteDock.shared.openProjects = { [weak self] in
+            self?.controllers.filter { !$0.isCarrier }.map(\.dockEntry) ?? []
+        }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification,
                                                object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -236,6 +242,7 @@ final class WindowManager {
                 // Written again rather than trusted: frames move without anything closing, and this is
                 // the last moment every window is still here to say where it is.
                 self.rememberOpenProjects()
+                CanvasSatelliteKeeper.rememberKept()
                 self.quitting = true
             }
         }
@@ -244,55 +251,77 @@ final class WindowManager {
     /// Reopen what was open last time. A regular app that launches with no window at all reads as
     /// broken, so anything that leaves us with nothing — restore turned off, a first run, a stale list
     /// — falls back to one window on the focused project.
+    ///
+    /// **Each window as it was**: where it was and the size it was rather than cascaded off the first,
+    /// on the canvas file it was opened on, in its place in the stack, and minimized or in full screen
+    /// if it was. Read up front, because every window opened below rewrites the list.
     func restoreOnLaunch() {
+        var restored: [(controller: ProjectWindowController, saved: WindowSettings.OpenWindow)] = []
         if WindowSettings.shared.restoreWindows {
             // Skip keys that no longer name a project — a renamed or deleted folder, or a bad key that
-            // got saved — rather than reopening a window that can only show the empty state. Dropping
-            // them here also cleans them out of the saved list on the next write.
+            // got saved — and canvases that are gone, rather than reopening a window that can only show
+            // the empty state. Dropping them here also cleans them out of the saved list on the next
+            // write.
             // One window per remembered entry, not one per distinct project: the list is a list of
             // windows, and a project you had open in two of them comes back in two.
-            // Each comes back where it was and the size it was, rather than cascaded off the first —
-            // read up front, because every window opened below rewrites both lists.
-            let keys = WindowSettings.shared.openProjectKeys
-            let frames = WindowSettings.shared.openWindowFrames
-            for (index, key) in keys.enumerated() where PMFiles.projectName(fromKey: key) != nil {
-                open(projectKey: key, reusingExistingWindow: false,
-                     frame: frames.indices.contains(index) ? frames[index] : nil)
+            for saved in WindowSettings.shared.openWindows {
+                if let key = saved.project, PMFiles.projectName(fromKey: key) == nil { continue }
+                let canvas = saved.canvas.map { URL(fileURLWithPath: $0) }
+                if let canvas, !FileManager.default.fileExists(atPath: canvas.path) { continue }
+                restored.append((open(projectKey: saved.project, reusingExistingWindow: false,
+                                      canvas: canvas, frame: saved.frame), saved))
             }
         }
+        // Satellites that were out with no window of their own come back out the same way.
+        defer { if WindowSettings.shared.restoreWindows { CanvasSatelliteKeeper.restoreKept() } }
         guard !controllers.isEmpty else {
             openFocusedProject()
             Log.write("launch: opened a window on the focused project")
             return
         }
         Log.write("launch: restored \(controllers.count) window(s)")
-        // Leave the focused project's window in front, so launching lands where the menubar points.
-        if let focused = PMFiles.focusedProjectKey(),
-           let controller = controllers.first(where: { $0.projectKey == focused }) {
+        // The stack as it was, back to front, so the frontmost is the last brought forward.
+        let stacked = restored.filter { $0.saved.depth != nil }.sorted { $0.saved.depth! > $1.saved.depth! }
+        if let front = stacked.last(where: { !$0.saved.minimized }) {
+            for entry in stacked where !entry.saved.minimized && entry.controller !== front.controller {
+                entry.controller.window?.orderFront(nil)
+            }
+            front.controller.show()
+        } else if let focused = PMFiles.focusedProjectKey(),
+                  let controller = controllers.first(where: { $0.projectKey == focused }) {
+            // Nothing said which was in front: leave the focused project's window there, so launching
+            // lands where the menubar points.
             controller.show()
+        }
+        for entry in restored {
+            guard let window = entry.controller.window else { continue }
+            if entry.saved.minimized {
+                window.miniaturize(nil)
+            } else if entry.saved.fullScreen, !window.styleMask.contains(.fullScreen) {
+                window.toggleFullScreen(nil)
+            }
         }
     }
 
-    /// The windows that are open, and where each one is, for the next launch.
-    ///
-    /// **Both lists in one pass, index for index.** `restoreOnLaunch` pairs a key with the frame at the
-    /// same position, so the two have to be filtered by one rule: a window with no project leaves both
-    /// lists or neither. Built here rather than as two `compactMap`s for exactly that reason — two
-    /// passes over the same array is two chances for the filters to drift apart, and the failure would
-    /// be silent and off by one.
+    /// The windows that are open, and how each one is, for the next launch — see `restoreOnLaunch`.
     ///
     /// The frames were read on launch and never written, which is why every restored window came back
     /// at whatever the `PMProject` autosave last held — one frame for all of them — rather than where
     /// it was. See `ProjectWindowController.init` for why that autosave belongs to one window only.
     private func rememberOpenProjects() {
-        let open = controllers.compactMap { controller -> (key: String, frame: String)? in
-            guard let key = controller.projectKey else { return nil }
-            // Empty where there is no window to ask yet. `restoreOnLaunch` reads that as "no frame" and
-            // places the window the ordinary way.
-            return (key, controller.window?.frameDescriptor ?? "")
+        let stack = NSApp.orderedWindows
+        WindowSettings.shared.openWindows = controllers.filter { !$0.isCarrier }.map { controller in
+            let window = controller.window
+            return WindowSettings.OpenWindow(
+                project: controller.projectKey,
+                canvas: controller.openedCanvas?.path,
+                // Empty where there is no window to ask yet. `restoreOnLaunch` reads that as "no frame"
+                // and places the window the ordinary way.
+                frame: controller.windowedFrameDescriptor ?? "",
+                minimized: window?.isMiniaturized ?? false,
+                fullScreen: window?.styleMask.contains(.fullScreen) ?? false,
+                depth: window.flatMap { window in stack.firstIndex { $0 === window } })
         }
-        WindowSettings.shared.openProjectKeys = open.map(\.key)
-        WindowSettings.shared.openWindowFrames = open.map(\.frame)
     }
 
     // MARK: Broadcasts

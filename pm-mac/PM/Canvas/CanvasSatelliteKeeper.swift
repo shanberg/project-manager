@@ -56,6 +56,74 @@ enum CanvasSatelliteKeeper {
         DispatchQueue.main.async { pane.teardown() }
     }
 
+    // MARK: Across a relaunch
+
+    /// The kept boards at quit — the workspaces with satellites out and no window — so the next launch
+    /// brings them out again with no window either. A workspace in a window comes back with that
+    /// window (`CanvasBoardView.restoreSatellites`).
+    static let keptKey = "PMCanvasKeptWorkspaces"
+
+    private struct Kept: Codable {
+        var project: String?
+        var canvas: String
+        var workspace: String
+    }
+
+    /// Written at quit, while the kept boards are still here to say what they are.
+    static func rememberKept(in defaults: UserDefaults = .standard) {
+        let all = kept.map(\.board).filter { !$0.satellites.isEmpty }.map { board in
+            Kept(project: board.boardProject?.key, canvas: board.store.url.path, workspace: board.satelliteScope)
+        }
+        defaults.set(all.isEmpty ? nil : try? JSONEncoder().encode(all), forKey: keptKey)
+    }
+
+    /// At launch: each workspace kept at quit up in a window that is never shown, which brings its
+    /// satellites out where they were and is closed once it has — keeping its board for them, as a
+    /// window closing does. What it showed for its project is put back as it was: the window was never
+    /// one you opened.
+    static func restoreKept(in defaults: UserDefaults = .standard) {
+        guard let data = defaults.data(forKey: keptKey),
+              let all = try? JSONDecoder().decode([Kept].self, from: data) else { return }
+        defaults.removeObject(forKey: keptKey)
+        for entry in all {
+            let canvas = URL(fileURLWithPath: entry.canvas)
+            guard FileManager.default.fileExists(atPath: canvas.path),
+                  !CanvasSatellites.records(canvas: canvas, workspace: entry.workspace, in: defaults).isEmpty,
+                  entry.project.map({ PMFiles.projectName(fromKey: $0) != nil }) ?? true else { continue }
+            let tabs = ProjectTabMemory.stored(for: entry.project)
+            let carrier = WindowManager.shared.open(projectKey: entry.project, reusingExistingWindow: false,
+                                                    canvas: entry.project == nil ? canvas : nil, carrier: true)
+            carriers.append((carrier, entry.project, tabs, canvas.standardizedFileURL, entry.workspace))
+            carrier.showTab(entry.workspace.isEmpty ? .board(.whole) : .board(.workspace(entry.workspace)))
+            // A workspace that cannot come up — gone from its canvas, say — still lets its window go.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak carrier] in
+                if let carrier { closeCarrier(carrier) }
+            }
+        }
+    }
+
+    /// The windows `restoreKept` has open: what their project's tabs were before them, and the
+    /// workspace each is there for.
+    private static var carriers: [(controller: ProjectWindowController, project: String?, tabs: Data?,
+                                   canvas: URL, workspace: String)] = []
+
+    /// A board has brought its satellites out: the one a carrier is there for lets the carrier go. Not
+    /// another board on the way — the carrier may open on another tab before it gets to its workspace.
+    static func satellitesRestored(on board: CanvasBoardView) {
+        guard let controller = board.window?.windowController as? ProjectWindowController,
+              let carrier = carriers.first(where: { $0.controller === controller }),
+              carrier.canvas == board.store.url.standardizedFileURL,
+              carrier.workspace == board.satelliteScope else { return }
+        closeCarrier(controller)
+    }
+
+    private static func closeCarrier(_ controller: ProjectWindowController) {
+        guard let index = carriers.firstIndex(where: { $0.controller === controller }) else { return }
+        let carrier = carriers.remove(at: index)
+        controller.close()
+        ProjectTabMemory.restore(carrier.tabs, for: carrier.project)
+    }
+
     /// Show Window for a kept board: a window on its project — or its canvas file — at its workspace.
     static func reopen(_ board: CanvasBoardView) {
         ProjectWindowController.showWorkspace(board.satelliteScope, projectKey: board.boardProject?.key,

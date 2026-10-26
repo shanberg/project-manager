@@ -310,6 +310,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     var isVisible: Bool { window?.isVisible ?? false }
 
+    /// A window never shown, opened at launch only to bring a closed window's satellites back out and
+    /// closed again once it has (`CanvasSatelliteKeeper.restoreKept`). Not remembered as open.
+    var isCarrier = false
+
     /// Publish where the window's traffic lights actually sit, so the leftmost pane's header can start
     /// past them and sit level with them.
     ///
@@ -674,6 +678,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// does, so the windowed titlebar is measured with it in place.
     func windowWillEnterFullScreen(_ notification: Notification) {
         window?.toolbar?.isVisible = false
+        fullScreenFrom = window?.frameDescriptor
     }
 
     func windowWillExitFullScreen(_ notification: Notification) {
@@ -686,6 +691,17 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func windowDidExitFullScreen(_ notification: Notification) {
         measureTitlebarButtons()
+        fullScreenFrom = nil
+    }
+
+    /// Where the window was before it went full screen — what it comes back to.
+    private var fullScreenFrom: String?
+
+    /// Where the window is, as `NSWindow.frameDescriptor`, for the next launch: the frame it comes back
+    /// to from full screen, while it is there — the screen-sized frame is no size for a window.
+    var windowedFrameDescriptor: String? {
+        guard let window else { return nil }
+        return window.styleMask.contains(.fullScreen) ? fullScreenFrom ?? window.frameDescriptor : window.frameDescriptor
     }
 
     func windowWillClose(_ notification: Notification) {

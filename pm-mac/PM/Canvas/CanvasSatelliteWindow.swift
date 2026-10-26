@@ -390,7 +390,29 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         backLeading?.constant = metrics.leadingInset + 2
     }
 
-    func windowDidExitFullScreen(_ notification: Notification) { fitToTitleBar() }
+    func windowDidExitFullScreen(_ notification: Notification) {
+        fitToTitleBar()
+        fullScreenFrom = nil
+        remember()
+    }
+
+    func windowWillEnterFullScreen(_ notification: Notification) { fullScreenFrom = window?.frame }
+    func windowDidEnterFullScreen(_ notification: Notification) { remember() }
+    func windowDidMiniaturize(_ notification: Notification) { remember() }
+    func windowDidDeminiaturize(_ notification: Notification) { remember() }
+
+    /// Where the window was before it went full screen — what it comes back to, and what is remembered.
+    private var fullScreenFrom: NSRect?
+
+    /// Minimized or in full screen again, as it was when it was remembered — see `restoreSatellites`.
+    func restore(_ record: CanvasSatellites.Record) {
+        guard let window else { return }
+        if record.minimized == true {
+            window.miniaturize(nil)
+        } else if record.fullScreen == true, !window.styleMask.contains(.fullScreen) {
+            window.toggleFullScreen(nil)
+        }
+    }
 
     static func symbol(for kind: CanvasItem.Kind?) -> NSImage? {
         let name: String
@@ -590,8 +612,12 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         // AppKit closes every window on the way out. Quitting puts a satellite away, to come back on
-        // the next launch; its project window no longer does that for it (`CanvasSatelliteKeeper`).
-        if WindowManager.shared.quitting { puttingAway = true }
+        // the next launch as it is now; its project window no longer does that for it
+        // (`CanvasSatelliteKeeper`).
+        if WindowManager.shared.quitting {
+            remember()
+            puttingAway = true
+        }
         if let linkMonitor { NSEvent.removeMonitor(linkMonitor) }
         linkMonitor = nil
         pageWatches = []
@@ -610,10 +636,14 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     func windowDidEndLiveResize(_ notification: Notification) { remember() }
 
     private func remember() {
-        guard let frame = window?.frame, !puttingAway, !cards.isEmpty,
+        guard let window, !puttingAway, !cards.isEmpty,
               Self.open.contains(where: { $0 === self }) else { return }
-        CanvasSatellites.remember(.init(cards: cardIDs, showing: shownCard?.node.id, frame: frame),
-                                  canvas: canvas, workspace: workspace)
+        let fullScreen = window.styleMask.contains(.fullScreen)
+        var record = CanvasSatellites.Record(cards: cardIDs, showing: shownCard?.node.id,
+                                             frame: fullScreen ? fullScreenFrom ?? window.frame : window.frame)
+        record.minimized = window.isMiniaturized
+        record.fullScreen = fullScreen
+        CanvasSatellites.remember(record, canvas: canvas, workspace: workspace)
     }
 }
 
@@ -623,11 +653,15 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
 enum CanvasSatellites {
     static let defaultsKey = "PMCanvasSatellites"
 
-    /// One window: its cards in tab order, the one showing, and where it was.
+    /// One window: its cards in tab order, the one showing, where it was — the windowed frame, for one
+    /// in full screen — and whether it was minimized or in full screen. Nil in records from before
+    /// those were kept.
     struct Record: Codable, Equatable {
         var cards: [String]
         var showing: String?
         var frame: String
+        var minimized: Bool?
+        var fullScreen: Bool?
 
         init(cards: [String], showing: String?, frame: NSRect) {
             self.cards = cards
@@ -869,11 +903,12 @@ extension CanvasBoardView {
                       // Already out from another board on this workspace — a second window on it.
                       !out.contains(where: { !Set($0.cardIDs).isDisjoint(with: ids) }) else { continue }
                 if ids.contains(where: { self.nodeViews[$0] == nil }) { refreshNodeViews() }
-                moveToWindow(ids, showing: record.showing, frame: record.rect, restoring: true)
+                moveToWindow(ids, showing: record.showing, frame: record.rect, restoring: true)?.restore(record)
             }
             if isAllOut, CanvasSatellites.isPoppedOut(canvas: store.url, workspace: satelliteScope) {
                 window?.orderOut(nil)
             }
+            CanvasSatelliteKeeper.satellitesRestored(on: self)
         }
     }
 

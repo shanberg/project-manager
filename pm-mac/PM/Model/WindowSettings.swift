@@ -25,17 +25,41 @@ final class WindowSettings {
         didSet { defaults.set(restoreWindows, forKey: Keys.restoreWindows) }
     }
 
-    /// The projects that had a window open when the app last quit, in the order they were opened.
-    var openProjectKeys: [String] {
-        get { defaults.stringArray(forKey: Keys.openProjects) ?? [] }
-        set { defaults.set(newValue, forKey: Keys.openProjects) }
+    /// One window open when the app last quit, as `WindowManager.restoreOnLaunch` brings it back.
+    struct OpenWindow: Codable, Equatable {
+        /// The project it showed; nil for a window on a canvas file, or on no project at all.
+        var project: String?
+        /// The canvas file it was opened on (`ProjectWindowController.openedCanvas`), as a path.
+        var canvas: String?
+        /// Where it was, as `NSWindow.frameDescriptor` — the windowed frame, for one in full screen.
+        /// Empty where a window had no frame to give.
+        var frame: String
+        var minimized: Bool
+        var fullScreen: Bool
+        /// Its place in the stack: 0 the frontmost. Nil where it could not be told.
+        var depth: Int?
     }
 
-    /// Where each of those windows was, as `NSWindow.frameDescriptor`, index for index with
-    /// `openProjectKeys`. Empty where a window had no frame to give.
-    var openWindowFrames: [String] {
-        get { defaults.stringArray(forKey: Keys.openFrames) ?? [] }
-        set { defaults.set(newValue, forKey: Keys.openFrames) }
+    /// The windows open when the app last quit, in the order they were opened.
+    ///
+    /// Read from the two lists this replaced — the projects, and their frames index for index — when it
+    /// has never been written.
+    var openWindows: [OpenWindow] {
+        get {
+            if let data = defaults.data(forKey: Keys.openWindows),
+               let windows = try? JSONDecoder().decode([OpenWindow].self, from: data) { return windows }
+            let keys = defaults.stringArray(forKey: Keys.openProjects) ?? []
+            let frames = defaults.stringArray(forKey: Keys.openFrames) ?? []
+            return keys.enumerated().map { index, key in
+                OpenWindow(project: key, canvas: nil, frame: frames.indices.contains(index) ? frames[index] : "",
+                           minimized: false, fullScreen: false, depth: nil)
+            }
+        }
+        set {
+            defaults.set(try? JSONEncoder().encode(newValue), forKey: Keys.openWindows)
+            defaults.removeObject(forKey: Keys.openProjects)
+            defaults.removeObject(forKey: Keys.openFrames)
+        }
     }
 
     private let defaults = UserDefaults.standard
@@ -45,6 +69,7 @@ final class WindowSettings {
         static let restoreWindows = "PMWindowRestore"
         static let openProjects = "PMWindowOpenProjects"
         static let openFrames = "PMWindowOpenFrames"
+        static let openWindows = "PMWindowOpenWindows"
     }
 
     private init() {
