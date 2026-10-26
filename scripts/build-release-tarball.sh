@@ -12,13 +12,15 @@ VERSION="${1:?Usage: $0 <version>}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARBALL_NAME="project-manager-${VERSION}.tar.gz"
 TARBALL_PATH="$ROOT/$TARBALL_NAME"
-PM_BINARY="pm-swift/.build/arm64-apple-macosx/release/pm"
 
 cd "$ROOT"
 
 echo "==> Building Swift pm (release, arm64 only)"
 cd pm-swift
 swift build -c release --triple arm64-apple-macosx
+# Ask SwiftPM where it put the binary: the output layout differs between build systems, and a
+# hardcoded path can find a stale binary from an older layout instead of the one just built.
+PM_BINARY="$(swift build -c release --triple arm64-apple-macosx --show-bin-path)/pm"
 cd "$ROOT"
 
 if [[ ! -f "$PM_BINARY" ]]; then
