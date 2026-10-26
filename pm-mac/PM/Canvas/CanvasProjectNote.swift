@@ -11,7 +11,7 @@ import PmLib
 /// as brackets. Everything the project window spends its effort making legible, spelled out.
 ///
 /// So it uses the same pieces, and not lookalikes: the status circle, the tokenised text through
-/// `taskLineAttributed` and `TokenTextLabel`, the due chip through `DueChip`, the row's commands
+/// `taskLineAttributed` and `TokenText`, the due chip through `DueChip`, the row's commands
 /// through `TaskMenu`, the editors through `InlineTextEditor` / `DueEditor` / `AddEditor`, the prose
 /// through `RenderedNote`, and the body cut into blocks by `SessionBody` — the same cut, so a task sits
 /// in the sentence that put it there rather than being gathered under it.
@@ -174,7 +174,7 @@ struct CanvasProjectNote: View {
     /// **Every sitting, always.** Narrowing happens in `blocks(for:at:)`, one block at a time, and it
     /// has to: a card scoped to the latest sitting's *prose* still draws the open tasks of every
     /// sitting before it, so there is no prefix of this list that describes what such a card shows. A
-    /// session that ends up contributing nothing loses its caption on its own — see `session_`.
+    /// session that ends up contributing nothing loses its caption on its own — see `sessionLines`.
     private var shownSessions: [(index: Int, session: Session)] {
         let all = (notes?.sessions ?? []).enumerated().map { (index: $0.offset, session: $0.element) }
         guard shows == .sitting, let pinned = pinnedSession else { return all }
@@ -475,7 +475,9 @@ struct CanvasProjectNote: View {
                 cancel: { pendingDelete = [] })
             ScrollViewReader { scroller in
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 0) {
+                // **Lazy, and flat** — see `CardLine`. Every row on a long project used to be built,
+                // measured and kept, and every scroll tick then walked all of them.
+                LazyVStack(alignment: .leading, spacing: 0) {
                     title
                     // The brief, above the work, exactly where the window puts it — and the same view,
                     // so it reads as the same printed page and edits the same way (double-click, then
@@ -494,16 +496,17 @@ struct CanvasProjectNote: View {
                                            trailingInset: Self.margin)
                     }
                     if shows.brief { members }
-                    switch shows.layout {
-                    case .sittings:
-                        ForEach(shownSessions, id: \.index) { index, session in
-                            session_(session, at: index)
+                    ForEach(cardLines) { line in
+                        // A sitting's lines each publish its frame, and the card joins them into the
+                        // sitting's block (`joinedSessions`): there is no view around a sitting any
+                        // more to publish it whole.
+                        if let index = line.session {
+                            lineView(line)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(SessionFrameReporter(index: index))
+                        } else {
+                            lineView(line)
                         }
-                    case .pile(let withLatest):
-                        if withLatest, let first = shownSessions.first {
-                            session_(first.session, at: first.index)
-                        }
-                        pile(withLatest: withLatest)
                     }
                     footer
                 }
@@ -512,7 +515,7 @@ struct CanvasProjectNote: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .coordinateSpace(name: TaskDropResolver.coordinateSpace)
                 .onPreferenceChange(RowFramesKey.self) { frames.rows = $0 }
-                .onPreferenceChange(SessionFramesKey.self) { frames.sessions = $0 }
+                .onPreferenceChange(SessionFramesKey.self) { frames.sessions = Self.joinedSessions($0) }
                 .overlay(alignment: .topLeading) { dropIndicator }
                 // **Only the app's own tasks.** The window's list also takes text and files dragged in
                 // from elsewhere; a card cannot, because the board underneath it is already the target
@@ -527,9 +530,12 @@ struct CanvasProjectNote: View {
                     onDropExternal: { _, _ in false }
                 ))
             }
+            // To the line's own id, not to an `.id` inside it: a lazy stack can scroll to a line it has
+            // not built yet only by the identity its `ForEach` gave it.
             .onChange(of: scrollToken) { _, _ in
-                guard let key = scrollTarget else { return }
-                withAnimation(.easeOut(duration: 0.15)) { scroller.scrollTo(key, anchor: .center) }
+                guard let key = scrollTarget,
+                      let id = cardLines.first(where: { $0.originKey == key })?.id else { return }
+                withAnimation(.easeOut(duration: 0.15)) { scroller.scrollTo(id, anchor: .center) }
             }
             }
         }
@@ -865,18 +871,23 @@ struct CanvasProjectNote: View {
         return name.hasPrefix("Notes - ") ? String(name.dropFirst("Notes - ".count)) : name
     }
 
-    /// A sitting, published whole so a drag can light it (`TaskDropResolver`, D1). One stack with no
-    /// spacing inside a list with none, so wrapping it changes nothing drawn.
-    private func session_(_ session: Session, at index: Int) -> some View {
-        VStack(alignment: .leading, spacing: 0) { sessionContent(session, at: index) }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(SessionFrameReporter(index: index))
+    /// Everything the card draws below the brief, one line at a time, in order — what the lazy stack's
+    /// one `ForEach` walks.
+    private var cardLines: [CardLine] {
+        switch shows.layout {
+        case .sittings:
+            return shownSessions.flatMap { sessionLines($0.session, at: $0.index) }
+        case .pile(let withLatest):
+            let latest = withLatest ? shownSessions.first.map { sessionLines($0.session, at: $0.index) } : nil
+            return (latest ?? []) + pileLines(withLatest: withLatest)
+        }
     }
 
-    @ViewBuilder private func sessionContent(_ session: Session, at index: Int) -> some View {
+    private func sessionLines(_ session: Session, at index: Int) -> [CardLine] {
         let blocks = blocks(for: session, at: index)
         let picked = pickedRows(into: index)
         let caption = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
+        var lines: [CardLine] = []
         // A sitting is captioned when it puts something on the card. Narrowed to tasks, a session whose
         // whole content was prose contributes nothing and would otherwise leave a date standing over
         // the next session's work.
@@ -888,6 +899,40 @@ struct CanvasProjectNote: View {
         let isEmpty = session.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let showsEmpty = isEmpty && shows.showsProse(ofSessionAt: index) && display.find.isEmpty
         if (!blocks.isEmpty || !picked.isEmpty || showsEmpty), !caption.isEmpty {
+            lines.append(.heading(session, at: index))
+        }
+        if showsEmpty { lines.append(.empty(at: index)) }
+        lines += blocks.map { .block($0, at: index) }
+        // The new-task field at the end of the sitting's own tasks — where the task it makes will be.
+        if activeEditor == Self.quickAdd, quickAddHost == index { lines.append(.quickAdd(at: index)) }
+        // **Picked up**: the older tasks taken up in this sitting, after its own, each still carrying
+        // where it came from. Drawn here *and* on its own line — one task in two places, both showing
+        // its state — because moving it here would take it out of the sentence that explains it
+        // (docs/sessions.md D5).
+        if !picked.isEmpty {
+            lines.append(.caption("Picked up", at: index, extraTop: 0))
+            lines += picked.map { .picked($0, into: index) }
+        }
+        return lines
+    }
+
+    /// D5's pile: every open task not already on the card, in one group, newest origin first — in place
+    /// of a caption per sitting, each row carrying the chip that says which sitting it is from.
+    ///
+    /// Captioned **Still open** under the latest sitting, where it is the second of two groups; a Tasks
+    /// card is nothing but the pile, and a caption over the only thing on the card says nothing.
+    private func pileLines(withLatest: Bool) -> [CardLine] {
+        let rows = pileRows(withLatest: withLatest)
+        var lines: [CardLine] = []
+        if !rows.isEmpty, withLatest {
+            lines.append(.caption("Still open", at: nil, extraTop: shownSessions.isEmpty ? 0 : 8))
+        }
+        return lines + rows.map { .pile($0) }
+    }
+
+    @ViewBuilder private func lineView(_ line: CardLine) -> some View {
+        switch line {
+        case .heading(let session, let index):
             SessionHeading(session: session)
                 .padding(.horizontal, Self.margin)
                 // Twice the gap between sittings, which run into one another at 10. The first one drawn
@@ -898,53 +943,52 @@ struct CanvasProjectNote: View {
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { openNote = index }
                 .contextMenu { LazyMenu { sessionMenu(at: index) } }
-        }
-        if showsEmpty { emptySession(at: index) }
-        ForEach(blocks) { block in
-            switch block {
-            case .prose(_, let text):
-                RenderedNote(prose: text, font: .systemFont(ofSize: TaskRowMetrics.textSize),
-                             noteURL: noteURL, maxImageHeight: 240)
-                    .padding(.horizontal, Self.margin)
-                    .padding(.vertical, 3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    // The window's gesture, on the window's object: double-clicking a session's prose
-                    // opens its note. Same act, same surface, whichever one you are looking at it
-                    // through — which is the rule the task row's double-click already follows.
-                    .onTapGesture(count: 2) { openNote = index }
-                    .contextMenu { LazyMenu { sessionMenu(at: index) } }
-            case .task(let identified):
-                row(identified.todo)
-            }
-        }
-        // The new-task field at the end of the sitting's own tasks — where the task it makes will be.
-        if activeEditor == Self.quickAdd, quickAddHost == index { quickAddEditor }
-        // **Picked up**: the older tasks taken up in this sitting, after its own, each still carrying
-        // where it came from. Drawn here *and* on its own line — one task in two places, both showing
-        // its state — because moving it here would take it out of the sentence that explains it
-        // (docs/sessions.md D5).
-        if !picked.isEmpty {
-            groupCaption("Picked up")
-            ForEach(picked) { entry in
-                row(entry.row.todo, place: .picked(into: index), showsOrigin: entry.row.showsOrigin)
-            }
+        case .empty(let index):
+            emptySession(at: index)
+        case .block(.prose(_, let text), let index):
+            RenderedNote(prose: text, font: .systemFont(ofSize: TaskRowMetrics.textSize),
+                         noteURL: noteURL, maxImageHeight: 240)
+                .padding(.horizontal, Self.margin)
+                .padding(.vertical, 3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                // The window's gesture, on the window's object: double-clicking a session's prose
+                // opens its note. Same act, same surface, whichever one you are looking at it
+                // through — which is the rule the task row's double-click already follows.
+                .onTapGesture(count: 2) { openNote = index }
+                .contextMenu { LazyMenu { sessionMenu(at: index) } }
+        case .block(.task(let identified), _):
+            row(identified.todo)
+        case .quickAdd:
+            quickAddEditor
+        case .caption(let text, _, let extraTop):
+            groupCaption(text).padding(.top, extraTop)
+        case .picked(let entry, let index):
+            row(entry.row.todo, place: .picked(into: index), showsOrigin: entry.row.showsOrigin)
+        case .pile(let entry):
+            row(entry.row.todo, showsOrigin: entry.row.showsOrigin)
         }
     }
 
-    /// D5's pile: every open task not already on the card, in one group, newest origin first — in place
-    /// of a caption per sitting, each row carrying the chip that says which sitting it is from.
+    /// A sitting's block, joined back together from the frames its lines published one by one.
     ///
-    /// Captioned **Still open** under the latest sitting, where it is the second of two groups; a Tasks
-    /// card is nothing but the pile, and a caption over the only thing on the card says nothing.
-    @ViewBuilder private func pile(withLatest: Bool) -> some View {
-        let rows = pileRows(withLatest: withLatest)
-        if !rows.isEmpty, withLatest {
-            groupCaption("Still open").padding(.top, shownSessions.isEmpty ? 0 : 8)
+    /// Only the lines the lazy stack has built publish, so a sitting running off the edge of the card
+    /// is joined from the part of it that is near the screen — which is the only part a drag can be
+    /// over.
+    private static func joinedSessions(_ frames: [SessionFrame]) -> [SessionFrame] {
+        var joined: [SessionFrame] = []
+        var position: [Int: Int] = [:]
+        for frame in frames {
+            if let at = position[frame.index] {
+                let held = joined[at]
+                joined[at] = SessionFrame(index: frame.index, minY: min(held.minY, frame.minY),
+                                          maxY: max(held.maxY, frame.maxY))
+            } else {
+                position[frame.index] = joined.count
+                joined.append(frame)
+            }
         }
-        ForEach(rows) { entry in
-            row(entry.row.todo, showsOrigin: entry.row.showsOrigin)
-        }
+        return joined
     }
 
     /// A group's caption inside the card — Picked up and Still open — in the brief's label style: a
@@ -1093,12 +1137,8 @@ struct CanvasProjectNote: View {
             // The words, what follows them, and "＋date" on hover — see `TaskLineLayout` for why the
             // badges give way to the words rather than the other way round.
             TaskLineLayout {
-                TokenTextLabel(attributed: taskLineAttributed(todo, wait: store.wait(for: todo),
-                                                              size: size),
-                               onOpenProject: onOpenProject)
-                    .alignmentGuide(.firstTextBaseline) { _ in
-                        TokenTextLabel.firstBaseline(size: size, focused: todo.isFocused)
-                    }
+                TokenText(attributed: taskLineAttributed(todo, wait: store.wait(for: todo), size: size),
+                          onOpenProject: onOpenProject)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1179,9 +1219,6 @@ struct CanvasProjectNote: View {
                 key: key, session: todo.sessionIndex, line: todo.lineIndex,
                 depth: todo.depth, minY: frame.minY, maxY: frame.maxY)])
         }) }
-        // In the background, so `ForEach`'s own identity for the row is left alone — an `.id` on the
-        // row itself would replace it and undo the stable-across-reindex animations.
-        .background(Color.clear.frame(width: 0, height: 0).id(rowID))
         .contentShape(Rectangle())
         // **Drag a task to move it**, which the card could not do before: reordering was the window's
         // and a board was where you read. It is the same drag, resolved by the same
@@ -1526,6 +1563,59 @@ private struct PileEntry: Identifiable {
     let id: String
     let row: PileRow
     var todo: Todo { row.todo }
+}
+
+/// One line of a project card below its brief: a sitting's heading, a paragraph, a task, a caption.
+///
+/// **One flat list, in one lazy stack**, so the card builds only the lines near the screen. On a long
+/// project (S-004: 25 sittings, 103 tasks) building every line cost 280ms up front, a ticked task
+/// rebuilt them all for close to half a second, and each scroll tick spent 8ms walking views nobody
+/// could see. Flat, rather than a lazy stack per sitting, because a lazy stack scrolls only to the
+/// lines its own `ForEach` names — a task inside a sitting that had not been built yet was a scroll
+/// that went nowhere.
+private enum CardLine: Identifiable {
+    case heading(Session, at: Int)
+    case empty(at: Int)
+    case block(SessionBlock, at: Int)
+    case quickAdd(at: Int)
+    case caption(String, at: Int?, extraTop: CGFloat)
+    case picked(PileEntry, into: Int)
+    case pile(PileEntry)
+
+    /// Built from what the line draws, so a completion that reindexes the list slides the lines below
+    /// rather than cross-fading them. A block's own id is unique only within its sitting.
+    var id: String {
+        switch self {
+        case .heading(_, let index): return "heading/\(index)"
+        case .empty(let index): return "empty/\(index)"
+        case .block(let block, let index): return "\(index)/\(block.id)"
+        case .quickAdd: return "quick-add"
+        case .caption(let text, let index, _): return "caption/\(index.map(String.init) ?? "")/\(text)"
+        case .picked(let entry, _): return entry.id
+        case .pile(let entry): return "pile/\(entry.id)"
+        }
+    }
+
+    /// The sitting the line belongs to, which it publishes its frame under.
+    var session: Int? {
+        switch self {
+        case .heading(_, let index), .empty(let index), .block(_, let index), .quickAdd(let index),
+             .picked(_, let index):
+            return index
+        case .caption(_, let index, _): return index
+        case .pile: return nil
+        }
+    }
+
+    /// The task drawn on its own line here — where a scroll to that task goes. Not a copy under Picked
+    /// up, which is not where its line is.
+    @MainActor var originKey: String? {
+        switch self {
+        case .block(.task(let identified), _): return PMStore.key(for: identified.todo)
+        case .pile(let entry): return PMStore.key(for: entry.todo)
+        default: return nil
+        }
+    }
 }
 
 /// What the board asks of the project card you are standing in.

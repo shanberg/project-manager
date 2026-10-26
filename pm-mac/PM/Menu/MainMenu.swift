@@ -416,7 +416,7 @@ enum MainMenu {
                                    action: #selector(CanvasBoardView.toggleConnectMode(_:)), keyEquivalent: "e")
         connect.keyEquivalentModifierMask = [.command, .shift]
 
-        menu.addItem(.sectionHeader(title: "Workspace"))
+        menu.addItem(.sectionHeader(title: "Layout"))
         workspaceItems(menu)
 
         menu.addItem(.sectionHeader(title: "Page"))
@@ -429,7 +429,7 @@ enum MainMenu {
     /// Making a workspace, arranging it, and what its focused tile can be told. Each tile command acts
     /// on the focused tile, so each is dim unless exactly one is focused — see `focusedTile`.
     private static func workspaceItems(_ menu: NSMenu) {
-        menu.addItem(withTitle: "New Workspace", action: #selector(CanvasBoardView.tileSelection(_:)),
+        menu.addItem(withTitle: "New Layout", action: #selector(CanvasBoardView.tileSelection(_:)),
                      keyEquivalent: "")
         let arrange = NSMenu(title: "Arrange")
         arrange.addItem(MenuPictures.palette("Arrange", CanvasTiling.Arrangement.allCases.map { arrangement in
@@ -467,13 +467,13 @@ enum MainMenu {
         menu.addItem(withTitle: "Gather Workspace", action: #selector(CanvasBoardView.gatherWorkspace(_:)),
                      keyEquivalent: "")
         // Rename with no Name beside it: a workspace is made named (docs/canvas-workspaces.md §7i).
-        menu.addItem(withTitle: "Rename Workspace\u{2026}", action: #selector(CanvasBoardView.renameWorkspace(_:)),
+        menu.addItem(withTitle: "Rename Layout\u{2026}", action: #selector(CanvasBoardView.renameWorkspace(_:)),
                      keyEquivalent: "")
-        menu.addItem(withTitle: "Duplicate Workspace\u{2026}",
+        menu.addItem(withTitle: "Duplicate Layout\u{2026}",
                      action: #selector(CanvasBoardView.duplicateWorkspace(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "Remove from Workspace", action: #selector(CanvasBoardView.removeTile(_:)),
+        menu.addItem(withTitle: "Remove from Layout", action: #selector(CanvasBoardView.removeTile(_:)),
                      keyEquivalent: "")
-        menu.addItem(withTitle: "Delete Workspace", action: #selector(CanvasBoardView.deleteWorkspace(_:)),
+        menu.addItem(withTitle: "Delete Layout", action: #selector(CanvasBoardView.deleteWorkspace(_:)),
                      keyEquivalent: "")
     }
 

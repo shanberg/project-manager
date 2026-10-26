@@ -43,9 +43,15 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
     /// Horizontal room inside the pill, at each end. The trailing pair of brackets supplies the right,
     /// the leading pair the left — plus the glyph's width.
     /// Total horizontal room inside the pill, split across the two bracket pairs.
-    private let padding: CGFloat = 8
+    static let padding: CGFloat = 8
     /// Rounded, not a capsule: a capsule on a 16pt line reads as a button, and this is a word.
-    private let radius: CGFloat = 4
+    static let radius: CGFloat = 4
+    /// The pill's fill: the text colour at this alpha. Shared with `TokenText`, which draws the same
+    /// pill in SwiftUI.
+    static let fillAlpha: CGFloat = 0.09
+    static var fill: NSColor { NSColor.labelColor.withAlphaComponent(fillAlpha) }
+    private var padding: CGFloat { Self.padding }
+    private var radius: CGFloat { Self.radius }
 
     override init() {
         super.init()
@@ -86,7 +92,7 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
     /// An alias (`[[note|shown as this]]`) is left alone — the words after the pipe are the ones
     /// somebody chose, and there is no code in them to drop. The prefix's length comes from PmLib's
     /// parser rather than from a second copy of the grammar here.
-    private func codeRange(inTokenAt span: NSRange, in text: String) -> NSRange? {
+    static func codeRange(inTokenAt span: NSRange, in text: String) -> NSRange? {
         guard !ProjectCodes.areShown else { return nil }
         let ns = text as NSString
         let inner = ns.substring(with: NSRange(location: span.location + 2, length: span.length - 4))
@@ -136,7 +142,7 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         for token in tokens {
             hidden.append((token.opening, padding / 4))
             hidden.append((token.closing, padding / 4))
-            if let code = codeRange(inTokenAt: token.span, in: text) { hidden.append((code, 0)) }
+            if let code = Self.codeRange(inTokenAt: token.span, in: text) { hidden.append((code, 0)) }
         }
         let result = Scan(codesShown: codesShown, tokens: tokens, hidden: hidden)
         if isOwn { scanned = result }
@@ -246,7 +252,7 @@ final class TokenLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
                 // A wash off the text colour rather than a grey of its own: `quaternaryLabelColor` is
                 // already light in dark mode, and at any alpha strong enough to see it read as a
                 // filled button rather than as a marked word.
-                NSColor.labelColor.withAlphaComponent(0.09).setFill()
+                Self.fill.setFill()
                 NSBezierPath(roundedRect: pill, xRadius: self.radius, yRadius: self.radius).fill()
             }
         }

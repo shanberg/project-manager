@@ -96,7 +96,7 @@ struct CanvasTileCapsule: View {
         switch (tile.isMaximized, tile.isCard) {
         case (true, true): return "Put the canvas back"
         case (false, true): return "Fill the window with this card"
-        case (true, false): return "Put the workspace back"
+        case (true, false): return "Put the layout back"
         case (false, false): return "Fill the window with this tile"
         }
     }

@@ -289,7 +289,7 @@ enum CanvasTiling {
     ///     out. Zero means nothing is selected, and the command is unavailable.
     static func commandTitle(tiled: Bool, targets: Int) -> String {
         guard !tiled else { return "Show Canvas" }
-        return targets > 0 ? "New Workspace from Selection" : "New Workspace"
+        return targets > 0 ? "New Layout from Selection" : "New Layout"
     }
 
     /// The order cards tile in: reading order of where they actually sit on the board.

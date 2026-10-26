@@ -400,7 +400,7 @@ extension CanvasBoardView {
     /// `.layoutChanged` is what the system uses for a window rearranging itself, which is exactly what
     /// this is.
     func announceTiling() {
-        setAccessibilityLabel(tilingSummary.map { "Workspace, \($0.long)" } ?? "Canvas")
+        setAccessibilityLabel(tilingSummary.map { "Layout, \($0.long)" } ?? "Canvas")
         NSAccessibility.post(element: self, notification: .layoutChanged)
     }
 
@@ -844,7 +844,7 @@ extension CanvasBoardView {
     /// restore — and wrong for one you went looking for, which would be added somewhere you can't see.
     func addExistingCard(withID id: String) {
         let undoFrom = beginTilingUndo()
-        defer { endTilingUndo("Add to Workspace", from: undoFrom) }
+        defer { endTilingUndo("Add to Layout", from: undoFrom) }
         guard let tiling, !tiling.cards.contains(id),
               document.node(id: id).map({ !$0.isGroup }) ?? false else { return }
         restoringMaximized { addToTiling(id) }
@@ -982,7 +982,7 @@ extension CanvasBoardView {
     /// ⌘Return on one (`tileTargets`). Never the last card out: a workspace of nothing is not a state.
     func pick(_ id: String) {
         let undoFrom = beginTilingUndo()
-        defer { endTilingUndo("Change Workspace", from: undoFrom) }
+        defer { endTilingUndo("Change Layout", from: undoFrom) }
         guard let session = tiling, let node = document.node(id: id) else { return }
         var ids = [id]
         if node.isGroup {

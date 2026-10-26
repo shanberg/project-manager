@@ -45,7 +45,7 @@ enum WorkspaceNamePrompt {
     static func confirmReplacing(_ name: String) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "A workspace named “\(name)” already exists."
+        alert.messageText = "A layout named “\(name)” already exists."
         alert.informativeText = "Replacing it keeps its name and forgets its tiles, until you undo."
         alert.addButton(withTitle: "Replace")
         alert.addButton(withTitle: "Cancel")
@@ -71,7 +71,7 @@ enum WorkspaceNamePrompt {
         if let answer = answersDelete { return answer(name) }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Delete the workspace “\(name)”?"
+        alert.messageText = "Delete the layout “\(name)”?"
         alert.informativeText = """
             Its cards stay on the board and the tiles stay on screen. The workspace and its name are \
             forgotten until you undo.
@@ -97,7 +97,7 @@ enum WorkspaceNamePrompt {
     /// to *be* called: it goes stale the moment you swap the arrangement or add a tile, and it puts a
     /// count on a chip, which is the one thing a chip has repeatedly been told not to carry.
     nonisolated static func freshName(avoiding taken: [String]) -> String {
-        let base = "Workspace"
+        let base = "Layout"
         guard taken.contains(base) else { return base }
         var n = 2
         while taken.contains("\(base) \(n)") { n += 1 }

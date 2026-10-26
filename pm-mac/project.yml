@@ -104,6 +104,12 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.stuarthanberg.pm
             CFBundleURLSchemes: [pmpanel]
+          # Web links, as an alternate handler for the `.canvas` reason below: Folio is offered in
+          # Open With and the default-browser list, and is never where links go unless chosen there.
+          # See Canvas/CanvasIncomingLinks.swift.
+          - CFBundleURLName: com.stuarthanberg.pm.web
+            CFBundleURLSchemes: [http, https]
+            LSHandlerRank: Alternate
         # Canvases open in PM, but PM never becomes the app that owns them: `LSHandlerRank: Alternate`
         # puts it in "Open With" and leaves Obsidian as the default handler. A vault's canvases are
         # Obsidian documents, and taking the file association on install would be a decision PM has no
@@ -200,6 +206,7 @@ targets:
       - path: PM/Canvas/CanvasBlockPolicy.swift
       - path: PM/Canvas/CanvasSiteSettings.swift
       - path: PM/Canvas/CanvasAddress.swift
+      - path: PM/Canvas/CanvasLinkStatus.swift
       - path: PM/Canvas/CanvasAddressSuggestions.swift
       - path: PM/Canvas/CanvasSelection.swift
       - path: PM/Canvas/CanvasSnapping.swift
@@ -273,6 +280,7 @@ targets:
       - path: PM/Windows/KeyablePanel.swift
       - path: PM/Task/OutsideClick.swift
       - path: PM/Task/TokenTextLabel.swift
+      - path: PM/Task/TokenText.swift
       - path: PM/Project/ProjectTab.swift
       - path: PM/Windows/ProjectTroublePane.swift
       - path: PM/Project/RowSelection.swift

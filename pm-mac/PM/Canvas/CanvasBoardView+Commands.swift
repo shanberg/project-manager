@@ -1260,13 +1260,13 @@ extension CanvasBoardView {
         var layouts = CanvasViewSpec.Layout.allCases.filter { layout in cards.allSatisfy { $0.spec.kind.layouts.contains(layout) } }
         if cards.contains(where: { $0.spec.period.isSpan }) { layouts.removeAll { $0 == .rail } }
         guard layouts.count > 1 else { return }
-        let submenu = NSMenu(title: "Layout")
+        let submenu = NSMenu(title: "View As")
         for layout in layouts {
             let item = add(submenu, layout.title, #selector(setViewLayout(_:)))
             item.representedObject = layout.rawValue
             item.state = cards.allSatisfy { $0.spec.shownLayout == layout } ? .on : .off
         }
-        menu.addItem(withTitle: "Layout", action: nil, keyEquivalent: "").submenu = submenu
+        menu.addItem(withTitle: "View As", action: nil, keyEquivalent: "").submenu = submenu
     }
 
     /// Lay the selected views out one way, growing each to what the layout needs — seven columns don't
@@ -1515,11 +1515,11 @@ extension CanvasBoardView {
 
         menu.addItem(.separator())
         if wholeTile {
-            add(menu, "Remove Tile from Workspace", #selector(removeMenuTileWithTabs(_:)))
+            add(menu, "Remove Tile from Layout", #selector(removeMenuTileWithTabs(_:)))
         } else {
             // The card's Delete, held back by `buildTileMenu` so that both removals end the menu.
             addDeleteCard(menu)
-            add(menu, "Remove from Workspace", #selector(removeMenuTile(_:)))
+            add(menu, "Remove from Layout", #selector(removeMenuTile(_:)))
         }
     }
 
@@ -1593,7 +1593,7 @@ extension CanvasBoardView {
     @objc func pickCardsOnBoard(_ sender: Any?) { togglePicking() }
 
     /// What that command is called: which way it goes.
-    var pickCardsTitle: String { isPicking ? "Back to Workspace" : "Pick Cards on Canvas" }
+    var pickCardsTitle: String { isPicking ? "Back to Layout" : "Pick Cards on Canvas" }
 
     /// A tile's tabs down its side or across its top — one checked item rather than two, since it is a
     /// setting of the tile's and a check says which it has.
@@ -1795,7 +1795,7 @@ extension CanvasBoardView {
             let entry = add(list, name, #selector(goToListedWorkspace(_:)))
             entry.representedObject = name
         }
-        let parent = menu.addItem(withTitle: "Workspaces", action: nil, keyEquivalent: "")
+        let parent = menu.addItem(withTitle: "Layouts", action: nil, keyEquivalent: "")
         parent.submenu = list
     }
 
@@ -2995,10 +2995,10 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             if let entry = item as? NSMenuItem {
                 switch entry.action {
                 case #selector(deleteWorkspace(_:)):
-                    entry.title = workspaceName.map { "Delete “\($0)”" } ?? "Delete Workspace"
+                    entry.title = workspaceName.map { "Delete “\($0)”" } ?? "Delete Layout"
                 case #selector(duplicateWorkspace(_:)):
                     entry.title = workspaceName.map { "Duplicate “\($0)”\u{2026}" }
-                        ?? "Duplicate Workspace\u{2026}"
+                        ?? "Duplicate Layout\u{2026}"
                 default: break
                 }
             }
@@ -3009,7 +3009,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             guard entry.tag < names.count else {
                 // Past the end: named for its slot, dim, and pointing at nothing — the same answer
                 // "Go to Frame" gives, so nine empty rows never look like nine broken commands.
-                entry.title = "Workspace \(entry.tag + 1)"
+                entry.title = "Layout \(entry.tag + 1)"
                 entry.representedObject = nil
                 entry.state = .off
                 return false

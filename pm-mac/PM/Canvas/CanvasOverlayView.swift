@@ -170,7 +170,7 @@ final class CanvasOverlayView: NSView {
         NSColor.black.withAlphaComponent(0.38).setFill()
         shade.fill()
         drawHint(session.cards.contains(id)
-                    ? "Return to Show It in the Workspace · Space or Esc to Put It Back"
+                    ? "Return to Show It in the Layout · Space or Esc to Put It Back"
                     : "Return to Add It · Space or Esc to Put It Back", board, scale)
     }
 

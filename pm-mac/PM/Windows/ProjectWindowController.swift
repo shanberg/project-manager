@@ -257,9 +257,30 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         // the board tab that has to hold still. See `ProjectSplitViewController.setTabs`.
         // Every tab wants a board now, including the notes (§7d), and so does the workspace seeding
         // above — so what decides whether this has to be asked again is only whether the path is known.
+        // A tab the window was opened *for* outranks the one it was last left on — see `askedFor`.
+        if let askedFor {
+            if let tab = remembered.first(showing: askedFor) { remembered.select(tab.id) }
+            else { remembered.open(askedFor) }
+        }
         let pending = !store.hasResolvedCanvasPath
         awaitsRememberedCanvas = pending
+        if !pending { askedFor = nil }
         split.setTabs(remembered, canvasPending: pending)
+    }
+
+    /// The tab this window was opened to show, held until the remembered tabs have been applied for
+    /// good.
+    ///
+    /// **A new window learns where its board is a moment after it is up**, and learning it re-applies
+    /// the project's remembered tabs — which used to land Open in New Window on whatever tab the project
+    /// was last left on, the canvas as often as not, a beat after it had shown the workspace you asked
+    /// for.
+    private var askedFor: ProjectTabView?
+
+    /// Put `view` up, and keep it up through the remembered tabs arriving.
+    func showTab(_ view: ProjectTabView) {
+        askedFor = awaitsRememberedCanvas ? view : nil
+        split.openTab(view)
     }
 
     /// ⌘Z goes to whatever this window is showing. With a board up that is the canvas document's own
@@ -445,7 +466,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func openWorkspaceInNewWindow(_ name: String) {
         let other = WindowManager.shared.open(projectKey: projectKey, reusingExistingWindow: false,
                                               canvas: openedCanvas)
-        other.split.openTab(.board(.workspace(name)))
+        other.showTab(.board(.workspace(name)))
     }
 
     /// A window on a project — or on a canvas file, for a board with no project — with one of its
@@ -454,7 +475,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     static func showWorkspace(_ name: String, projectKey: String?, canvas: URL) {
         let controller = projectKey.map { WindowManager.shared.open(projectKey: $0) }
             ?? WindowManager.shared.open(canvas: canvas)
-        controller?.split.openTab(name.isEmpty ? .board(.whole) : .board(.workspace(name)))
+        controller?.showTab(name.isEmpty ? .board(.whole) : .board(.workspace(name)))
     }
 
     func openProjectCanvas() {

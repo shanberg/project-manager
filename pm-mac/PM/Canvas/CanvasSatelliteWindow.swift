@@ -156,6 +156,17 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         if content.superview !== stage { place(content) }
     }
 
+    /// A card new to the workspace that belongs out here: a link ⌘-clicked on one of this window's
+    /// pages, or one handed to Folio while this window was in front. It joins as the last tab — the
+    /// slot it was given in the tiling is this window's tile, so Bring Back and Gather agree.
+    func adopt(_ card: CanvasNodeView, showing: Bool) {
+        let before = shownCard
+        take(card)
+        guard cards.last === card else { return }
+        showTab(showing ? cards.count - 1 : cards.firstIndex { $0 === before } ?? 0)
+        CanvasSatelliteDock.shared.refresh()
+    }
+
     private func place(_ content: NSView) {
         content.translatesAutoresizingMaskIntoConstraints = false
         stage.addSubview(content)

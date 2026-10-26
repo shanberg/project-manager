@@ -184,6 +184,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             }
             // The tab wears this too, and in a window with a bar it is the *only* place it is worn.
             onTilingChanged?()
+            runWaitingForWorkspace()
         }
         // The header's tiling button says what it is about to do — "Fill Window with These 6 Cards" —
         // so it has to hear about the selection. Nothing was listening to this before; the board fired
@@ -510,6 +511,32 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     /// Told when this board tiles or untiles, so the tab holding it can re-title itself.
     var onTilingChanged: (() -> Void)?
+
+    /// Run `act` once this board is tiled into the workspace called `name` — at once if it already is.
+    ///
+    /// **Because getting there takes a pane anything from no time to several turns**, and which one
+    /// depends on how it was built: a pane already in the workspace is there, one coming over from the
+    /// canvas leaves its tiles and makes them again a turn later (`runArrival`), and one built for the
+    /// tab lays them out only after its first fit (`goToWorkspace`). Pop Out from a chip used to guess
+    /// at that with a short poll, and gave up on a pane that did not know its workspace's name yet —
+    /// which is every pane built for the click, so the workspace opened and nothing popped out.
+    ///
+    /// Dropped if the board tiles into something else first.
+    func whenInWorkspace(_ name: String, _ act: @escaping () -> Void) {
+        if board.isTiled, board.workspaceName == name { return act() }
+        waitingForWorkspace = (name, act)
+    }
+
+    private var waitingForWorkspace: (name: String, act: () -> Void)?
+
+    private func runWaitingForWorkspace() {
+        guard let waiting = waitingForWorkspace, board.isTiled else { return }
+        waitingForWorkspace = nil
+        guard board.workspaceName == waiting.name else { return }
+        // A turn later: this is heard from inside `restoreTiling`, which has its satellites still to
+        // bring back.
+        DispatchQueue.main.async(execute: waiting.act)
+    }
 
     /// What a tiled view here is showing, long and short — what the tab puts after its name.
     var tilingSummary: (long: String, short: String)? { header.tiling }

@@ -408,18 +408,13 @@ final class ProjectSplitViewController: NSSplitViewController {
         applySelectedTab()
     }
 
-    /// Pop Out from a workspace's chip: its tab up, then every tile out. A board just built for the tab
-    /// lays its tiles out a turn or more after it is shown (`CanvasPaneController.goToWorkspace`), so
-    /// this waits for them, briefly.
+    /// Pop Out from a workspace's chip: its tab up, then every tile out — once the tiles are there,
+    /// which for a pane just built for the tab is a turn or more after it is shown. See
+    /// `CanvasPaneController.whenInWorkspace`.
     func popOutWorkspace(_ name: String) {
         openTab(.board(.workspace(name)))
-        func attempt(_ left: Int) {
-            guard let board = canvasPane?.board, board.workspaceName == name else { return }
-            if board.isTiled { return board.popOutWorkspace() }
-            guard left > 0 else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { attempt(left - 1) }
-        }
-        attempt(20)
+        guard let pane = canvasPane else { return }
+        pane.whenInWorkspace(name) { [weak pane] in pane?.board.popOutWorkspace() }
     }
 
     /// ⌃⇥ / ⌃⇧⇥.
@@ -732,7 +727,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         guard replaced == nil || WorkspaceNamePrompt.confirmReplacing(new) else { return }
         moveWorkspace(from: old, to: new)
         // ⌘Z renames it back, and puts back what the new name replaced.
-        registerWorkspaceStep("Rename Workspace", undo: { split in
+        registerWorkspaceStep("Rename Layout", undo: { split in
             split.moveWorkspace(from: new, to: old)
             if let replaced { split.putWorkspace(replaced, named: new, opening: false) }
         }, redo: { $0.moveWorkspace(from: old, to: new) })
@@ -793,7 +788,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         guard !taken.contains(new) || WorkspaceNamePrompt.confirmReplacing(new) else { return }
         let replaced = CanvasWorkspaces.tiling(named: new, of: url)
         putWorkspace(tiling, named: new, opening: true)
-        registerWorkspaceStep("Duplicate Workspace", undo: { split in
+        registerWorkspaceStep("Duplicate Layout", undo: { split in
             split.dropWorkspace(named: new)
             if let replaced { split.putWorkspace(replaced, named: new, opening: false) }
         }, redo: { $0.putWorkspace(tiling, named: new, opening: true) })
@@ -814,7 +809,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         guard let url = canvasSource().url, let tiling = CanvasWorkspaces.tiling(named: name, of: url),
               WorkspaceNamePrompt.confirmDelete(name) else { return }
         dropWorkspace(named: name)
-        registerWorkspaceStep("Delete Workspace",
+        registerWorkspaceStep("Delete Layout",
                               undo: { $0.putWorkspace(tiling, named: name, opening: true) },
                               redo: { $0.dropWorkspace(named: name) })
     }

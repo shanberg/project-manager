@@ -47,6 +47,8 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     private var siteLabel: NSTextField?
     /// The line under the host: what the card is doing, or why it isn't doing it.
     private var status: NSTextField?
+    /// Where the hovered link goes. Made on the first hover. See `CanvasLinkStatus`.
+    private var linkStatus: CanvasLinkStatus?
     /// Told when the page renames itself. See `titleChanged`.
     private var titleWatch: NSKeyValueObservation?
     /// Told as the load advances, for the header's progress hairline. See `watchTitle`.
@@ -391,6 +393,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         view.alphaValue = handover.revealed ? 1 : 0
         web = view
         (view as? CanvasPageView)?.setFullFrameRate(isEngaged)
+        view.allowsBackForwardNavigationGestures = isEngaged
         capturingTitle = handover.capturingTitle
         watchTitle(of: view)
         applyContentZoom()
@@ -452,6 +455,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         running.removeFromSuperview()
         web = nil
         revealed = false
+        linkStatus?.hideNow()
         placeholder?.isHidden = false
         board.pageStateChanged()
         return handover
@@ -835,10 +839,16 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         CanvasWebSession.allowInspecting(view)
         view.navigationDelegate = self
         view.uiDelegate = self
-        // Left off deliberately: a two-finger swipe inside an engaged card would be a horizontal
-        // scroll on most pages and a "go back" on the rest. Back is on the card's menu instead, where
-        // it can't be triggered by accident.
-        view.allowsBackForwardNavigationGestures = false
+        // Two-finger swipe for Back and Forward, as in Safari — and with Safari's arbitration, which is
+        // WebKit's rather than ours: a horizontal swipe goes to the page first, and only becomes Back
+        // once the page is pinned at its left edge and declines it, so a carousel or a wide table still
+        // scrolls. It follows System Settings ▸ Trackpad ▸ Swipe between pages.
+        //
+        // **Only in the card you are in.** The board hands a wheel over any card to that card's page
+        // (`CanvasBoardView.scrollWheel`), and a page that can't scroll sideways hands it back so the
+        // board pans. With the gesture on, that same sideways pan across a board would send every
+        // card it crossed Back. Stepping in and out sets it — see `engagementChanged`.
+        view.allowsBackForwardNavigationGestures = isEngaged
         // Left on deliberately, and it is the `drawsBackground` line that used to be here. A page is
         // only obliged to paint a background if it wants one other than the browser's; plenty of real
         // pages set none and rely on the default. Through a transparent web view "no background" means
@@ -1032,6 +1042,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         web?.removeFromSuperview()
         web = nil
         revealed = false
+        linkStatus?.hideNow()
     }
 
     /// Put `view` in `container`, filling it, optionally beneath a view already there.
@@ -1142,6 +1153,8 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// web page that is no longer listening for them.
     override func engagementChanged() {
         (web as? CanvasPageView)?.setFullFrameRate(isEngaged)
+        // Swipe is Back only in the card you are in. See where the page is built.
+        web?.allowsBackForwardNavigationGestures = isEngaged
         if isEngaged {
             // Stepping in is where a card stops adopting names. Clicking a link is the only way a page
             // goes somewhere the card didn't send it, and a click is only possible from in here — so
@@ -1606,7 +1619,33 @@ extension CanvasLinkNodeView: CanvasPageLinkHost {
     }
 
     func openInNewCard(_ link: PageLink) {
-        board.addLinkCard(link.url.absoluteString, beside: node.id)
+        openAsNewCard(link.url, behind: NSEvent.modifierFlags.contains(.shift))
+    }
+
+    /// ⌘-click, middle-click and Open Link as New Card all end here.
+    ///
+    /// **In a workspace it is a tab in this tile, and it shows** — the browser's ⌘-click, with the
+    /// browser's ⇧ to leave it behind instead. A tile beside for every link you followed split the
+    /// workspace a little smaller each time; a tab costs the strip one chip. ⌥T still pulls it out.
+    ///
+    /// **On the board it is a card beside this one, with no line.** The line was what made every quick
+    /// look an edge in the `.canvas` file. Decided in a mock, 2026-10-24 (docs/web-cards.md).
+    private func openAsNewCard(_ url: URL, behind: Bool) {
+        let address = url.absoluteString
+        guard board.tiling?.position(of: node.id) != nil else {
+            return board.addLinkCard(address, beside: node.id, joined: false)
+        }
+        board.addingTab(to: node.id) { board.addLinkCard(address, beside: node.id, joined: false) }
+        guard let added = board.selection.first, added != node.id else { return }
+        // Out in a satellite, the tile it joined is that window's: the tab goes there too.
+        if let satellite = lentTo { return board.lendNewTab(added, to: satellite, showing: !behind) }
+        if behind {
+            board.showTab(node.id)
+        } else {
+            board.showTab(added)
+            // The tab's card view is built as the layout settles.
+            DispatchQueue.main.async { [weak board] in board?.engage(cardWithID: added) }
+        }
     }
 
     /// A tile, or a card you have stepped into: somewhere you are working in the page, not arranging it.
@@ -1666,10 +1705,10 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         default: break
         }
 
-        // ⌘-click: the link becomes a card of its own, beside this one and joined to it.
+        // ⌘-click: a tab in this tile, or a card beside this one on the board. See `openAsNewCard`.
         if clicked, navigationAction.modifierFlags.contains(.command),
            let target = navigationAction.request.url, isWeb(target) {
-            board.addLinkCard(target.absoluteString, beside: node.id)
+            openAsNewCard(target, behind: navigationAction.modifierFlags.contains(.shift))
             return decisionHandler(.cancel)
         }
 
@@ -1911,7 +1950,7 @@ extension CanvasLinkNodeView: WKUIDelegate {
         // goes on the board. Without it, the gesture would work on half the links of a real site and
         // not the other half, for a reason nobody could see.
         if navigationAction.modifierFlags.contains(.command) {
-            board.addLinkCard(url.absoluteString, beside: node.id)
+            openAsNewCard(url, behind: navigationAction.modifierFlags.contains(.shift))
         } else if CanvasWebPopup.wanted(by: navigationAction, features: windowFeatures) {
             return CanvasWebPopup.present(with: configuration, features: windowFeatures,
                                           userAgent: webView.customUserAgent, over: self, opener: self)
@@ -1920,6 +1959,21 @@ extension CanvasLinkNodeView: WKUIDelegate {
             webView.load(URLRequest(url: url))
         }
         return nil
+    }
+
+    /// The pointer moved over something on the page — WebKit's private hover callback, the one Safari's
+    /// status bar reads. See `CanvasLinkStatus`.
+    @objc(_webView:mouseDidMoveOverElement:withFlags:userInfo:)
+    func webView(_ webView: WKWebView, mouseDidMoveOverElement hit: AnyObject?,
+                 withFlags flags: NSEvent.ModifierFlags, userInfo: AnyObject?) {
+        guard webView === web else { return }
+        let link = hit?.value(forKey: "absoluteLinkURL") as? URL
+        guard let text = CanvasLinkStatus.text(for: link, flags: flags) else {
+            linkStatus?.show(nil)
+            return
+        }
+        if linkStatus == nil { linkStatus = CanvasLinkStatus.install(in: face) }
+        linkStatus?.show(text)
     }
 
     // MARK: What a page is allowed to put up

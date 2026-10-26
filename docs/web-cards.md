@@ -86,8 +86,9 @@ every browser has taught people to look for it.
 | gesture | what happens |
 |---|---|
 | click | the card goes there — wandered, with Home and Pin in the header |
-| ⌘-click | a card of its own, beside this one, joined by a line |
-| middle-click | the same (the gesture's one meaning in every browser) |
+| ⌘-click | on the board: a card of its own beside this one, with no line. In a workspace: a tab in this tile, showing |
+| ⇧⌘-click | the same, but a workspace tab opens behind and you stay on this page |
+| middle-click | the same as ⌘-click (the gesture's one meaning in every browser) |
 | right-click ▸ Open Link as New Card | the same, and findable |
 | right-click ▸ Add Link to *Project* | into the project's `## Links` |
 | right-click on the page ▸ Add Page to *Project* | the same, for where you have ended up |
@@ -148,9 +149,42 @@ the field, a back-history menu on press-and-hold, copy and open-in-browser where
 is small; the question is which of them a card is *for*, given that the answer to "I want to use this
 page properly" is Open in Browser and always has been.
 
-One of them is a real argument and is settled the other way: **the field does not search.**
-`CanvasAddress` rejects what isn't an address rather than reinterpreting it, because handing what you
-typed to a search engine is a network claim nobody agreed to in an app that makes exactly one.
+**Searching from the field is off until chosen.**
+- Words that aren't an address go to the engine picked in Settings (`CanvasSearchEngine`): DuckDuckGo, Google, Bing, Ecosia, Kagi or Startpage.
+- The default is `none`. With none, the field rejects what isn't an address.
+- Why: sending what you typed to a search engine is a network request, and nobody has agreed to it until they pick one.
+
+**What ⌘-click makes — decided 2026-10-24, in a mock.**
+- In a workspace: a tab in the tile it was clicked in, shown and stepped into. ⇧ leaves it behind.
+- In a satellite: a tab in that satellite (`CanvasSatelliteWindow.adopt`), as well as in its tile. Was: a new tile beside, which split the workspace smaller with every link followed.
+- On the board: a card beside, with no line. Was: joined by an edge, so every quick look added an edge to the `.canvas` file.
+- ⌘-click, middle-click and Open Link as New Card all go through `CanvasLinkNodeView.openAsNewCard`.
+- Rejected: a loose card saved only on Keep; pages stacked inside one board card.
+- Checked in a whole-app scratch harness: a tab joins the tile and shows, with no new column, tile or edge. On the board: one node, no edge. A negative control (forcing the old path) fails it. The ⇧ behind path isn't tested, because it reads the live modifier keys.
+
+## Browser habits a card follows
+
+**Links from other apps open in Folio, if you choose it.**
+- `http` and `https` are declared in `CFBundleURLTypes` with `LSHandlerRank: Alternate` (project.yml). Folio shows up in Open With and in System Settings' default-browser list, and never becomes the default on its own.
+- An incoming link with a satellite in front becomes a tab in that satellite, and shows. It goes into the satellite's tile in the workspace too, so Bring Back and Gather keep it.
+- Otherwise it lands on the front project window's board, or on the focused project's window if none is open. That window switches to its canvas tab and from List or Grid to the board ([CanvasIncomingLinks](../pm-mac/PM/Canvas/CanvasIncomingLinks.swift)).
+- Before the fix (2026-10-24), from a satellite: the satellite isn't a project window, so the link went to the project window behind it, which was in List view, and the card wasn't visible.
+- A board that already has a card on that address reveals that card instead of adding a second one.
+- The card is stepped into, so the page is live and the keyboard goes to it.
+- These are three of Apple's criteria for the browser passkey entitlement (S-008).
+
+**The status line shows where a link goes.**
+- It sits at the bottom-left of the card, as in Safari ([CanvasLinkStatus](../pm-mac/PM/Canvas/CanvasLinkStatus.swift)).
+- With ⌘ held it reads "Open as a new card: …", because ⌘-click writes to the `.canvas` file.
+- It is fed by WebKit's private `_webView:mouseDidMoveOverElement:withFlags:userInfo:` and `_WKHitTestResult.absoluteLinkURL`. Both were confirmed present on macOS 26 (2026-10-24).
+- Synthetic `mouseMoved` events never reach a page: WebKit takes hover position from the real pointer. The callback can only be checked by hand.
+- `javascript:` links and non-links show nothing. The line hides 0.25s after the pointer leaves a link, so moving between links doesn't make it flicker.
+
+**Two-finger swipe goes Back and Forward, in the engaged card only.**
+- `allowsBackForwardNavigationGestures` follows `isEngaged`. It is set when the page is built, when a page is handed over and in `engagementChanged`. A focused tile and a satellite card count as engaged.
+- WebKit offers the horizontal swipe to the page first, and it becomes Back only at the page's left edge. A carousel still scrolls.
+- Unengaged cards keep it off. The board passes a wheel over any card to that card's page (`CanvasBoardView.scrollWheel`), so with it on, panning sideways across the board would send each card it crossed Back.
+- It follows System Settings ▸ Trackpad ▸ Swipe between pages.
 
 **Revealing a page on an earlier signal than "finished" — settled, and the argument is worth keeping.**
 The page used to be hidden until `didFinish`, which on an app-shell page is long after it was worth

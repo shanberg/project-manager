@@ -407,6 +407,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // an app that quietly took them over on install would be taking a decision that isn't
                 // its to take. "Open With ▸ Folio" is the whole claim.
                 WindowManager.shared.open(canvas: url)
+            } else if CanvasIncomingLinks.handles(url) {
+                Log.write("web link open requested: \(url.host() ?? "")")
+                CanvasIncomingLinks.open(url)
             }
         }
     }

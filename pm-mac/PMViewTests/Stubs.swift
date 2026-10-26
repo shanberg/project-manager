@@ -20,10 +20,11 @@ enum Log {
     static func write(_ s: String) {}
 }
 
-/// Codes shown, which is the app's default.
+/// Codes shown unless a test turns them off, which is the app's default.
 enum ProjectCodes {
+    static let defaultsKey = "PMShowProjectCode"
     static let didChange = Notification.Name("PMProjectCodesDidChange")
-    static var areShown: Bool { true }
+    static var areShown: Bool { UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true }
     static func display(_ full: String, short: String? = nil, showing: Bool = true) -> String {
         showing ? full : (short ?? full)
     }

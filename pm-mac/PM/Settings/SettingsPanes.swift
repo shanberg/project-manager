@@ -135,7 +135,7 @@ struct BoardsSettingsView: View {
             } footer: {
                 // The honest version of the trade, because the number is only meaningful next to what
                 // a page costs — and nothing else in PM has a per-item cost anywhere near this.
-                Text("A live page is a real browser tab, and a heavy site can hold a few hundred megabytes of memory on its own. Cards past the limit keep a picture of the page and wake up when you come back to them.\n\nScrolling a card out of the window doesn't pause it, and neither does hiding it behind a workspace — a canvas keeps more running than it is showing, and the ones you looked at most recently keep their place in the queue. The timeout is only for a card you have well and truly left: it stops a canvas you wandered away from holding pages all afternoon. Every tile in a workspace runs, whatever the limit says.")
+                Text("A live page is a real browser tab, and a heavy site can hold a few hundred megabytes of memory on its own. Cards past the limit keep a picture of the page and wake up when you come back to them.\n\nScrolling a card out of the window doesn't pause it, and neither does hiding it behind a layout — a canvas keeps more running than it is showing, and the ones you looked at most recently keep their place in the queue. The timeout is only for a card you have well and truly left: it stops a canvas you wandered away from holding pages all afternoon. Every tile in a layout runs, whatever the limit says.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
