@@ -88,6 +88,9 @@ struct SessionNoteTakeover: View {
     /// The widest the prose gets, in points; nil runs it to the edges. A project card passes its own
     /// line width (`CanvasTextStyle`).
     var measure: CGFloat? = MarkdownTextEditor.measureWidth
+    /// The face the note is written in. A narrow card passes a smaller one, so a column a few hundred
+    /// points wide holds a useful amount of note. Read when the editor is made.
+    var baseFont: NSFont
 
     @State private var text: String
     /// The prose this takeover opened with, and the identity of the session it opened *on*.
@@ -135,11 +138,13 @@ struct SessionNoteTakeover: View {
     init(index: Int, session: Session, projectName: String, store: PMStore,
          onOpenProject: @escaping (String) -> Void,
          onBack: @escaping () -> Void, isActive: Bool = true,
-         measure: CGFloat? = MarkdownTextEditor.measureWidth, startsAt: NSRange? = nil,
+         measure: CGFloat? = MarkdownTextEditor.measureWidth,
+         baseFont: NSFont = MarkdownTextEditor.baseFont, startsAt: NSRange? = nil,
          onSelectionChange: ((NSRange) -> Void)? = nil,
          onTypingUndo: ((UndoManager, _ open: Bool) -> Void)? = nil) {
         self.isActive = isActive
         self.measure = measure
+        self.baseFont = baseFont
         self.startsAt = startsAt
         self.onSelectionChange = onSelectionChange
         self.onTypingUndo = onTypingUndo
@@ -237,6 +242,7 @@ struct SessionNoteTakeover: View {
                                         onSelectionChange: onSelectionChange,
                                         topInset: barHeight)
         editor.undoManager = typing
+        editor.baseFont = baseFont
         return editor
     }
 

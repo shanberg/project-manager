@@ -139,6 +139,11 @@ struct CanvasProjectNote: View {
     private var rowContentInset: CGFloat { margin }
     /// Where the brief and the member projects start: under the title's words, past its progress pie.
     private var briefInset: CGFloat { margin + 16 + 8 }
+    /// The face an open note is written in: two points down on a narrow card, where the window's 13pt
+    /// left a few words to a line.
+    private var noteFont: NSFont {
+        isNarrow ? NSFont.monospacedSystemFont(ofSize: 11, weight: .regular) : MarkdownTextEditor.baseFont
+    }
     /// Associated-object key holding a drag's end sentinel on its item provider — see `DragEndSentinel`.
     private nonisolated(unsafe) static var dragSentinelKey: UInt8 = 0
     /// The session whose note has taken the card over, by index, or nil when the card is showing the
@@ -319,7 +324,8 @@ struct CanvasProjectNote: View {
                                     onBack: { openNote = nil },
                                     isActive: engagement.isEngaged,
                                     measure: CanvasTextStyle(lineWidth: display.lineWidth)
-                                        .maxColumnWidth(in: MarkdownTextEditor.baseFont),
+                                        .maxColumnWidth(in: noteFont),
+                                    baseFont: noteFont,
                                     onSelectionChange: { display.noteCaret = $0 },
                                     onTypingUndo: { stack, open in
                                         // Closing one note and opening another can report in either
@@ -547,6 +553,14 @@ struct CanvasProjectNote: View {
                     onDropExternal: { _, _ in false }
                 ))
             }
+            // **A card sized to its content draws no legacy scroller.** One takes 17pt of width as it
+            // comes and goes, the words rewrap, the content's height changes and the host resizes to
+            // it — a loop that never settled once the cap was at or above the content: the companion
+            // panel froze in it on a Mac with "Show scroll bars: Always". `.visible` didn't hold the
+            // scroller up while the content fit, so the width still moved. The wheel still scrolls.
+            // Overlay scrollers take no width, so they are left to come and go.
+            .scrollIndicators(display.reportsHeight && NSScroller.preferredScrollerStyle == .legacy
+                              ? .never : .automatic)
             // To the line's own id, not to an `.id` inside it: a lazy stack can scroll to a line it has
             // not built yet only by the identity its `ForEach` gave it.
             .onChange(of: scrollToken) { _, _ in
