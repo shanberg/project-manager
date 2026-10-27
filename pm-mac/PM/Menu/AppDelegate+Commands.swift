@@ -145,7 +145,8 @@ extension AppDelegate: NSMenuItemValidation {
     ///
     /// Found up the key window's responder chain rather than through the window controller: that is
     /// where the keyboard is, and so where "the selection" is — a text view inside a card walks up to
-    /// its board like the board itself does.
+    /// its board like the board itself does, and one in the companion panel to the panel's
+    /// (`ProjectCardKeyHolder`).
     /// Only the menu bar's own items, and keys, follow the selection. The Dock's "Complete: …" names the
     /// focused task in its title, so it has to be the focused task it completes.
     static func followsSelection(_ command: PMCommand, from item: NSMenuItem) -> Bool {
@@ -155,9 +156,9 @@ extension AppDelegate: NSMenuItemValidation {
 
     static func taskSelection(in window: NSWindow? = NSApp.keyWindow) -> PMCommand.Selection? {
         var responder = window?.firstResponder
-        while let current = responder, !(current is CanvasBoardView) { responder = current.nextResponder }
-        guard let board = responder as? CanvasBoardView,
-              let commands = board.engagedProjectCard?.projectCommands, commands.selectedRows > 0 else { return nil }
+        while let current = responder, !(current is ProjectCardKeyHolder) { responder = current.nextResponder }
+        guard let holder = responder as? ProjectCardKeyHolder,
+              let commands = holder.standingInCard, commands.selectedRows > 0 else { return nil }
         let tasks = commands.selectedTasks()
         guard !tasks.isEmpty else { return nil }
         return PMCommand.Selection(tasks: tasks, run: commands.requestTaskCommand)

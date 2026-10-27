@@ -1,6 +1,6 @@
 import AppKit
 
-/// Where the session companion sits beside its satellite, and what it reads out of the session.
+/// Where the session companion sits beside its satellite.
 /// See `CanvasSatelliteCompanion`.
 ///
 /// **Four anchors.** Outside the window at its top-left or top-right, hanging from the window's top
@@ -22,7 +22,7 @@ enum CanvasCompanionPlacement {
         var isInside: Bool { self == .insideBottomLeft || self == .insideBottomRight }
     }
 
-    static let width: CGFloat = 300
+    static let width: CGFloat = 320
     static let gap: CGFloat = 12
     static let inset: CGFloat = 10
 
@@ -80,18 +80,4 @@ enum CanvasCompanionPlacement {
     }
 
     private static func distance(_ a: NSRect, _ b: NSRect) -> CGFloat { hypot(a.midX - b.midX, a.midY - b.midY) }
-
-    /// The last `count` lines of a session's prose: no task lines, no blank lines, bullets and heading
-    /// marks taken off. What the companion shows of the note — the end of the running log, not the note.
-    static func noteTail(_ body: String, count: Int) -> [String] {
-        let prose = body.split(separator: "\n", omittingEmptySubsequences: false).compactMap { raw -> String? in
-            var line = raw.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.range(of: #"^[-*+]\s+\[.\]"#, options: .regularExpression) != nil { return nil }
-            if let mark = line.range(of: #"^(#{1,6}|[-*+]|\d+[.)])\s+"#, options: .regularExpression) {
-                line.removeSubrange(mark)
-            }
-            return line.isEmpty ? nil : line
-        }
-        return Array(prose.suffix(count))
-    }
 }

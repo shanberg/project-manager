@@ -1,19 +1,12 @@
 import SwiftUI
 
-/// A task's words, the badges after them, and an optional control that appears over the words' end.
+/// A task's words and the badges after them.
 ///
 /// **The words keep their width.** A badge column beside the text used to take whatever it needed and
 /// leave the text the rest, so a narrow card with a date, a pick-up and a count wrapped a task into a
 /// thin strip three lines deep. Now the badges stay on the line only while the text keeps at least
 /// `minTextShare` of it. Past that they go to a line of their own under the text, the way Reminders
 /// puts a task's details under it, and the words get the full width back.
-///
-/// **The third view is a ghost**: a control that shows on hover, like the card's "＋date". It is
-/// placed at the end of the text's first line, over the words, and takes no room. A control that
-/// held its space while invisible cost every task the width of a button nobody could see. It brings
-/// its own backing to cover the words it sits on: the words are never masked, because a mask on a
-/// hosted AppKit text view kept the size it had when it switched on and cut off every line but the
-/// first.
 struct TaskLineLayout: Layout {
     /// Between the words and the badges on one line.
     var gap: CGFloat = 6
@@ -25,7 +18,6 @@ struct TaskLineLayout: Layout {
     struct Placement {
         var text: CGRect
         var badges: CGRect
-        var ghost: CGRect?
         var textBaseline: CGFloat
         var size: CGSize
     }
@@ -61,7 +53,6 @@ struct TaskLineLayout: Layout {
         }
         put(0, placement.text)
         put(1, placement.badges)
-        if let ghost = placement.ghost { put(2, ghost) }
     }
 
     /// The text's first baseline, so the row can line the box up with the words.
@@ -113,17 +104,8 @@ struct TaskLineLayout: Layout {
             }
         }
 
-        var ghostRect: CGRect?
-        if subviews.count > 2 {
-            let ghost = subviews[2]
-            let size = ghost.sizeThatFits(.unspecified)
-            let baseline = ghost.dimensions(in: .unspecified)[VerticalAlignment.firstTextBaseline]
-            ghostRect = CGRect(x: textRect.maxX - size.width, y: textRect.minY + textBaseline - baseline,
-                               width: size.width, height: size.height)
-        }
-
         let height = max(textRect.maxY, hasBadges ? badgeRect.maxY : 0)
-        return Placement(text: textRect, badges: badgeRect, ghost: ghostRect, textBaseline: textBaseline,
+        return Placement(text: textRect, badges: badgeRect, textBaseline: textBaseline,
                          size: CGSize(width: total, height: height))
     }
 }

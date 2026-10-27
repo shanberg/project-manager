@@ -17,8 +17,7 @@ struct RowSelectionBand: View {
     }
 }
 
-/// The band's tint without its shape, for something drawn on the band that has to match it — the hover
-/// "＋date" on a card, whose backing is the card and this.
+/// The band's tint without its shape, for something drawn on the band that has to match it.
 struct RowSelectionFill: View {
     let isSelected: Bool
     let isEmphasized: Bool

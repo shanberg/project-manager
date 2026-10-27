@@ -26,22 +26,12 @@ enum DueBadge {
             .padding(.horizontal, 5)
             .padding(.vertical, 1.5)
             .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(style.fill))
-            .overlay {
-                // Only the empty "＋date" control keeps an outline: it is a control with nothing in
-                // it, and the dashed edge is what says there is somewhere to click.
-                if let stroke = style.stroke {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(stroke, style: StrokeStyle(lineWidth: 1, dash: [3]))
-                }
-            }
             .foregroundStyle(style.text)
     }
 }
 
 struct DueChipStyle {
     var text: Color
-    /// An outline, drawn dashed — only the empty "＋date" control has one.
-    var stroke: Color?
     var fill: Color
     var weight: Font.Weight
 
@@ -58,7 +48,6 @@ struct DueChipStyle {
         case .later, .inherited: tint = .secondary
         }
         text = tint
-        stroke = nil
         if state == .overdue {
             fill = tint.opacity(0.14)
             weight = .semibold
@@ -70,13 +59,6 @@ struct DueChipStyle {
             weight = .regular
         }
     }
-
-    private init(text: Color, stroke: Color?, fill: Color, weight: Font.Weight) {
-        self.text = text; self.stroke = stroke; self.fill = fill; self.weight = weight
-    }
-
-    /// The "＋date" affordance on a task with no date at all — a control, so it stays quiet.
-    static let empty = DueChipStyle(text: .secondary, stroke: .secondary, fill: .clear, weight: .regular)
 }
 
 
@@ -88,7 +70,7 @@ struct DueChipStyle {
 struct DueChip: View {
     let todo: Todo
     let isEditing: Bool
-    /// Reveal the empty-state "＋date" affordance (true while hovering the row). A real own/inherited
+    /// Reveal the empty-state calendar (true while hovering the row). A real own/inherited
     /// date is content, not a control, so it stays visible regardless.
     let reveal: Bool
     /// Apply a due date — nil clears it. Whatever the row's date commands apply to, this applies to.
@@ -104,7 +86,7 @@ struct DueChip: View {
 
     var body: some View {
         // Always laid out so hovering only toggles opacity, never the row's height. A real own/
-        // inherited date is content (always visible); the empty-state "＋date" is a control that
+        // inherited date is content (always visible); the empty-state calendar is a control that
         // fades in on hover/edit but keeps reserving its space.
         Menu {
             menuItems
@@ -112,7 +94,14 @@ struct DueChip: View {
             if let shown {
                 DueBadge.chip(RelativeDue.short(shown), style: DueChipStyle(due: shown, done: todo.checked))
             } else {
-                DueBadge.chip("＋date", style: .empty)
+                // No date: one glyph, the calendar, at the chip's size — the smallest thing that says
+                // "a date goes here", in the room a count or an origin would otherwise take.
+                Image(systemName: "calendar")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1.5)
+                    .contentShape(Rectangle())
             }
         }
         // `.button` + `.plain`, not `.borderlessButton`. The borderless style presents the label

@@ -2,8 +2,8 @@ import AppKit
 import PmLib
 import SwiftUI
 
-/// The session companion: a small panel beside the satellite you are working in — the sitting you're
-/// in, a line to add to its note, and the open tasks.
+/// The session companion: a small panel beside the satellite you are working in — the project card,
+/// set to the sitting you're in and the open tasks, with a line to add to its note.
 ///
 /// **For a big screen with every tile in a window of its own.** Pop Out puts the project window away,
 /// so the project card goes with it; this is how the session stays a glance away from whichever window
@@ -25,7 +25,9 @@ import SwiftUI
 /// when there's room again. See `CanvasCompanionSpots`.
 ///
 /// **Non-activating**, like the focus panel: ticking a task off leaves the keyboard in the satellite.
-/// It takes the keyboard only when you click into one of its fields, and gives it back on Escape.
+/// It takes the keyboard when the card says it needs it — a row picked, an editor or a field opened
+/// (`CanvasProjectCardCommands.wantsKeyboard`) — and gives it back on Escape. While it has it, the
+/// card is stepped into, and the list's keys and the menu bar mean the card.
 @MainActor
 final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
     static let shared = CanvasSatelliteCompanion()
@@ -51,8 +53,14 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
     }
 
     private var panel: KeyablePanel?
-    private var hosting: NSHostingView<CanvasCompanionView>?
+    private var hosting: CanvasCompanionHostingView?
     private let state = CanvasCompanionState()
+    /// The card's seams, made again for each project so nothing of one project's card — a selection, a
+    /// request in flight — carries over to the next.
+    private var commands = CanvasProjectCardCommands()
+    private var display = CanvasProjectCardDisplay()
+    private var engagement = CanvasCardEngagement()
+    private var noteURL: URL?
     private weak var satellite: CanvasSatelliteWindow?
     private var store: PMStore?
     private var satelliteWatches: [NSObjectProtocol] = []
@@ -132,12 +140,14 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
             let previous = store
             store = StoreRegistry.shared.acquire(project.key)
             if let previous { StoreRegistry.shared.release(previous.boundKey) }
-            state.showsAllTasks = false
+            noteURL = CanvasProjectNoteCard.notes(forCanvasAt: board.store.url)
+            makeCard()
             hosting?.rootView = makeView()
         }
         state.title = project.title
         state.tint = satellite.projectColor.map(Color.init(nsColor:))
         state.icon = satellite.projectMarkIcon
+        state.cardCap = CanvasCompanionState.cardCap(forWindowHeight: window.frame.height)
         if panel.parent !== window { window.addChildWindow(panel, ordered: .above) }
         hosting?.layoutSubtreeIfNeeded()
         if alreadyShown { return place(animated: false) }
@@ -247,6 +257,10 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
     private func place(animated: Bool) {
         guard let panel, dragStart == nil, let geo = geometry() else { return }
         let (window, screen) = geo
+        // A new cap that changes the panel's height measures again and places again from there; one
+        // that doesn't (the card is shorter than either) changes nothing, so this carries on.
+        let cap = CanvasCompanionState.cardCap(forWindowHeight: window.height)
+        if state.cardCap != cap { state.cardCap = cap }
         let choice = CanvasCompanionPlacement.choose(spot: spotKey.flatMap(CanvasCompanionSpots.spot), size: openSize,
                                                      window: window, screen: screen,
                                                      header: CanvasSatelliteWindow.headerHeight)
@@ -371,8 +385,23 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
 
     // MARK: Keyboard
 
+    func windowDidBecomeKey(_ notification: Notification) {
+        engagement.isEngaged = true
+    }
+
     func windowDidResignKey(_ notification: Notification) {
         panel?.acceptsKey = false
+        // Out of the card, as stepping off a card on a board is: its editors close and its selection
+        // goes, rather than standing on a panel the keyboard has left.
+        engagement.isEngaged = false
+    }
+
+    /// The card has a use for keys: take them, and give them to the card — unless a field already has
+    /// them, which is where they were meant to go.
+    private func takeKeyboard() {
+        guard let panel, let hosting else { return }
+        if !panel.isKeyWindow { panel.takeKey() }
+        if !(panel.firstResponder is NSText) { panel.makeFirstResponder(hosting) }
     }
 
     private func giveKeyboardBack() {
@@ -394,23 +423,44 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
         panel.collectionBehavior = [.fullScreenAuxiliary, .ignoresCycle]
         panel.identifier = NSUserInterfaceItemIdentifier(Self.windowIdentifier)
         panel.delegate = self
-        let hosting = NSHostingView(rootView: makeView())
+        let hosting = CanvasCompanionHostingView(rootView: makeView())
         hosting.sizingOptions = []
+        hosting.onEscape = { [weak self] in self?.giveKeyboardBack() }
         panel.contentView = hosting
         self.panel = panel
         self.hosting = hosting
         return panel
     }
 
+    /// The card the panel shows: Current — the latest sitting's note and every open task — with the
+    /// line for adding to the note, no title of its own (the panel's header is it), acting from the first
+    /// click as a tile does, and sized to what it draws.
+    private func makeCard() {
+        commands = CanvasProjectCardCommands()
+        commands.wantsKeyboard = { [weak self] in self?.takeKeyboard() }
+        commands.releasesKeyboard = { [weak self] in self?.giveKeyboardBack() }
+        display = CanvasProjectCardDisplay()
+        display.shows = .current
+        display.showsTitle = false
+        display.appendsToNote = true
+        display.reportsHeight = true
+        display.lineWidth = .full
+        engagement = CanvasCardEngagement()
+        engagement.isTiled = true
+        engagement.isEngaged = panel?.isKeyWindow ?? false
+    }
+
     private func makeView() -> CanvasCompanionView {
         CanvasCompanionView(
             store: store ?? StoreRegistry.shared.emptyStore,
             state: state,
+            noteURL: noteURL ?? URL(fileURLWithPath: "/"),
+            commands: commands,
+            display: display,
+            engagement: engagement,
             onSize: { [weak self] size in self?.contentMeasured(size) },
             onDragChanged: { [weak self] in self?.dragChanged() },
             onDragEnded: { [weak self] in self?.dragEnded() },
-            onNeedsKeyboard: { [weak self] in self?.panel?.takeKey() },
-            onDoneTyping: { [weak self] in self?.giveKeyboardBack() },
             onOpenProject: { [weak self] in WindowManager.shared.open(projectKey: self?.store?.boundKey) }
         )
     }

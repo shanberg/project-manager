@@ -20,6 +20,11 @@ struct TaskMenu: View {
     /// Seed the add position, then open the add editor.
     let openAdd: (TaskInsertPosition) -> Void
     var onDelete: ([Todo]) -> Void = { _ in }
+    /// Go to where the task was written — the origin chip's click, for a row whose chip gives way to
+    /// the calendar while the pointer is on it. Nil where the row shows no origin.
+    var onGoToOrigin: (() -> Void)?
+    /// The day that was, for the item's title.
+    var originDay: String?
     /// Open the project a task is waiting on. Supplied by the project window; the focus panel has no
     /// window to retarget, so it leaves this out and the "Go to" item doesn't appear there.
     var onGoToProject: ((String) -> Void)?
@@ -81,6 +86,11 @@ struct TaskMenu: View {
         }
         if !isMulti, !todo.checked, !todo.isFocused {
             Button { store.focus(todo) } label: { Label("Focus", systemImage: "arrow.right.circle") }
+        }
+        if !isMulti, let onGoToOrigin {
+            Button(action: onGoToOrigin) {
+                Label(originDay.map { "Go to Session from \($0)" } ?? "Go to Session", systemImage: "arrow.up.left")
+            }
         }
         // Picking up takes an older task into the current sitting without moving its line; putting
         // back takes that pick away (docs/sessions.md D3). Each counts only the tasks it would act on.

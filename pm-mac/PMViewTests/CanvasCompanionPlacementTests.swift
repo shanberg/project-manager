@@ -68,20 +68,4 @@ final class CanvasCompanionPlacementTests: XCTestCase {
         let window = NSRect(x: 200, y: -200, width: 600, height: 500)
         XCTAssertEqual(P.frame(at: .insideBottomLeft, size: size, window: window, screen: screen).minY, 0)
     }
-
-    /// The tail of the note is prose only: task lines and blank lines skipped, bullets and heading marks off.
-    func testNoteTailIsTheLastProseLines() {
-        let body = """
-        Hero copy reads long on mobile
-
-        - [ ] Send Ana revised copy
-        - Nav sticky on scroll
-        ### Decided
-        * drop the carousel
-          - [x] Audit image weights
-        1. Linear NW-212 blocks pricing
-        """
-        XCTAssertEqual(P.noteTail(body, count: 3), ["Decided", "drop the carousel", "Linear NW-212 blocks pricing"])
-        XCTAssertEqual(P.noteTail("- [ ] only a task", count: 3), [])
-    }
 }

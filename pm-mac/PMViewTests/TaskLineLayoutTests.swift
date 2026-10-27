@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 import XCTest
 
-/// A task's words keep their width: badges share the line only while the words keep most of it, move
-/// under the words past that, and a ghost control takes no room at all.
+/// A task's words keep their width: badges share the line only while the words keep most of it, and
+/// move under the words past that.
 @MainActor
 final class TaskLineLayoutTests: XCTestCase {
     private let words = "Migrate the press-release archive and make sure every PDF link still resolves"
@@ -49,17 +49,6 @@ final class TaskLineLayoutTests: XCTestCase {
         let line = height(TaskLineLayout {
             text(words)
             HStack {}
-        }, width: 200)
-        XCTAssertEqual(line, alone, accuracy: 0.5)
-    }
-
-    /// The hover "＋date": drawn over the words' end, never costing them width or the row height.
-    func testAGhostTakesNoRoom() {
-        let alone = height(text(words), width: 200)
-        let line = height(TaskLineLayout {
-            text(words)
-            HStack {}
-            Color.red.frame(width: 150, height: 90)
         }, width: 200)
         XCTAssertEqual(line, alone, accuracy: 0.5)
     }

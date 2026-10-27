@@ -3211,3 +3211,7 @@ extension CanvasBoardView {
         (scrollView as? CanvasScrollView)?.reveal(id)
     }
 }
+
+extension CanvasBoardView: ProjectCardKeyHolder {
+    var standingInCard: CanvasProjectCardCommands? { engagedProjectCard?.projectCommands }
+}

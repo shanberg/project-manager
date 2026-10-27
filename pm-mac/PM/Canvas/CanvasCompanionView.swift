@@ -9,47 +9,50 @@ import SwiftUI
 final class CanvasCompanionState {
     /// Every anchor is blocked, so it rests as a pill (`CanvasCompanionPlacement.Choice.asPill`).
     var asPill = false
-    /// A pill the pointer is over opens, and closes again when it leaves — unless you are typing in it.
+    /// A pill the pointer is over opens, and closes again when it leaves — unless you are working in it.
     var pillOpen = false
-    var showsAllTasks = false
     var title = ""
     var tint: Color?
     var icon: ProjectIcon?
+    /// The tallest the card gets before it scrolls — a share of the satellite's height, so the panel
+    /// stays a thing beside the window rather than a second one.
+    var cardCap: CGFloat = 420
 
     var showsPill: Bool { asPill && !pillOpen }
+
+    /// The cap for a satellite this tall: over half of it, within reason.
+    static func cardCap(forWindowHeight height: CGFloat) -> CGFloat {
+        min(max(height * 0.6, 220), 560)
+    }
 }
 
-/// The session companion's content: the sitting you are in and the work that's open, beside the
+/// The session companion's content: the project card, under a header you move it by, beside the
 /// satellite you are working in. See `CanvasSatelliteCompanion`.
 ///
-/// **Built for its size, not cut down from the project card.** The card draws the whole notes
-/// document, so it costs as much as the project is long; this reads a fixed amount whatever the
-/// project — the current sitting's heading, the last three lines of its prose, the first five open
-/// tasks and a count. The rest of the project is the project window's.
+/// **The project card, not a lookalike.** It drew its own short version — the note's last three lines,
+/// five tasks, a tick and a field — and every list behaviour the card had learnt was missing from it:
+/// no selection, no reordering, no editing a task, no dates. Now the panel is the card set to Current
+/// (the latest sitting's note and every open task), with the card's own line for adding to the note,
+/// and what you can do to a task here is what you can do to it anywhere.
+///
+/// **The header is the panel's.** It stays put while the card scrolls, it is what you drag the panel by,
+/// and it holds the project's mark and the way to its window — so the card's own title is left off.
 ///
 /// **No stepping in.** A card on a board takes a click before it takes edits, so panning across it is
-/// safe; this is a thing you aim at, so a click on a box ticks it and a click in a field types.
+/// safe; this is a thing you aim at, so it acts from the first click, as a tile does.
 struct CanvasCompanionView: View {
     let store: PMStore
     let state: CanvasCompanionState
+    let noteURL: URL
+    let commands: CanvasProjectCardCommands
+    let display: CanvasProjectCardDisplay
+    let engagement: CanvasCardEngagement
     var onSize: (CGSize) -> Void = { _ in }
     /// The header (or the pill) dragged: the panel follows the pointer, and snaps to a corner on release.
     var onDragChanged: () -> Void = {}
     var onDragEnded: () -> Void = {}
-    /// The panel takes the keyboard only when a field here has a use for it. See `KeyablePanel`.
-    var onNeedsKeyboard: () -> Void = {}
-    /// Typing done: the keyboard goes back to the satellite.
-    var onDoneTyping: () -> Void = {}
     var onOpenProject: () -> Void = {}
 
-    static let noteLines = 3
-    static let taskCount = 5
-
-    private enum Field { case note, task }
-    @FocusState private var field: Field?
-    @State private var noteText = ""
-    @State private var taskText = ""
-    @State private var addingTask = false
     @State private var closing: Task<Void, Never>?
 
     var body: some View {
@@ -64,7 +67,7 @@ struct CanvasCompanionView: View {
             if inside { state.pillOpen = true; return }
             closing = Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(450))
-                guard !Task.isCancelled, field == nil else { return }
+                guard !Task.isCancelled, !engagement.isEngaged else { return }
                 state.pillOpen = false
             }
         }
@@ -79,6 +82,12 @@ struct CanvasCompanionView: View {
         let label = SessionLabel(parsing: session.label)
         let day = session.date == formatSessionDate() ? "Today" : session.date
         return [day, label.name.isEmpty ? label.time : label.name].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The card's height: what its content measures, up to the cap. A little to begin with, before the
+    /// first measure lands, rather than the whole cap for a moment.
+    private var cardHeight: CGFloat {
+        min(display.contentHeight ?? 120, state.cardCap)
     }
 
     private var mark: some View {
@@ -112,13 +121,16 @@ struct CanvasCompanionView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider().opacity(0.5)
-            note
-            Divider().opacity(0.5)
-            tasks
+            CanvasProjectNote(store: store, engagement: engagement, noteURL: noteURL,
+                              onOpenProject: { WindowManager.shared.open(named: $0) },
+                              commands: commands, display: display)
+                // A new project is a new card, with nothing of the last one's selection or editors.
+                .id(ObjectIdentifier(commands))
+                .frame(height: cardHeight)
         }
-        .font(.system(size: 12))
         .frame(width: CanvasCompanionPlacement.width)
         .background(CompanionGlass(tint: state.tint, cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     /// Grabbing the panel. The pointer is read from the screen by the controller, since the window
@@ -144,11 +156,16 @@ struct CanvasCompanionView: View {
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .gesture(moving)
-            Button("New Session", systemImage: "plus") {
-                store.openCurrentSession(forcingNew: true) { _ in }
+            // The card's two verbs, which its own title would have carried — asked of the card, so they
+            // do here what they do on a board.
+            Button("New Task", systemImage: "plus") { commands.requestNewTask() }
+                .labelStyle(.iconOnly)
+                .help("New Task")
+            Button("New Session", systemImage: "calendar.badge.plus") {
+                commands.requestNewSession(forcingNew: NSEvent.modifierFlags.contains(.option))
             }
             .labelStyle(.iconOnly)
-            .help("New Session")
+            .help("New Session — hold ⌥ to start another, unless this one is still empty")
             Button("Show Project", systemImage: "arrow.up.forward.app", action: onOpenProject)
                 .labelStyle(.iconOnly)
                 .help("Show the project's window")
@@ -157,120 +174,49 @@ struct CanvasCompanionView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
     }
+}
 
-    private var note: some View {
-        let lines = session.map { CanvasCompanionPlacement.noteTail($0.body, count: Self.noteLines) } ?? []
-        return VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                Text(line).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            }
-            entry("Add to the note…", text: $noteText, field: .note) { text in
-                store.appendSessionNote(text)
-                noteText = ""
-            }
+/// The companion's hosting view, which holds the keyboard on the card's behalf while the panel is key —
+/// the part a board plays for a card stepped into on it: the list's keys, ⌘A/⌘C/⌘V, ⌘Z, and the
+/// project commands in the File menu all mean the card.
+final class CanvasCompanionHostingView: NSHostingView<CanvasCompanionView>, ProjectCardKeyHolder, NSMenuItemValidation {
+    var onEscape: () -> Void = {}
+
+    var standingInCard: CanvasProjectCardCommands? { rootView.commands }
+    private var store: PMStore { rootView.store }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        if rootView.commands.takesListKey(event) { return }
+        if event.charactersIgnoringModifiers == "\u{1b}" { return onEscape() }
+        super.keyDown(with: event)
+    }
+
+    override func cancelOperation(_ sender: Any?) { onEscape() }
+
+    @objc override func selectAll(_ sender: Any?) { rootView.commands.requestSelectAllRows() }
+    @objc func copy(_ sender: Any?) { rootView.commands.requestCopyRows() }
+    @objc func paste(_ sender: Any?) { rootView.commands.requestPasteRows() }
+    @objc func newTask(_ sender: Any?) { rootView.commands.requestNewTask() }
+    @objc func newSession(_ sender: Any?) { rootView.commands.requestNewSession() }
+    @objc func startNewSession(_ sender: Any?) { rootView.commands.requestNewSession(forcingNew: true) }
+    @objc func editProjectDetails(_ sender: Any?) { rootView.commands.requestEditDetails() }
+    @objc func undo(_ sender: Any?) { store.undo() }
+    @objc func redo(_ sender: Any?) { store.redo() }
+
+    /// Asked only for the actions above — AppKit asks the responder that answers an item.
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(copy(_:)): return rootView.commands.selectedRows > 0
+        case #selector(paste(_:)): return TaskPasteboard.hasTasksToPaste
+        case #selector(undo(_:)): return store.canUndo
+        case #selector(redo(_:)): return store.canRedo
+        case #selector(selectAll(_:)), #selector(newTask(_:)), #selector(newSession(_:)),
+             #selector(startNewSession(_:)), #selector(editProjectDetails(_:)):
+            return store.projectName != nil
+        default: return true
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-    }
-
-    private var tasks: some View {
-        let open = store.openTodos
-        let shown = state.showsAllTasks ? open : Array(open.prefix(Self.taskCount))
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text("Tasks").textCase(.uppercase).font(.system(size: 10)).kerning(0.6)
-                Spacer()
-                Text("\(open.count) open").font(.system(size: 10))
-            }
-            .foregroundStyle(.secondary)
-            .padding(.bottom, 2)
-            if state.showsAllTasks {
-                ScrollView { LazyVStack(alignment: .leading, spacing: 2) { rows(shown) } }
-                    .frame(maxHeight: 320)
-            } else {
-                rows(shown)
-            }
-            if open.count > Self.taskCount {
-                Button(state.showsAllTasks ? "Show fewer" : "\(open.count - Self.taskCount) more") {
-                    state.showsAllTasks.toggle()
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 22)
-            }
-            if addingTask {
-                entry("New task", text: $taskText, field: .task) { text in
-                    store.addTodo(text: text)
-                    taskText = ""
-                }
-            } else {
-                Button("Add Task", systemImage: "plus") {
-                    addingTask = true
-                    focus(.task)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .padding(.top, 2)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
-    }
-
-    private func rows(_ todos: [Todo]) -> some View {
-        ForEach(todos.map { (PMStore.key(for: $0), $0) }, id: \.0) { _, todo in
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Button { store.toggle(todo) } label: { TaskStatusIcon(state: todo.state, size: 13) }
-                    .buttonStyle(.plain)
-                    .help("Complete")
-                Text(todo.text).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-                if let due = todo.dueDate ?? todo.effectiveDueDate {
-                    Text(RelativeDue.short(due))
-                        .font(.system(size: 10.5)).monospacedDigit()
-                        .foregroundStyle(todo.dueDate != nil ? Color.orange : Color.secondary)
-                }
-            }
-            .padding(.leading, CGFloat(todo.depth) * 12)
-            .padding(.vertical, 3)
-            .padding(.horizontal, 4)
-            .background(RoundedRectangle(cornerRadius: 6).fill(todo.isFocused ? Color.accentColor.opacity(0.14) : .clear))
-            .contentShape(Rectangle())
-            .onTapGesture { store.focus(todo) }
-        }
-    }
-
-    /// A one-line field that submits on Return and stays open for the next line; Escape gives the
-    /// keyboard back. A click into it asks for the keyboard first, since the panel doesn't take it for
-    /// being clicked.
-    private func entry(_ prompt: String, text: Binding<String>, field which: Field,
-                       submit: @escaping (String) -> Void) -> some View {
-        TextField(prompt, text: text)
-            .textFieldStyle(.plain)
-            .focused($field, equals: which)
-            .onSubmit {
-                let line = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !line.isEmpty { submit(line) }
-                focus(which)
-            }
-            .onExitCommand { stopTyping() }
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
-            .simultaneousGesture(TapGesture().onEnded { focus(which) })
-    }
-
-    private func focus(_ which: Field) {
-        onNeedsKeyboard()
-        DispatchQueue.main.async { field = which }
-    }
-
-    private func stopTyping() {
-        field = nil
-        addingTask = false
-        taskText = ""
-        onDoneTyping()
     }
 }
 

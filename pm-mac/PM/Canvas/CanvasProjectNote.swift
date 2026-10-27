@@ -88,6 +88,7 @@ struct CanvasProjectNote: View {
             // true *before* the key arrives — so it is published on every change to the selection
             // rather than read across the seam on demand.
             if commands.selectedRows != newValue.count { commands.selectedRows = newValue.count }
+            if !newValue.isEmpty { commands.wantsKeyboard() }
         }
     }
     /// The row under the pointer, again — as a reference, so the right-click monitor's closure reads
@@ -123,14 +124,21 @@ struct CanvasProjectNote: View {
     @State private var scrollTarget: String?
     @State private var scrollToken = 0
 
-    /// Where a depth-0 row's content begins, and what one level of nesting costs — the pointer's depth
-    /// is measured against these, so they have to be the row's real metrics. See `TaskRowMetrics`.
-    private static let rowContentInset: CGFloat = TaskRowMetrics.margin
+    /// What one level of nesting costs — the pointer's depth is measured against it, so it has to be
+    /// the row's real metric. See `TaskRowMetrics`.
     private static let indentStep: CGFloat = TaskRowMetrics.indentStep
+    /// Below this width the card is narrow — a slim tile, the companion panel — and its margins give
+    /// the words the room instead.
+    static let narrowWidth: CGFloat = 360
+    /// Whether the card is narrower than `narrowWidth`. A flag rather than the width itself, so the
+    /// card's body runs again when it crosses the line and not on every point of a resize.
+    @State private var isNarrow = false
     /// The card's margin, either side — every block on it lines up on this.
-    private static let margin: CGFloat = TaskRowMetrics.margin
+    private var margin: CGFloat { isNarrow ? 10 : TaskRowMetrics.margin }
+    /// Where a depth-0 row's content begins — what the drop resolver measures depth from.
+    private var rowContentInset: CGFloat { margin }
     /// Where the brief and the member projects start: under the title's words, past its progress pie.
-    private static let briefInset: CGFloat = TaskRowMetrics.margin + 16 + 8
+    private var briefInset: CGFloat { margin + 16 + 8 }
     /// Associated-object key holding a drag's end sentinel on its item provider — see `DragEndSentinel`.
     private nonisolated(unsafe) static var dragSentinelKey: UInt8 = 0
     /// The session whose note has taken the card over, by index, or nil when the card is showing the
@@ -243,6 +251,7 @@ struct CanvasProjectNote: View {
 
     var body: some View {
         card
+            .onGeometryChange(for: Bool.self) { $0.size.width < Self.narrowWidth } action: { isNarrow = $0 }
             .onChange(of: commands.rowStepRequest) { _, _ in
                 moveSelection(commands.rowStep, extending: commands.rowStepExtends)
             }
@@ -350,7 +359,12 @@ struct CanvasProjectNote: View {
         // note starts.
         .onChange(of: openNote) { _, index in
             if index == nil { display.noteCaret = nil }
+            // A note fills whatever it is given; the list measures itself again as it comes back.
+            if index != nil, display.reportsHeight { display.contentHeight = .infinity }
+            if index != nil { commands.wantsKeyboard() }
         }
+        .onChange(of: activeEditor) { _, editor in if editor != nil { commands.wantsKeyboard() } }
+        .onChange(of: editingDetails) { _, editing in if editing { commands.wantsKeyboard() } }
         .onChange(of: engagement.isEngaged) { _, engaged in
             if !engaged {
                 activeEditor = nil
@@ -478,7 +492,7 @@ struct CanvasProjectNote: View {
                 // **Lazy, and flat** — see `CardLine`. Every row on a long project used to be built,
                 // measured and kept, and every scroll tick then walked all of them.
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    title
+                    if display.showsTitle { title }
                     // The brief, above the work, exactly where the window puts it — and the same view,
                     // so it reads as the same printed page and edits the same way (double-click, then
                     // live rows). Drawn only when there is one: an empty brief on a card would be six
@@ -492,8 +506,8 @@ struct CanvasProjectNote: View {
                         // fields have the room they need.
                         ProjectDetailsView(notes: notes, store: store, isEditing: $editingDetails,
                                            showsPlaceholders: false,
-                                           leadingInset: editingDetails ? Self.margin : Self.briefInset,
-                                           trailingInset: Self.margin)
+                                           leadingInset: editingDetails ? margin : briefInset,
+                                           trailingInset: margin)
                     }
                     if shows.brief { members }
                     ForEach(cardLines) { line in
@@ -510,9 +524,12 @@ struct CanvasProjectNote: View {
                     }
                     footer
                 }
-                .padding(.top, 14)
+                .padding(.top, display.showsTitle ? 14 : 4)
                 .padding(.bottom, 12)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { ceil($0.size.height) } action: { height in
+                    if display.reportsHeight { display.contentHeight = height }
+                }
                 .coordinateSpace(name: TaskDropResolver.coordinateSpace)
                 .onPreferenceChange(RowFramesKey.self) { frames.rows = $0 }
                 .onPreferenceChange(SessionFramesKey.self) { frames.sessions = Self.joinedSessions($0) }
@@ -560,8 +577,8 @@ struct CanvasProjectNote: View {
                 Circle().fill(Color.accentColor).frame(width: 6, height: 6)
                 Capsule().fill(Color.accentColor).frame(height: 2)
             }
-            .padding(.leading, Self.rowContentInset + CGFloat(target.depth) * Self.indentStep)
-            .padding(.trailing, Self.margin)
+            .padding(.leading, rowContentInset + CGFloat(target.depth) * Self.indentStep)
+            .padding(.trailing, margin)
             // Centre the 6pt dot on the boundary line.
             .offset(y: target.gapY - 3)
             .allowsHitTesting(false)
@@ -586,7 +603,7 @@ struct CanvasProjectNote: View {
                                         rows: frames.rows,
                                         sessionFrames: [],
                                         draggedSubtree: store.subtreeKeys(of: dragged),
-                                        contentInset: Self.rowContentInset,
+                                        contentInset: rowContentInset,
                                         indentStep: Self.indentStep,
                                         from: dragged.sessionIndex,
                                         pickingUpInto: current,
@@ -683,7 +700,7 @@ struct CanvasProjectNote: View {
             }
             activeEditor = nil
         } onCancel: { activeEditor = nil }
-            .padding(.horizontal, Self.margin)
+            .padding(.horizontal, margin)
             .padding(.top, 4)
     }
 
@@ -697,7 +714,7 @@ struct CanvasProjectNote: View {
                 Text(title).font(FolioType.body)
             }
             .foregroundStyle(.tertiary)
-            .padding(.horizontal, Self.margin)
+            .padding(.horizontal, margin)
             .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
@@ -742,8 +759,8 @@ struct CanvasProjectNote: View {
                         .buttonStyle(.plain)
                 }
             }
-            .padding(.leading, Self.briefInset)
-            .padding(.trailing, Self.margin)
+            .padding(.leading, briefInset)
+            .padding(.trailing, margin)
             .padding(.bottom, 12)
         }
     }
@@ -801,7 +818,7 @@ struct CanvasProjectNote: View {
                 }
                 .buttonStyle(.plain)
                 .help("Part of \(projectTitle(fromFolderName: master))")
-                .padding(.horizontal, Self.margin)
+                .padding(.horizontal, margin)
                 .padding(.bottom, 3)
             }
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -834,7 +851,7 @@ struct CanvasProjectNote: View {
                     }
                 }
             }
-            .padding(.horizontal, Self.margin)
+            .padding(.horizontal, margin)
             .padding(.bottom, 6)
         }
     }
@@ -905,6 +922,11 @@ struct CanvasProjectNote: View {
         lines += blocks.map { .block($0, at: index) }
         // The new-task field at the end of the sitting's own tasks — where the task it makes will be.
         if activeEditor == Self.quickAdd, quickAddHost == index { lines.append(.quickAdd(at: index)) }
+        // A line to add to the note, where the note ends — after the sitting's own tasks, since what it
+        // writes lands after them in the file. Only the latest sitting's: that is the one it writes to.
+        if display.appendsToNote, display.find.isEmpty, index == notes?.sessions.indices.first {
+            lines.append(.noteEntry(at: index))
+        }
         // **Picked up**: the older tasks taken up in this sitting, after its own, each still carrying
         // where it came from. Drawn here *and* on its own line — one task in two places, both showing
         // its state — because moving it here would take it out of the sentence that explains it
@@ -934,7 +956,7 @@ struct CanvasProjectNote: View {
         switch line {
         case .heading(let session, let index):
             SessionHeading(session: session)
-                .padding(.horizontal, Self.margin)
+                .padding(.horizontal, margin)
                 // Twice the gap between sittings, which run into one another at 10. The first one drawn
                 // keeps its 10: the card's own top padding is already the space above it.
                 .padding(.top, index == shownSessions.first?.index ? 10 : 20)
@@ -948,7 +970,7 @@ struct CanvasProjectNote: View {
         case .block(.prose(_, let text), let index):
             RenderedNote(prose: text, font: .systemFont(ofSize: TaskRowMetrics.textSize),
                          noteURL: noteURL, maxImageHeight: 240)
-                .padding(.horizontal, Self.margin)
+                .padding(.horizontal, margin)
                 .padding(.vertical, 3)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -961,6 +983,12 @@ struct CanvasProjectNote: View {
             row(identified.todo)
         case .quickAdd:
             quickAddEditor
+        case .noteEntry:
+            NoteAppendLine(onFocus: { commands.wantsKeyboard() },
+                           onDone: { commands.releasesKeyboard() }) { store.appendSessionNote($0) }
+                .padding(.horizontal, margin)
+                .padding(.top, 4)
+                .padding(.bottom, 2)
         case .caption(let text, _, let extraTop):
             groupCaption(text).padding(.top, extraTop)
         case .picked(let entry, let index):
@@ -995,7 +1023,7 @@ struct CanvasProjectNote: View {
     /// sub-heading under a sitting's heading, not a second kind of heading.
     private func groupCaption(_ text: String) -> some View {
         BriefLabel(text)
-            .padding(.horizontal, Self.margin)
+            .padding(.horizontal, margin)
             .padding(.top, 8)
             .padding(.bottom, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1041,7 +1069,7 @@ struct CanvasProjectNote: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, Self.margin)
+        .padding(.horizontal, margin)
         .padding(.vertical, 2)
         .contextMenu { LazyMenu { sessionMenu(at: index) } }
     }
@@ -1070,7 +1098,7 @@ struct CanvasProjectNote: View {
                     store.editText(todo, text: text)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
-                    .padding(.horizontal, Self.margin)
+                    .padding(.horizontal, margin)
             } else {
                 line(todo, place: place, showsOrigin: showsOrigin)
             }
@@ -1080,7 +1108,7 @@ struct CanvasProjectNote: View {
                     store.setDue(todo, due: due)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
-                    .padding(.horizontal, Self.margin)
+                    .padding(.horizontal, margin)
             }
             if activeEditor == EditorTarget(key: key, kind: .waiting) {
                 InlineTextEditor(seed: todo.waiting ?? "", placeholder: "Waiting on…",
@@ -1091,7 +1119,7 @@ struct CanvasProjectNote: View {
                     store.setWaiting(todo, waiting: trimmed.isEmpty ? nil : trimmed)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
-                    .padding(.horizontal, Self.margin)
+                    .padding(.horizontal, margin)
             }
             if activeEditor == EditorTarget(key: key, kind: .add) {
                 AddEditor(leadingIcon: AnyView(TaskStatusIcon()),
@@ -1099,7 +1127,7 @@ struct CanvasProjectNote: View {
                     store.addTodo(text: text, due: due, relativeTo: todo, position: addPosition)
                     activeEditor = nil
                 } onCancel: { activeEditor = nil }
-                    .padding(.horizontal, Self.margin)
+                    .padding(.horizontal, margin)
                     .padding(.leading, indent(todo.depth + (addPosition == .child ? 1 : 0)))
             }
         }
@@ -1118,7 +1146,8 @@ struct CanvasProjectNote: View {
         let size = TaskRowMetrics.textSize
         let editingDue = activeEditor == EditorTarget(key: rowID, kind: .due)
         let editorClosed = activeEditor == nil
-        let dueChip = RowHoverReader(hover: hover, id: rowID) { hovering in
+        let count = todo.state == .open ? subtaskCounts[key].flatMap { $0.total > 0 ? $0 : nil } : nil
+        let dueChip = { (hovering: Bool) in
             DueChip(todo: todo,
                     isEditing: editingDue,
                     reveal: hovering,
@@ -1134,8 +1163,8 @@ struct CanvasProjectNote: View {
             .buttonStyle(.plain)
             .help(todo.checked ? "Reopen" : "Complete")
 
-            // The words, what follows them, and "＋date" on hover — see `TaskLineLayout` for why the
-            // badges give way to the words rather than the other way round.
+            // The words, and what follows them — see `TaskLineLayout` for why the badges give way to the
+            // words rather than the other way round.
             TaskLineLayout {
                 TokenText(attributed: taskLineAttributed(todo, wait: store.wait(for: todo), size: size),
                           onOpenProject: onOpenProject)
@@ -1157,34 +1186,31 @@ struct CanvasProjectNote: View {
                         .fixedSize()
                         .help("Picked up on \(day)")
                     }
-                    if showsOrigin { originChip(todo) }
-                    // A parent says how far through its subtasks it is, the way Things counts a
-                    // checklist. Only while it is open: a finished parent's count is a record nobody is
-                    // working from.
-                    if todo.state == .open, let count = subtaskCounts[key], count.total > 0 {
-                        Text("\(count.done)/\(count.total)")
-                            .font(FolioType.meta.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                            .fixedSize()
-                            .help("\(count.done) of \(count.total) subtasks done")
-                    }
+                    // The origin is the slot's when nothing else is: see below.
+                    if showsOrigin, todo.dueDate != nil || count != nil { originChip(todo) }
                     if todo.dueDate != nil {
-                        dueChip
-                    } else if let due = InheritedOverdueDot.due(for: todo) {
-                        InheritedOverdueDot(due: due)
-                    }
-                }
-
-                // Revealed on hover, exactly as in the window, and over the words' end rather than
-                // beside them. Shown unconditionally it put a dashed "＋date" on every dateless task on
-                // the card at once; laid out invisibly it cost every one of them the chip's width.
-                if todo.dueDate == nil {
-                    dueChip.background {
+                        // A date is clicked to change it, and a parent's count sits before it.
+                        if let count { subtaskCount(count) }
+                        RowHoverReader(hover: hover, id: rowID) { dueChip($0) }
+                    } else {
+                        if let due = InheritedOverdueDot.due(for: todo) { InheritedOverdueDot(due: due) }
+                        // **One slot, off the words**: the parent's count, or else where the task was
+                        // written, or nothing — and the calendar in its place while the row is hovered. Held at
+                        // the wider of the two whether or not either shows, so hovering never moves the
+                        // line. It used to float over the words' end, which needed a backing to cover
+                        // them — a patch of the card's colour that no ground but the card's could match.
+                        //
+                        // The origin gives way too, rather than sitting beside a second date-shaped pill
+                        // that read as the task's date twice. Its jump is in the row's menu.
                         RowHoverReader(hover: hover, id: rowID) { hovering in
-                            if hovering || editingDue {
-                                DueGhostBacking(isSelected: selection.contains(key),
-                                                isEmphasized: engagement.isEngaged,
-                                                isHovering: hovering && editorClosed)
+                            let revealed = hovering || editingDue
+                            ZStack(alignment: .trailing) {
+                                Group {
+                                    if let count { subtaskCount(count) } else if showsOrigin { originChip(todo) }
+                                }
+                                .opacity(revealed ? 0 : 1)
+                                .allowsHitTesting(!revealed)
+                                dueChip(hovering)
                             }
                         }
                     }
@@ -1195,11 +1221,11 @@ struct CanvasProjectNote: View {
             hover.set(rowID, inside: inside)
             rowHover.set(key, inside: inside)
         }
-        .padding(.leading, Self.margin + indent(todo.depth))
-        .padding(.trailing, Self.margin)
+        .padding(.leading, margin + indent(todo.depth))
+        .padding(.trailing, margin)
         .padding(.vertical, 3)
         // Before the band in the chain, so drawn over its tint: a selected subtask keeps its threads.
-        .background(TaskThreads(depth: todo.depth, leading: Self.margin))
+        .background(TaskThreads(depth: todo.depth, leading: margin))
         // Outside the depth indent, so a subtask's highlight starts where every other row's does — a
         // band that stepped in with the text would read as a second kind of row. The same view the
         // window's list paints, so a selection looks like a selection wherever you made it.
@@ -1304,11 +1330,23 @@ struct CanvasProjectNote: View {
                          activeEditor = nil
                          pendingDelete = todos
                      },
+                     onGoToOrigin: showsOrigin ? { goToOrigin(todo) } : nil,
+                     originDay: SessionPicks.day(iso: todo.sessionISODate),
                      onGoToProject: { key in
                          guard let folder = PMFiles.projectName(fromKey: key) else { return }
                          onOpenProject(folder)
                      })
         } }
+    }
+
+    /// A parent's count of its subtasks, the way Things counts a checklist. Only while it is open: a
+    /// finished parent's count is a record nobody is working from.
+    private func subtaskCount(_ count: (done: Int, total: Int)) -> some View {
+        Text("\(count.done)/\(count.total)")
+            .font(FolioType.meta.monospacedDigit())
+            .foregroundStyle(.tertiary)
+            .fixedSize()
+            .help("\(count.done) of \(count.total) subtasks done")
     }
 
     /// The row's selection band, reading the hover and the selection itself so the row's body doesn't
@@ -1447,16 +1485,7 @@ struct CanvasProjectNote: View {
     /// written beside; clicking goes there — to its own line when the card draws it, and otherwise into
     /// that sitting's note, which is the one place its sentence is always drawn.
     private func originChip(_ todo: Todo) -> some View {
-        Button {
-            let key = PMStore.key(for: todo)
-            if originKeys.contains(key) {
-                selection.select([key])
-                scrollTarget = key
-                scrollToken &+= 1
-            } else {
-                openNote = todo.sessionIndex
-            }
-        } label: {
+        Button { goToOrigin(todo) } label: {
             Text(SessionPicks.day(iso: todo.sessionISODate) ?? "Earlier")
                 .font(FolioType.meta)
                 .foregroundStyle(.secondary)
@@ -1469,6 +1498,18 @@ struct CanvasProjectNote: View {
         }
         .buttonStyle(.plain)
         .help(SessionPicks.originHelp(todo, sessions: notes?.sessions ?? [], tasks: store.todos))
+    }
+
+    /// Where an old task was written: its own line when the card draws it, else its sitting's note.
+    private func goToOrigin(_ todo: Todo) {
+        let key = PMStore.key(for: todo)
+        if originKeys.contains(key) {
+            selection.select([key])
+            scrollTarget = key
+            scrollToken &+= 1
+        } else {
+            openNote = todo.sessionIndex
+        }
     }
 
     /// The session's body, cut where its tasks are, and narrowed to what this card shows.
@@ -1578,6 +1619,7 @@ private enum CardLine: Identifiable {
     case empty(at: Int)
     case block(SessionBlock, at: Int)
     case quickAdd(at: Int)
+    case noteEntry(at: Int)
     case caption(String, at: Int?, extraTop: CGFloat)
     case picked(PileEntry, into: Int)
     case pile(PileEntry)
@@ -1590,6 +1632,7 @@ private enum CardLine: Identifiable {
         case .empty(let index): return "empty/\(index)"
         case .block(let block, let index): return "\(index)/\(block.id)"
         case .quickAdd: return "quick-add"
+        case .noteEntry: return "note-entry"
         case .caption(let text, let index, _): return "caption/\(index.map(String.init) ?? "")/\(text)"
         case .picked(let entry, _): return entry.id
         case .pile(let entry): return "pile/\(entry.id)"
@@ -1600,7 +1643,7 @@ private enum CardLine: Identifiable {
     var session: Int? {
         switch self {
         case .heading(_, let index), .empty(let index), .block(_, let index), .quickAdd(let index),
-             .picked(_, let index):
+             .noteEntry(let index), .picked(_, let index):
             return index
         case .caption(_, let index, _): return index
         case .pile: return nil
@@ -1684,6 +1727,45 @@ final class CanvasProjectCardCommands {
     func requestPasteRows() { pasteRowsRequest &+= 1 }
     func requestOpenRow() { openRowRequest &+= 1 }
 
+    /// The list's keys, for whatever holds the keyboard on this card's behalf — the board it is on, or
+    /// the companion panel it is in. One answer, so a list in a panel is the same list as on a board.
+    ///
+    /// - **⌥ arrows are left alone.** On a board they move between cards; see `moveFocus`.
+    /// - **⌫ with no rows picked out is not taken**, so the board deletes the card, as it would have.
+    /// - **Return opens one picked row** — focuses it, the same act as its double-click. One row only:
+    ///   Return has to name a single thing to open.
+    ///
+    /// A text field is first responder while you type in one, so none of this is reached then.
+    func takesListKey(_ event: NSEvent) -> Bool {
+        let extending = event.modifierFlags.contains(.shift)
+        switch event.specialKey {
+        case .delete, .deleteForward:
+            guard selectedRows > 0 else { return false }
+            requestDeleteRows()
+        case .upArrow where !event.modifierFlags.contains(.option):
+            stepRows(-1, extending: extending)
+        case .downArrow where !event.modifierFlags.contains(.option):
+            stepRows(1, extending: extending)
+        default:
+            guard event.charactersIgnoringModifiers == "\r", selectedRows == 1 else { return false }
+            requestOpenRow()
+        }
+        return true
+    }
+
+    /// Asked by the card the moment it is about to need keys: a row picked, an editor or a note opened.
+    ///
+    /// A card on a board never needs it — the click that does any of these is the click that steps in,
+    /// and the board already has the keyboard. The companion panel does not take the keyboard for being
+    /// clicked, so ticking a box leaves your typing where it was, and this is how it learns that a click
+    /// was the other kind. See `CanvasSatelliteCompanion`.
+    @ObservationIgnored
+    var wantsKeyboard: () -> Void = {}
+    /// Typing done — Escape in a field that has nothing to cancel. Where the keyboard came from gets it
+    /// back; on a board, where it never left, nothing happens.
+    @ObservationIgnored
+    var releasesKeyboard: () -> Void = {}
+
     // MARK: The Task menu
 
     /// The Task menu, on the picked rows rather than the project's focused task, while there are any —
@@ -1701,6 +1783,14 @@ final class CanvasProjectCardCommands {
     }
 }
 
+/// Whatever holds the keyboard on a project card's behalf — the board a card is stepped into on, or the
+/// companion panel — so the menu bar can find the card the keyboard means by walking the responder
+/// chain, wherever the card is. See `AppDelegate.taskSelection`.
+@MainActor
+protocol ProjectCardKeyHolder: AnyObject {
+    var standingInCard: CanvasProjectCardCommands? { get }
+}
+
 /// How much of its project a card is drawing, published so a change made from the menu **redraws**
 /// rather than rebuilds.
 ///
@@ -1716,6 +1806,21 @@ final class CanvasProjectCardDisplay {
     var sitting: SessionRef?
     /// How long a line of an open session note gets, from `pmLineWidth`. See `CanvasTextStyle`.
     var lineWidth = CanvasTextStyle.LineWidth.readable
+
+    /// Whether the card draws its own title. Off where something around it already names the project
+    /// and holds its two verbs — the companion panel's header, which stays put while the card scrolls.
+    var showsTitle = true
+
+    /// Whether the latest sitting ends in a line to add to its note — a sentence written down without
+    /// opening the note. The companion's, where the card is a thing you glance at beside other work.
+    var appendsToNote = false
+
+    /// How tall the card's content is, written back by the card while `reportsHeight` — what a panel
+    /// sizes itself to, up to a cap. Infinite while a note or the brief has the card, since those fill
+    /// whatever they are given.
+    var contentHeight: CGFloat?
+    @ObservationIgnored
+    var reportsHeight = false
 
     /// What the board's find is looking for, while this is the card you are standing in.
     ///
@@ -1915,28 +2020,51 @@ struct SessionHeading: View {
     }
 }
 
-/// What the hover "＋date" sits on: the card and the row's band over it, faded in from the left, so the
-/// chip reads as laid on the end of the words rather than printed across them.
-private struct DueGhostBacking: View {
-    let isSelected: Bool
-    let isEmphasized: Bool
-    let isHovering: Bool
-    var fade: CGFloat = 16
+/// A line to add to the latest sitting's note: Return writes it and leaves the field open for the next
+/// one, Escape stops. A sentence written down without opening the note — see
+/// `CanvasProjectCardDisplay.appendsToNote`.
+///
+/// A click asks for the keyboard before it focuses, since a card in a panel that doesn't take the
+/// keyboard for being clicked can't type until it has.
+private struct NoteAppendLine: View {
+    var onFocus: () -> Void
+    var onDone: () -> Void
+    var submit: (String) -> Void
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
-        ZStack {
-            Color(nsColor: CanvasPalette.card)
-            RowSelectionFill(isSelected: isSelected, isEmphasized: isEmphasized, isHovering: isHovering)
+        HStack(alignment: .firstTextBaseline, spacing: TaskRowMetrics.gap) {
+            Image(systemName: "text.append")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .frame(width: TaskRowMetrics.boxColumn)
+            TextField("Add to the note\u{2026}", text: $text)
+                .textFieldStyle(.plain)
+                .font(FolioType.body)
+                .focused($focused)
+                .onSubmit {
+                    let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !line.isEmpty { submit(line) }
+                    text = ""
+                    focus()
+                }
+                .onExitCommand {
+                    focused = false
+                    text = ""
+                    onDone()
+                }
         }
-        .mask {
-            HStack(spacing: 0) {
-                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing)
-                    .frame(width: fade)
-                Color.black
-            }
-        }
-        .padding(.leading, -fade)
-        .padding(.vertical, -2)
-        .allowsHitTesting(false)
+        .padding(.horizontal, 6)
+        .frame(height: 26)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(focused ? 0.07 : 0.04)))
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded { focus() })
+    }
+
+    private func focus() {
+        onFocus()
+        DispatchQueue.main.async { focused = true }
     }
 }

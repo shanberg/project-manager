@@ -1148,12 +1148,6 @@ extension CanvasBoardView {
         default:
             if event.charactersIgnoringModifiers == "\u{1b}" {
                 cancelOperation(nil)
-            } else if event.charactersIgnoringModifiers == "\r",
-                      let commands = engagedProjectCard?.projectCommands, commands.selectedRows == 1 {
-                // A list's "open": Return on one selected row focuses that task, the same act as its
-                // double-click. One row only, for the reason the window gives — Return has to name a
-                // single thing to open.
-                commands.requestOpenRow()
             } else if event.charactersIgnoringModifiers == "\r", let only = selection.first {
                 beginEditing(only)
             } else {
@@ -1181,20 +1175,7 @@ extension CanvasBoardView {
     ///   then. That is not a check here; it is how the responder chain already works, and it is why
     ///   these can be unconditional.
     private func projectCardTakes(_ event: NSEvent) -> Bool {
-        guard let commands = engagedProjectCard?.projectCommands else { return false }
-        let extending = event.modifierFlags.contains(.shift)
-        switch event.specialKey {
-        case .delete, .deleteForward:
-            guard commands.selectedRows > 0 else { return false }
-            commands.requestDeleteRows()
-        case .upArrow where !event.modifierFlags.contains(.option):
-            commands.stepRows(-1, extending: extending)
-        case .downArrow where !event.modifierFlags.contains(.option):
-            commands.stepRows(1, extending: extending)
-        default:
-            return false
-        }
-        return true
+        engagedProjectCard?.projectCommands.takesListKey(event) ?? false
     }
 
     /// The workspace's keys (docs/canvas-workspaces.md §7k): ⌥ with the arrows, =, −, 0, `, [, ], T, N,
