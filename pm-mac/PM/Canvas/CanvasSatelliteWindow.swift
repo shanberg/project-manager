@@ -249,7 +249,11 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         shown = max(0, min(index, cards.count - 1))
         for (i, card) in cards.enumerated() { card.cardContent?.isHidden = i != shown }
         if leaving !== shownCard, leaving?.isEngaged == true { leaving?.engage(false) }
-        if window?.isKeyWindow == true { shownCard?.engage(true) }
+        if window?.isKeyWindow == true {
+            shownCard?.engage(true)
+            // The project panel is the tab's to show or not (`CanvasSatelliteCompanion.isShown`).
+            if leaving !== shownCard { CanvasSatelliteCompanion.shared.refresh() }
+        }
         watchPage()
         describe()
         remember()
@@ -547,7 +551,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         menu.autoenablesItems = false
         let panel = NSMenuItem(title: "Show Project Panel", action: #selector(toggleProjectPanel), keyEquivalent: "")
         panel.target = self
-        panel.state = CanvasSatelliteCompanion.isEnabled ? .on : .off
+        panel.state = CanvasSatelliteCompanion.isShown(beside: self) ? .on : .off
         // The panel is a project's: a board on a bare canvas file has none to show.
         panel.isEnabled = board?.boardProject != nil
         menu.addItem(panel)
@@ -600,8 +604,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func toggleProjectPanel() {
-        CanvasSatelliteCompanion.isEnabled.toggle()
-        CanvasSatelliteCompanion.shared.refresh()
+        CanvasSatelliteCompanion.setShown(!CanvasSatelliteCompanion.isShown(beside: self), beside: self)
     }
 
     /// A tile out in a window: that window forward, at the card. A tile on the board: the workspace's

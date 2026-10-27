@@ -30,13 +30,25 @@ import SwiftUI
 final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
     static let shared = CanvasSatelliteCompanion()
 
-    /// Whether the panel comes out beside satellites at all — Show Project Panel in a satellite's menu.
-    /// One answer for every window, across launches; on until it is turned off.
-    static var isEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
+    /// Whether the panel comes out beside this satellite — Show Project Panel in its menu. **Per tile**,
+    /// the card showing: off beside the project's own notes, which say what the panel says, and on
+    /// beside the page you are working in. The card's, not the window's, so it holds in any window and
+    /// any workspace the card comes out in, and a window of tabs follows the tab. Kept across launches
+    /// (`CanvasCompanionSpots`).
+    ///
+    /// **Off for a project card until it is turned on**, on for everything else until it is turned off:
+    /// a project card is the panel's own content at a larger size.
+    static func isShown(beside satellite: CanvasSatelliteWindow) -> Bool {
+        guard let card = satellite.shownCard else { return true }
+        return CanvasCompanionSpots.isShown(card: card.node.id, canvas: satellite.canvas)
+            ?? !((card as? CanvasFileNodeView)?.isProjectCard ?? false)
     }
-    static let enabledKey = "PMSatelliteCompanionShown"
+
+    static func setShown(_ shown: Bool, beside satellite: CanvasSatelliteWindow) {
+        guard let card = satellite.shownCard?.node.id else { return }
+        CanvasCompanionSpots.setShown(shown, card: card, canvas: satellite.canvas)
+        shared.refresh()
+    }
 
     private var panel: KeyablePanel?
     private var hosting: NSHostingView<CanvasCompanionView>?
@@ -105,7 +117,7 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
     }
 
     private func show(beside satellite: CanvasSatelliteWindow) {
-        guard Self.isEnabled else { return hide("turned off") }
+        guard Self.isShown(beside: satellite) else { return hide("turned off for this window") }
         guard let board = satellite.board else { return hide("satellite has no board") }
         guard let project = board.boardProject else { return hide("board has no project: \(board.store.url.path)") }
         guard let window = satellite.window, window.isVisible else { return hide("satellite window not visible") }
@@ -223,10 +235,7 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
 
     // MARK: Placement
 
-    private var spotKey: CanvasCompanionSpots.Key? {
-        guard let satellite, let first = satellite.cardIDs.first else { return nil }
-        return .init(canvas: satellite.canvas, workspace: satellite.workspace, window: first)
-    }
+    private var spotKey: CanvasCompanionSpots.Key? { satellite.flatMap(CanvasCompanionSpots.key(for:)) }
 
     private func geometry() -> (window: NSRect, screen: NSRect)? {
         guard let window = satellite?.window, let screen = (window.screen ?? NSScreen.main)?.visibleFrame else { return nil }
@@ -409,11 +418,31 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
     static let windowIdentifier = "PMSatelliteCompanion"
 }
 
-/// The corner you dragged the companion to, per satellite window, across launches. In user defaults
-/// beside `CanvasSatellites`, keyed the way it keys a window: canvas, workspace, and the window's first
-/// card.
+/// The corner you dragged the companion to, per satellite window, across launches — keyed the way
+/// `CanvasSatellites` keys a window: canvas, workspace, and the window's first card. And whether it
+/// was turned on or off for a tile, keyed by canvas and card alone. In user defaults.
 enum CanvasCompanionSpots {
     static let defaultsKey = "PMCompanionSpots"
+    static let shownKey = "PMCompanionShown"
+
+    @MainActor static func key(for satellite: CanvasSatelliteWindow) -> Key? {
+        satellite.cardIDs.first.map { Key(canvas: satellite.canvas, workspace: satellite.workspace, window: $0) }
+    }
+
+    /// Nil when it was never turned on or off for this card, which leaves it to the kind of card.
+    static func isShown(card: String, canvas: URL, in defaults: UserDefaults = .standard) -> Bool? {
+        defaults.dictionary(forKey: shownKey)?[shownString(card, canvas)] as? Bool
+    }
+
+    static func setShown(_ shown: Bool, card: String, canvas: URL, in defaults: UserDefaults = .standard) {
+        var all = defaults.dictionary(forKey: shownKey) ?? [:]
+        all[shownString(card, canvas)] = shown
+        defaults.set(all, forKey: shownKey)
+    }
+
+    private static func shownString(_ card: String, _ canvas: URL) -> String {
+        canvas.standardizedFileURL.path + "\u{1}" + card
+    }
 
     struct Key: Equatable {
         var canvas: URL
