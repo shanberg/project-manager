@@ -556,11 +556,19 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         if !tiles.isEmpty {
             menu.addItem(.separator())
             menu.addItem(.sectionHeader(title: "Tiles"))
+            FaviconLoader.shared.warm(hosts: tiles.compactMap { card -> String? in
+                if case .page(let host)? = board?.describeCard(card)?.kind { return host }
+                return nil
+            })
             for card in tiles {
                 let described = board?.describeCard(card)
                 let item = NSMenuItem(title: described?.title ?? "Card", action: #selector(openTile(_:)), keyEquivalent: "")
                 item.target = self
-                item.image = Self.symbol(for: described?.kind)
+                // The board's own card menus' icons: a page's site, else the card's symbol — what says
+                // which tile is which when page titles don't.
+                item.image = described.map { CanvasBoardView.menuIcon(for: $0.kind) }
+                    ?? MenuPictures.symbol("text.alignleft", nil)
+                MenuPictures.forceImageVisible(item)
                 item.representedObject = card
                 menu.addItem(item)
             }
@@ -574,6 +582,8 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
                 let item = NSMenuItem(title: name, action: #selector(openWorkspace(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = name
+                item.image = MenuPictures.symbol("rectangle.split.2x2", nil)
+                MenuPictures.forceImageVisible(item)
                 item.state = name == workspace ? .on : .off
                 menu.addItem(item)
             }

@@ -289,7 +289,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         if let symbol {
             item.image = MenuPictures.symbol(symbol, nil)
-            Self.forceImageVisible(item)
+            MenuPictures.forceImageVisible(item)
         }
         let sub = NSMenu(title: title)
         sub.delegate = submenuLogger   // traces open/close/highlight when the log is on
@@ -317,7 +317,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             // The apps get their own icons where we can find them — a Finder or Obsidian item reads
             // faster with the app's face on it than with a generic glyph.
             if let icon = appIcon(for: command) { entry.image = icon }
-            Self.forceImageVisible(entry)
+            MenuPictures.forceImageVisible(entry)
             // Add Before rides under Add After on ⌥, as it always has: same gesture, opposite
             // direction, and the pair reads as one choice rather than two items.
             if command == .addBefore {
@@ -374,7 +374,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             } else {
                 r.image = MenuPictures.symbol("clock.arrow.circlepath", nil)
             }
-            Self.forceImageVisible(r)
+            MenuPictures.forceImageVisible(r)
             if #available(macOS 14.4, *) { r.subtitle = recentSubtitle(recent) }
             r.toolTip = recentTooltip(recent)
             r.representedObject = recent.projectKey
@@ -615,19 +615,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         item.target = self
         if let symbol {
             item.image = MenuPictures.symbol(symbol, nil)
-            Self.forceImageVisible(item)
+            MenuPictures.forceImageVisible(item)
         }
         return item
-    }
-
-    /// macOS 27 hides menu-item *symbol* images by default (`NSMenuItem.preferredImageVisibility`
-    /// defaults to `.automatic`). Opt back in so our SF Symbol action icons render. The Xcode SDK
-    /// (26.5) predates this API, so set it through the runtime; `responds(to:)` makes it a no-op on
-    /// earlier macOS. `1` == `NSMenuItemImageVisibilityVisible`.
-    private static func forceImageVisible(_ item: NSMenuItem) {
-        let selector = NSSelectorFromString("setPreferredImageVisibility:")
-        guard item.responds(to: selector) else { return }
-        item.setValue(NSNumber(value: 1), forKey: "preferredImageVisibility")
     }
 
     // MARK: Actions

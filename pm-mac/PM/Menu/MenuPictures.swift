@@ -17,6 +17,7 @@ enum MenuPictures {
         menu.presentationStyle = .palette
         for item in items {
             item.toolTip = item.title
+            forceImageVisible(item)
             menu.addItem(item)
         }
         let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
@@ -30,6 +31,16 @@ enum MenuPictures {
     static func symbol(_ name: String, _ label: String?) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: label)?
             .withSymbolConfiguration(.init(pointSize: 12, weight: .light, scale: .medium))
+    }
+
+    /// macOS 27 hides menu-item *symbol* images by default (`NSMenuItem.preferredImageVisibility`
+    /// defaults to `.automatic`). Opt back in so our SF Symbol action icons render. The Xcode SDK
+    /// (26.5) predates this API, so set it through the runtime; `responds(to:)` makes it a no-op on
+    /// earlier macOS. `1` == `NSMenuItemImageVisibilityVisible`.
+    static func forceImageVisible(_ item: NSMenuItem) {
+        let selector = NSSelectorFromString("setPreferredImageVisibility:")
+        guard item.responds(to: selector) else { return }
+        item.setValue(NSNumber(value: 1), forKey: "preferredImageVisibility")
     }
 
     // MARK: What each choice looks like

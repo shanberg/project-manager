@@ -792,6 +792,7 @@ extension CanvasBoardView {
                 item.target = self
                 item.representedObject = card.id
                 item.image = Self.menuIcon(for: card.kind)
+                MenuPictures.forceImageVisible(item)
             }
         }
     }

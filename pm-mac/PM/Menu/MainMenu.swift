@@ -436,6 +436,7 @@ enum MainMenu {
             let entry = NSMenuItem(title: arrangement.title,
                                    action: #selector(CanvasBoardView.setTileArrangement(_:)), keyEquivalent: "")
             entry.image = MenuPictures.arrangement(arrangement)
+            MenuPictures.forceImageVisible(entry)
             entry.representedObject = arrangement.rawValue
             return entry
         }))

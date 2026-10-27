@@ -1005,6 +1005,7 @@ extension CanvasBoardView {
             let item = NSMenuItem(title: width.title, action: #selector(setProseLineWidth(_:)), keyEquivalent: "")
             item.target = self
             item.image = MenuPictures.lineWidth(width)
+            MenuPictures.forceImageVisible(item)
             item.representedObject = width.rawValue
             item.state = widthCards.allSatisfy { $0.textStyle.lineWidth == width } ? .on : .off
             return item
@@ -1020,6 +1021,7 @@ extension CanvasBoardView {
             let item = NSMenuItem(title: face.title, action: #selector(setProseFace(_:)), keyEquivalent: "")
             item.target = self
             item.image = MenuPictures.face(face)
+            MenuPictures.forceImageVisible(item)
             item.representedObject = face.rawValue
             item.state = cards.allSatisfy { $0.textStyle.face == face } ? .on : .off
             return item
@@ -1154,6 +1156,7 @@ extension CanvasBoardView {
                                       action: #selector(setViewSpan(_:)), keyEquivalent: "")
                 item.target = self
                 item.image = MenuPictures.layout(layout)
+                MenuPictures.forceImageVisible(item)
                 item.representedObject = [period.value, layout.rawValue]
                 item.state = cards.allSatisfy { $0.spec.shows(period, as: layout) } ? .on : .off
                 return item
@@ -1447,6 +1450,7 @@ extension CanvasBoardView {
                                   keyEquivalent: "")
             item.target = self
             item.image = MenuPictures.arrangement(option)
+            MenuPictures.forceImageVisible(item)
             return item
         }))
         if isTiled {
@@ -1604,6 +1608,7 @@ extension CanvasBoardView {
                                   action: #selector(setMenuTabsOnSide(_:)), keyEquivalent: "")
             item.target = self
             item.image = MenuPictures.tabs(onSide: side)
+            MenuPictures.forceImageVisible(item)
             item.representedObject = side
             return item
         })
@@ -1874,6 +1879,7 @@ extension CanvasBoardView {
                     let item = add(submenu, command.viewName ?? command.title, action)
                     item.representedObject = command
                     item.image = command.viewKind.flatMap { MenuPictures.symbol($0.symbol, $0.title) }
+                    MenuPictures.forceImageVisible(item)
                     if let subtitle = command.viewSubtitle { item.subtitle = subtitle }
                 }
                 menu.addItem(withTitle: "New View", action: nil, keyEquivalent: "").submenu = submenu
