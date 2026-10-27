@@ -716,7 +716,10 @@ final class CanvasFocusHint {
     /// A plain titled window's corner (a satellite has no toolbar). The ring follows it, concentric.
     static let windowRadius: CGFloat = 16
 
+    /// Not for a window on another Space: there is nothing here to ring, and the ring would sit round
+    /// wherever its frame falls on this one.
     func show(around window: NSWindow, color: NSColor?) {
+        guard window.isOnActiveSpace else { return hide() }
         let panel = self.panel ?? makePanel()
         let margin = Self.outset + Self.glow
         let frame = window.frame.insetBy(dx: -margin, dy: -margin)
@@ -767,7 +770,7 @@ final class CanvasFocusHint {
 /// faint, a ghost of itself — and put back exactly where it was in the stack when the pointer leaves.
 /// Clicking the button keeps it up, as the window it is (`keep`).
 ///
-/// Only for a window that is hidden: wholly covered, or with as much as 40% of it under windows above
+/// Only for a window that is hidden on this Space: wholly covered, or with as much as 40% of it under windows above
 /// it. One you can already see is shown by the ring alone (`CanvasFocusHint`).
 @MainActor
 final class CanvasWindowGhost {
@@ -784,7 +787,8 @@ final class CanvasWindowGhost {
 
     func show(_ window: NSWindow) {
         end()
-        guard window.isVisible, Self.isHidden(window) else { return }
+        // Not one on another Space, which reads as hidden too: ordering it front takes the screen there.
+        guard window.isVisible, window.isOnActiveSpace, Self.isHidden(window) else { return }
         self.window = window
         above = Self.windowJustAbove(window)
         alpha = window.alphaValue

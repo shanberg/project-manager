@@ -490,8 +490,12 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         }
         projectMarkIcon = icon.flatMap { ProjectIconMark.canDraw($0) ? $0 : nil }
         let tint = wash.color?.swiftUIColor
+        // In the title's ink rather than the project's colour, which the bar's wash already says: drawn
+        // black and handed over as a template, for the image view to tint with the label colour as the
+        // appearance changes. An emoji, or an image in colours of its own, keeps them.
+        let ink = icon.map { ProjectIconMark.canDraw($0) && !ProjectIconMark.keepsOwnColors($0) } ?? false
         let drawn: AnyView? = if let icon, ProjectIconMark.canDraw(icon) {
-            AnyView(ProjectIconMark(icon: icon, size: 14, tint: tint))
+            AnyView(ProjectIconMark(icon: icon, size: 14, tint: ink ? .black : tint))
         } else if let tint {
             // No icon of its own: the project's colour says as much, as a dot.
             AnyView(Circle().fill(tint).frame(width: 9, height: 9))
@@ -503,6 +507,8 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
             renderer.scale = window?.backingScaleFactor ?? 2
             return renderer.nsImage
         }
+        mark.image?.isTemplate = ink
+        mark.contentTintColor = ink ? .labelColor : nil
         mark.isHidden = mark.image == nil
         markWidth?.constant = mark.image == nil ? 0 : 16
         projectTitle = board.boardProject?.title
@@ -883,31 +889,46 @@ extension CanvasBoardView {
     /// where the satellite came from: its cards are in that workspace's saved tiling, and come back
     /// with it.
     ///
-    /// **Bring Back brings the card home; the close button only closes.** Bring Back raises the window
-    /// if Pop Out put it away, and picks the tile out at the card that was showing. Closing a window
-    /// changes nothing else on screen: no window comes back or forward, the board's selection and
-    /// tabs stay as they were, and a workspace window Pop Out put away stays away — the dock is the way
-    /// back to it.
+    /// **Bring Back brings the card home; the close button only closes.** Bring Back brings the window
+    /// that has the workspace up into view (`showWindow(onWorkspace:)`), and picks the tile out at the
+    /// card that was showing. Closing a window changes nothing else on screen: no window comes back or
+    /// forward, the board's selection and tabs stay as they were, and a workspace window Pop Out put
+    /// away stays away — the dock is the way back to it.
     func satelliteReturned(_ ids: [String], showing: String?, from scope: String, raisingWindow: Bool) {
-        guard var session = tiling, scope == satelliteScope else { return }
-        let missing = ids.filter { !session.cards.contains($0) && document.node(id: $0) != nil }
-        if let first = missing.first {
-            session.add(first, at: nextPlacement)
-            for id in missing.dropFirst() { session.add(id, at: .init(target: first, side: .tab)) }
-            tiling = session
-            setLayout(session.layout, animated: true)
-            onTilingChanged?()
-            announceTiling()
+        if var session = tiling, scope == satelliteScope {
+            let missing = ids.filter { !session.cards.contains($0) && document.node(id: $0) != nil }
+            if let first = missing.first {
+                session.add(first, at: nextPlacement)
+                for id in missing.dropFirst() { session.add(id, at: .init(target: first, side: .tab)) }
+                tiling = session
+                setLayout(session.layout, animated: true)
+                onTilingChanged?()
+                announceTiling()
+            }
         }
         guard raisingWindow else { return }
-        if let window, !window.isVisible, !isAllOut {
-            window.orderFront(nil)
-            CanvasSatellites.setPoppedOut(false, canvas: store.url, workspace: satelliteScope)
-        }
-        guard let front = showing.flatMap({ ids.contains($0) ? $0 : nil }) ?? ids.first,
+        showWindow(onWorkspace: scope)
+        guard let session = tiling, scope == satelliteScope,
+              let front = showing.flatMap({ ids.contains($0) ? $0 : nil }) ?? ids.first,
               session.cards.contains(front) else { return }
         select([front])
         if session.hasTabs(front) { showTab(front) }
+    }
+
+    /// Bring Back's window: whichever has this canvas at `scope` up, brought into view — this board's,
+    /// put away by Pop Out, behind other windows, minimised or on another of its tabs; else, when this
+    /// board has gone on to another workspace, another window showing that one. None up, none opens.
+    private func showWindow(onWorkspace scope: String) {
+        if scope == satelliteScope, let window {
+            guard window.isVisible || !isAllOut else { return }
+            CanvasSatellites.setPoppedOut(false, canvas: store.url, workspace: scope)
+            if isHiddenOrHasHiddenAncestor, let workspaceName { onGoToWorkspace(workspaceName) }
+            return window.makeKeyAndOrderFront(nil)
+        }
+        WindowManager.shared.controllers.first { controller in
+            guard !controller.isCarrier, let board = controller.canvasPane?.board else { return false }
+            return board !== self && board.store.url == store.url && board.satelliteScope == scope
+        }?.show()
     }
 
     /// Pop Out Workspace: every tile into a window of its own, each opened over the tile it was — a
