@@ -30,6 +30,14 @@ import SwiftUI
 final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
     static let shared = CanvasSatelliteCompanion()
 
+    /// Whether the panel comes out beside satellites at all — Show Project Panel in a satellite's menu.
+    /// One answer for every window, across launches; on until it is turned off.
+    static var isEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
+    }
+    static let enabledKey = "PMSatelliteCompanionShown"
+
     private var panel: KeyablePanel?
     private var hosting: NSHostingView<CanvasCompanionView>?
     private let state = CanvasCompanionState()
@@ -97,6 +105,7 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
     }
 
     private func show(beside satellite: CanvasSatelliteWindow) {
+        guard Self.isEnabled else { return hide("turned off") }
         guard let board = satellite.board else { return hide("satellite has no board") }
         guard let project = board.boardProject else { return hide("board has no project: \(board.store.url.path)") }
         guard let window = satellite.window, window.isVisible else { return hide("satellite window not visible") }

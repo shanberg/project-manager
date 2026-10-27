@@ -64,6 +64,9 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     private let workspaceLabel = NSTextField(labelWithString: "")
     private let bringBack = NSButton()
     private let gather = NSButton()
+    /// The window's menu, innermost of the buttons on the right: the project panel, and the way to the
+    /// workspace's other tiles and the project's other workspaces. See `showMenu`.
+    private let more = NSButton()
     private let tabs = CanvasSatelliteTabs()
     private var barHeight: NSLayoutConstraint?
     private var backLeading: NSLayoutConstraint?
@@ -278,8 +281,9 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         configure(reload, "arrow.clockwise", "Reload", #selector(reloadPage))
         configure(bringBack, "arrow.down.left", "Bring Back to Workspace", #selector(returnToWorkspace))
         configure(gather, "rectangle.grid.2x2", "Gather Workspace", #selector(gatherWorkspace))
+        configure(more, "ellipsis.circle", "More", #selector(showMenu))
         showButtons(false)
-        let home = NSStackView(views: [gather, bringBack])
+        let home = NSStackView(views: [more, gather, bringBack])
         home.spacing = 0
 
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -534,6 +538,81 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     }
     @objc private func gatherWorkspace() { board?.gatherWorkspace() }
 
+    // MARK: The menu
+
+    /// The header's menu, built as it opens so it lists what is there now: the project panel on or off,
+    /// then this workspace's other tiles, then the project's workspaces.
+    @objc private func showMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let panel = NSMenuItem(title: "Show Project Panel", action: #selector(toggleProjectPanel), keyEquivalent: "")
+        panel.target = self
+        panel.state = CanvasSatelliteCompanion.isEnabled ? .on : .off
+        // The panel is a project's: a board on a bare canvas file has none to show.
+        panel.isEnabled = board?.boardProject != nil
+        menu.addItem(panel)
+
+        let tiles = otherTiles()
+        if !tiles.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(.sectionHeader(title: "Tiles"))
+            for card in tiles {
+                let described = board?.describeCard(card)
+                let item = NSMenuItem(title: described?.title ?? "Card", action: #selector(openTile(_:)), keyEquivalent: "")
+                item.target = self
+                item.image = Self.symbol(for: described?.kind)
+                item.representedObject = card
+                menu.addItem(item)
+            }
+        }
+
+        let workspaces = CanvasWorkspaces.names(of: canvas)
+        if !workspaces.isEmpty {
+            menu.addItem(.separator())
+            menu.addItem(.sectionHeader(title: "Workspaces"))
+            for name in workspaces {
+                let item = NSMenuItem(title: name, action: #selector(openWorkspace(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = name
+                item.state = name == workspace ? .on : .off
+                menu.addItem(item)
+            }
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.maxY + 4), in: more)
+    }
+
+    /// The workspace's tiles that aren't this window — on its board or out in windows of their own — by
+    /// the card each shows.
+    private func otherTiles() -> [String] {
+        guard let board, let session = board.tiling, board.satelliteScope == workspace else { return [] }
+        let mine = Set(cardIDs)
+        return session.columns.flatMap(\.tiles).filter { $0.cards.allSatisfy { !mine.contains($0) } }.map(\.shown)
+    }
+
+    @objc private func toggleProjectPanel() {
+        CanvasSatelliteCompanion.isEnabled.toggle()
+        CanvasSatelliteCompanion.shared.refresh()
+    }
+
+    /// A tile out in a window: that window forward, at the card. A tile on the board: the workspace's
+    /// window forward with the tile picked out — it opens where it is rather than coming out, which
+    /// would rearrange the workspace for a look.
+    @objc private func openTile(_ sender: NSMenuItem) {
+        guard let board, let id = sender.representedObject as? String, let card = board.nodeViews[id] else { return }
+        if let out = card.lentTo { return out.reveal(card) }
+        board.showWorkspaceWindow()
+        board.select([id])
+        if board.tiling?.hasTabs(id) == true { board.showTab(id) }
+    }
+
+    /// Another workspace in the project's window — a tab of its own, so this one stays out and its
+    /// satellites with it. This workspace: its window forward.
+    @objc private func openWorkspace(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        if name == workspace, let board { return board.showWorkspaceWindow() }
+        ProjectWindowController.showWorkspace(name, projectKey: board?.boardProject?.key, canvas: canvas)
+    }
+
     /// The header's two buttons are there only while the pointer is over the window — the title bar
     /// included: they are for the moment you reach for them, and the rest of the time the header is the
     /// card's. Tracked on the window's frame view rather than the content, because the title bar is laid
@@ -550,7 +629,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     private func showButtons(_ shown: Bool) {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
-            for button in [bringBack, gather] { button.animator().alphaValue = shown ? 1 : 0 }
+            for button in [bringBack, gather, more] { button.animator().alphaValue = shown ? 1 : 0 }
         }
     }
 
