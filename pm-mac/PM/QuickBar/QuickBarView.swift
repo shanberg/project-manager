@@ -177,6 +177,7 @@ struct QuickBarView: View {
                 // disappears the moment it's accepted, → is never taken twice running.
                 .onKeyPress(.rightArrow) { model.acceptCompletion() ? .handled : .ignored }
                 .onKeyPress(.tab) { model.switchMode(); return .handled }
+                .onKeyPress(.delete) { model.dropPage() ? .handled : .ignored }
                 .onKeyPress(.escape) { model.clearOrDismiss(); return .handled }
                 .accessibilityLabel(model.mode.placeholder)
                 // The badges beside the field belong to the line rather than to any one row, so they
@@ -214,6 +215,12 @@ struct QuickBarView: View {
             // as a difference between the rows when they are the one thing the rows have in common.
             if let target = model.reading.target {
                 badge(target.displayName, symbol: "folder", tint: .accentColor)
+            }
+            // The page being carried, beside the field rather than above it: nothing above the field
+            // may move, and this arrives a moment after the bar does, once the browser has answered.
+            if model.mode == .goToProject, let page = model.page {
+                badge(page.label, symbol: "globe", tint: .accentColor)
+                    .frame(maxWidth: QuickBarMetrics.width * 0.4, alignment: .trailing)
             }
             if let warning = model.unreadableDueLabel {
                 badge(warning, symbol: "exclamationmark.triangle", tint: .orange)
@@ -331,6 +338,7 @@ struct QuickBarView: View {
     private var fieldDescription: String {
         [model.completion.map { "completes to \(model.query)\($0)" },
          model.reading.target.map { "going to \($0.displayName)" },
+         model.mode == .goToProject ? model.page.map { "bringing \($0.label) from \($0.browser)" } : nil,
          model.unreadableDueLabel,
          model.parsedDueLabel.map { "due \($0)" }]
             .compactMap { $0 }
@@ -612,6 +620,13 @@ struct QuickBarView: View {
             // Spelled out rather than left to the ⌘ rule, because this is the row where the two halves
             // are furthest apart: one switches PM in the background, the other puts a window in front.
             if model.isEmptyState { return Self.nothingMatched("project", model) }
+            if model.page != nil {
+                var parts = [Self.hint([.return], "open page here"),
+                             Self.hint([.command, .return], "in a new window")]
+                if model.completion != nil { parts.append(Self.acceptHint) }
+                parts.append(Self.hint([.delete], "drop page"))
+                return parts
+            }
             var parts = [Self.hint([.return], "focus"),
                          Self.hint([.command, .return], "and open it")]
             if model.completion != nil { parts.append(Self.acceptHint) }
@@ -747,7 +762,7 @@ struct QuickBarView: View {
 /// words beside them. A symbol is drawn to the text style it's in, so it takes the line's weight and
 /// baseline and stops being something the eye has to resolve separately from the words.
 private enum KeyCap {
-    case command, option, control, shift, escape, tab, rightArrow
+    case command, option, control, shift, escape, tab, rightArrow, delete
     case `return`
     /// A letter in a chord — the `F` of ⌃⌘F. Drawn as the letter rather than as a symbol: there is no
     /// SF Symbol for a bare key cap, and the boxed ones (`f.square`) put a frame around one member of a
@@ -764,6 +779,7 @@ private enum KeyCap {
         case .escape: return "escape"
         case .return: return "return"
         case .rightArrow: return "arrow.right"
+        case .delete: return "delete.left"
         // The one key with no symbol of its own. `arrow.right.to.line` is the drawing the ⇥ character
         // is and the drawing on the key itself — an arrow stopped at a bar — so it's the closest thing
         // to the legend, and near enough that it doesn't read as the odd one out beside the rest.
@@ -792,6 +808,7 @@ private enum KeyCap {
         case .return: return "Return"
         case .tab: return "Tab"
         case .rightArrow: return "Right arrow"
+        case .delete: return "Delete"
         case .letter(let character): return character.uppercased()
         }
     }

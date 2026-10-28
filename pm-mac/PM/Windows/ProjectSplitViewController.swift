@@ -417,6 +417,20 @@ final class ProjectSplitViewController: NSSplitViewController {
         pane.whenInWorkspace(name) { [weak pane] in pane?.board.popOutWorkspace() }
     }
 
+    /// Bring up the tab a page carried in from a browser goes to: the one that is up when it is a
+    /// workspace or the notes, else the first workspace in the row, else the notes. Never the canvas —
+    /// a page dropped on the freeform board lands somewhere nobody is looking.
+    func goToWorkspaceForIncomingPage() {
+        let view = tabs.selected.view
+        if view.workspaceName != nil || view.isNotesTab { return }
+        if let open = tabs.tabs.first(where: { $0.view.workspaceName != nil }) {
+            tabs.select(open.id)
+            applySelectedTab()
+            return
+        }
+        openTab(.notes)
+    }
+
     /// ⌃⇥ / ⌃⇧⇥.
     func cycleTabs(by step: Int) {
         guard tabs.tabs.count > 1 else { return }

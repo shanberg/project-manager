@@ -650,6 +650,14 @@ final class QuickBarModel {
     /// landed somewhere you can't see.
     var receipt: QuickBarReceipt?
 
+    /// The browser page the bar was summoned over, while it's being carried to a project.
+    ///
+    /// Only in go-to-project, and only when the bar came up over a browser it could read (see
+    /// `BrowserTab`). With one here, a project row opens the page in that project instead of focusing
+    /// it — ⏎ in its workspace, ⌘⏎ in a satellite. ⌫ on an empty line drops it, and the rows go back to
+    /// what they always meant.
+    var page: BrowserPage?
+
     /// The focused project's display name, or nil when there isn't one — capture has nowhere to go
     /// unless the line named somewhere with `@`.
     ///
@@ -819,6 +827,7 @@ final class QuickBarModel {
         rows = []
         selection = 0
         receipt = nil
+        page = nil
         query = ""
         // Emptied here and filled by the controller straight afterwards when there's a draft to put
         // back — a summon must never inherit the last one's prose by accident, only on purpose.
@@ -1199,6 +1208,14 @@ final class QuickBarModel {
     /// summoned — the same thing deleting the sigil by hand does.
     func clearOrDismiss() {
         if query.isEmpty { onDismiss() } else { query = "" }
+    }
+
+    /// What ⌫ does on an empty line: drop the page chip, the way it deletes a token in a search field.
+    /// Returns whether there was one to drop, so the key falls through to the field otherwise.
+    func dropPage() -> Bool {
+        guard query.isEmpty, page != nil else { return false }
+        page = nil
+        return true
     }
 
     // MARK: The session preview

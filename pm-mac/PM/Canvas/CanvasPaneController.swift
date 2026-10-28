@@ -185,6 +185,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             // The tab wears this too, and in a window with a bar it is the *only* place it is worn.
             onTilingChanged?()
             runWaitingForWorkspace()
+            runWaitingForTiling()
         }
         // The header's tiling button says what it is about to do — "Fill Window with These 6 Cards" —
         // so it has to hear about the selection. Nothing was listening to this before; the board fired
@@ -536,6 +537,31 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // A turn later: this is heard from inside `restoreTiling`, which has its satellites still to
         // bring back.
         DispatchQueue.main.async(execute: waiting.act)
+    }
+
+    /// Run `act` once this board is tiled into whatever its tab shows — a page carried in by the quick
+    /// bar, waiting for the workspace it was sent to. At once if it already is.
+    ///
+    /// A board that hasn't tiled within a second isn't going to, and `act` runs on it as it is: a page
+    /// that lands on the board beats one that never lands.
+    func whenTiled(_ act: @escaping () -> Void) {
+        if board.isTiled { return act() }
+        waitingForTiling = act
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, let waiting = waitingForTiling else { return }
+            waitingForTiling = nil
+            Log.write("incoming page: board never tiled; put on the board as it is")
+            waiting()
+        }
+    }
+
+    private var waitingForTiling: (() -> Void)?
+
+    private func runWaitingForTiling() {
+        guard let waiting = waitingForTiling, board.isTiled else { return }
+        waitingForTiling = nil
+        // A turn later, for the reason `runWaitingForWorkspace` gives.
+        DispatchQueue.main.async(execute: waiting)
     }
 
     /// What a tiled view here is showing, long and short — what the tab puts after its name.

@@ -40,11 +40,56 @@ enum CanvasIncomingLinks {
         let front = NSApp.orderedWindows.lazy
             .compactMap { $0.windowController as? ProjectWindowController }.first
             ?? WindowManager.shared.openFocusedProject()
-        front.show()
-        front.setRenderer(.canvas)
+        onBoard(of: front) { $0.openIncomingLink(url.absoluteString) }
+    }
+
+    /// A page carried in by the quick bar, to a project it was told — see `QuickBarModel.page`.
+    ///
+    /// Into one of the project's workspaces — never the canvas, where a page lands somewhere nobody is
+    /// looking (`goToWorkspaceForIncomingPage`). With `inNewWindow`, out of it into a satellite of its
+    /// own; the card keeps its tile in the workspace, so Bring Back has somewhere to put it.
+    static func open(_ url: URL, inProject key: String, inNewWindow: Bool) {
+        let window = WindowManager.shared.open(projectKey: key)
+        window.showWorkspaceForIncomingPage()
+        // A window just opened, or just switched tabs, builds its board on the next pass, and a
+        // workspace lays its tiles out a turn or more after that.
+        DispatchQueue.main.async {
+            guard let pane = window.canvasPane else {
+                Log.write("incoming page: no board to put it on")
+                return
+            }
+            pane.whenTiled { [weak pane] in
+                guard let board = pane?.board else { return }
+                place(url, on: board, inNewWindow: inNewWindow)
+            }
+        }
+    }
+
+    private static func place(_ url: URL, on board: CanvasBoardView, inNewWindow: Bool) {
+        guard inNewWindow else {
+            board.openIncomingLink(url.absoluteString)
+            return
+        }
+        guard let id = board.cardForIncomingLink(url.absoluteString) else { return }
+        // The card's view is built as the board refreshes for the change that added it.
+        DispatchQueue.main.async {
+            if let out = board.nodeViews[id]?.lentTo {
+                out.window?.makeKeyAndOrderFront(nil)
+            } else if board.moveToWindow([id], showing: id) == nil {
+                Log.write("incoming page: no view for \(id); left in the workspace")
+                board.engage(cardWithID: id)
+            }
+        }
+    }
+
+    /// Run `then` with `window`'s board, brought forward and showing the board.
+    private static func onBoard(of window: ProjectWindowController,
+                                then: @escaping @MainActor (CanvasBoardView) -> Void) {
+        window.show()
+        window.setRenderer(.canvas)
         // A window just opened, or just switched to its canvas tab, builds its board on the next pass.
         DispatchQueue.main.async {
-            guard let pane = front.canvasPane else {
+            guard let pane = window.canvasPane else {
                 Log.write("incoming link: no board to put it on")
                 return
             }
@@ -52,30 +97,36 @@ enum CanvasIncomingLinks {
             // card is placed and stepped into; in a lens it went into a frame on a board hidden
             // behind the list.
             if pane.presentation != .board { pane.presentation = .board }
-            pane.board.openIncomingLink(url.absoluteString)
+            then(pane.board)
         }
     }
 }
 
 extension CanvasBoardView {
     func openIncomingLink(_ address: String) {
-        guard let normalized = CanvasAddress.normalized(address) else { return }
-        let id: String
+        guard let id = cardForIncomingLink(address) else { return }
+        (scrollView as? CanvasScrollView)?.reveal(id)
+        // The card's view is built as the board refreshes for the change above.
+        DispatchQueue.main.async { [weak self] in self?.engage(cardWithID: id) }
+    }
+
+    /// The card on `address`, selected: the one already on this board if there is one, else a new one.
+    func cardForIncomingLink(_ address: String) -> String? {
+        guard let normalized = CanvasAddress.normalized(address) else { return nil }
         if let existing = document.nodes.first(where: {
             if case .link(let url) = $0.content { return CanvasAddress.normalized(url) == normalized }
             return false
         }) {
-            id = existing.id
-            select([id])
-        } else {
-            let at = centreOfVisibleBoard
-            id = addCard(CanvasNode(content: .link(url: normalized),
-                                    frame: CanvasRect(x: at.x - 200, y: at.y - 200, width: 400, height: 400)),
-                         actionName: "Add Web Card")
+            // Into the workspace that's up when it lives elsewhere on the board: found but out of
+            // sight is the same as not found.
+            if isTiled, tiling?.position(of: existing.id) == nil { addToTiling(existing.id) }
+            select([existing.id])
+            return existing.id
         }
-        (scrollView as? CanvasScrollView)?.reveal(id)
-        // The card's view is built as the board refreshes for the change above.
-        DispatchQueue.main.async { [weak self] in self?.engage(cardWithID: id) }
+        let at = centreOfVisibleBoard
+        return addCard(CanvasNode(content: .link(url: normalized),
+                                  frame: CanvasRect(x: at.x - 200, y: at.y - 200, width: 400, height: 400)),
+                       actionName: "Add Web Card")
     }
 }
 

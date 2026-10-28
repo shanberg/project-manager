@@ -74,6 +74,8 @@
 	</array>
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Reads the page in your browser's front tab, so Go to Project can open it in a project. Nothing else is read.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Shows events from the calendars you choose beside their projects. Read only.</string>
 	<key>NSCameraUsageDescription</key>

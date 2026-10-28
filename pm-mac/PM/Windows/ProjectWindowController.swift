@@ -576,6 +576,15 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         ProjectTabMemory.remember(split.tabs, for: projectKey)
     }
 
+    /// A workspace up for a page the quick bar carried in — see
+    /// `ProjectSplitViewController.goToWorkspaceForIncomingPage`.
+    func showWorkspaceForIncomingPage() {
+        split.goToWorkspaceForIncomingPage()
+        renderer = split.renderer
+        ProjectRendererMemory.remember(split.renderer, for: projectKey)
+        ProjectTabMemory.remember(split.tabs, for: projectKey)
+    }
+
     // MARK: Tabs
 
     /// View ▸ New Tab. Another view of this project beside the one you are in — the notes if you

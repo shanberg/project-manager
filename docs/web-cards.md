@@ -173,6 +173,23 @@ page properly" is Open in Browser and always has been.
 - The card is stepped into, so the page is live and the keyboard goes to it.
 - These are three of Apple's criteria for the browser passkey entitlement (S-008).
 
+**Go to Project over a browser carries its front tab — added 2026-10-28.**
+- Summoned over Safari or a Chromium browser (Chrome, Brave, Edge, Arc, Vivaldi), go-to-project shows the front tab as a page chip beside the field ([BrowserTab](../pm-mac/PM/QuickBar/BrowserTab.swift)).
+- A browser not on the list is recognised by its scripting dictionary: `active tab` means Chromium (Helium, Thorium), `current tab` means Safari.
+- With the chip, ⏎ on a project opens the page as a tile in one of that project's workspaces. ⌘⏎ opens it in a new satellite whose card keeps a tile in that workspace (`CanvasIncomingLinks.open(_:inProject:inNewWindow:)`).
+- Which workspace: the tab that's up if it's a workspace or the notes; else the first workspace tab in the row; else the Notes workspace (`ProjectSplitViewController.goToWorkspaceForIncomingPage`).
+- Never the canvas tab. The first version used the incoming-link path, which switches to the canvas; the page landed on the freeform board, which isn't a useful view (2026-10-28).
+- The page is placed once the workspace's tiles are laid out (`CanvasPaneController.whenTiled`). A board that hasn't tiled after a second gets the page anyway.
+- The project's focus doesn't change. ⌫ on an empty line drops the chip, and the rows go back to focus / open.
+- A page already on that board is reused, not added again. If it isn't in the workspace's tiles, it joins them. If it's already out in a satellite, that satellite comes forward.
+- The tab is read with Apple Events: `com.apple.security.automation.apple-events` plus `NSAppleEventsUsageDescription` (project.yml). macOS asks once per browser.
+- Not Accessibility, which would also cover Firefox but is a grant over every app. Firefox has no scripting dictionary, so no chip.
+- Only http and https pages; a new-tab or settings page gives no chip.
+- The read runs off the main queue. The bar is up before the browser answers, and an answer for a bar that's gone is dropped.
+- Not offered when Services ▸ Send to Project in Folio is choosing a project.
+- Checked in a whole-app scratch harness: a page becomes a workspace tile; a card elsewhere on the board joins the workspace (fails without the fix); `whenTiled` waits for tiles and gives up after a second; ⌘⏎'s satellite path works tiled and untiled, and a second carry reuses the card.
+- Tried in the installed app with Helium (2026-10-28): the chip appears. Tab choice isn't covered by a test, because it needs a whole project window.
+
 **The status line shows where a link goes.**
 - It sits at the bottom-left of the card, as in Safari ([CanvasLinkStatus](../pm-mac/PM/Canvas/CanvasLinkStatus.swift)).
 - With ⌘ held it reads "Open as a new card: …", because ⌘-click writes to the `.canvas` file.

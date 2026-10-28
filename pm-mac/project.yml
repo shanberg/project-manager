@@ -151,6 +151,8 @@ targets:
         # Read-only, for a project's Show Events From… (views.md, Calendars C1). Asked for from that sheet,
         # never at launch.
         NSCalendarsFullAccessUsageDescription: Shows events from the calendars you choose beside their projects. Read only.
+        # Asked per browser, the first time the quick bar's Go to Project comes up over it (BrowserTab).
+        NSAppleEventsUsageDescription: Reads the page in your browser's front tab, so Go to Project can open it in a project. Nothing else is read.
     scheme:
       testTargets:
         - PMViewTests
@@ -168,6 +170,9 @@ targets:
         com.apple.security.device.camera: true
         # EventKit reads nothing under the hardened runtime without this, whatever the user answers.
         com.apple.security.personal-information.calendars: true
+        # The quick bar reads a browser's front tab with Apple Events; under the hardened runtime they
+        # are refused without this, whatever the user answers. See NSAppleEventsUsageDescription.
+        com.apple.security.automation.apple-events: true
 
   # The AppKit views, driven with real events and asserted through the layout manager.
   #
@@ -285,6 +290,7 @@ targets:
       - path: PM/Windows/ProjectTroublePane.swift
       - path: PM/Project/RowSelection.swift
       - path: PM/QuickBar/ProjectSearch.swift
+      - path: PM/QuickBar/BrowserTab.swift
       # The header's parts, so the motion tests measure the real ones (docs/header-chrome.md P1, P4, P5).
       - path: PM/Shared/Motion.swift
       - path: PM/Shared/WindowChrome.swift

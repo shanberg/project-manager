@@ -96,6 +96,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         // Remember where you came from before anything moves, so dismissing can hand focus back.
         if !wasActive { previousApp = NSWorkspace.shared.frontmostApplication }
         seed(mode: mode)
+        if mode == .goToProject, projectPicked == nil, let previousApp { readPage(from: previousApp) }
         // Before the first layout, since the note surface clamps itself against it.
         model.panelHeightLimit = (summonScreen()?.visibleFrame.height ?? 0) * Self.maxHeightFraction
         let panel = ensurePanel()
@@ -154,6 +155,23 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             return event
         }
     }
+
+    /// Fill the page chip from the browser the bar came up over, once it answers.
+    ///
+    /// The bar is already up and typing by then. An answer that arrives after the bar has gone, or
+    /// after another summon, is for a bar that isn't there any more, and is dropped.
+    private func readPage(from app: NSRunningApplication) {
+        pageRead += 1
+        let read = pageRead
+        BrowserTab.read(from: app) { [weak self] page in
+            guard let self, read == self.pageRead, self.isVisible, let page else { return }
+            self.model.page = page
+            Log.write("quick bar carrying a page from \(page.browser): \(page.url.host() ?? "")")
+        }
+    }
+
+    /// Which summon a browser's answer belongs to. See `readPage`.
+    private var pageRead = 0
 
     private func removeFlagsMonitor() {
         if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
@@ -600,6 +618,14 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             if let picked = projectPicked {
                 hide(restoringFocus: true)
                 picked(key, name)
+                return
+            }
+            // A page carried in from a browser goes to the project, and the focus stays where it was:
+            // this is putting a page somewhere, not changing what you're working on.
+            if let page = model.page {
+                hide(restoringFocus: false)
+                Log.write("quick bar opened a page in \(name)\(reveal ? " in a satellite" : "")")
+                CanvasIncomingLinks.open(page.url, inProject: key, inNewWindow: reveal)
                 return
             }
             PMStore.setGlobalFocus(key: key)
