@@ -21,12 +21,15 @@ final class TimeCountTests: XCTestCase {
                                                 withIntermediateDirectories: true)
         savedConfigHome = ProcessInfo.processInfo.environment["PM_CONFIG_HOME"]
         setenv("PM_CONFIG_HOME", root.path, 1)
+        // No real transcript may lend evidence to a test's aways.
+        setenv("PM_AGENT_TRANSCRIPTS", root.appendingPathComponent("transcripts").path, 1)
         try saveConfig(PmConfig(activePath: projects.path, archivePath: archive.path,
                                 areasPath: areas.path, domains: ["W": "Work"], subfolders: ["docs"]))
     }
 
     override func tearDownWithError() throws {
         if let saved = savedConfigHome { setenv("PM_CONFIG_HOME", saved, 1) } else { unsetenv("PM_CONFIG_HOME") }
+        unsetenv("PM_AGENT_TRANSCRIPTS")
         try? FileManager.default.removeItem(at: root)
     }
 
@@ -201,10 +204,13 @@ final class AttentionLogTailTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         savedConfigHome = ProcessInfo.processInfo.environment["PM_CONFIG_HOME"]
         setenv("PM_CONFIG_HOME", root.path, 1)
+        // No real transcript may lend evidence to a test's aways.
+        setenv("PM_AGENT_TRANSCRIPTS", root.appendingPathComponent("transcripts").path, 1)
     }
 
     override func tearDownWithError() throws {
         if let saved = savedConfigHome { setenv("PM_CONFIG_HOME", saved, 1) } else { unsetenv("PM_CONFIG_HOME") }
+        unsetenv("PM_AGENT_TRANSCRIPTS")
         try? FileManager.default.removeItem(at: root)
     }
 

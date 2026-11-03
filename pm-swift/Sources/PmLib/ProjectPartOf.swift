@@ -69,7 +69,7 @@ public func projectMemberships() throws -> [ProjectMembership] {
 }
 
 /// The first few kilobytes of a file, enough to hold its frontmatter. Nil when it can't be read.
-private func readHead(of path: String, bytes: Int = 4096) -> String? {
+func readHead(of path: String, bytes: Int = 4096) -> String? {
     guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
     defer { try? handle.close() }
     let data = (try? handle.read(upToCount: bytes)) ?? Data()

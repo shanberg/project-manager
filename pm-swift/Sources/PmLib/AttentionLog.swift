@@ -96,18 +96,45 @@ public struct AttentionAway: Codable, Equatable, Sendable {
     public var seconds: Double
     /// What ended the span before it: `paused`, `slept` or `locked`.
     public var why: String
+    /// What else was going on while nobody was at the keys, busiest first. Empty when nothing was.
+    public var evidence: [AwayEvidence]
+    /// The project the evidence says the time was, when it says so clearly enough (`agentCoverage`).
+    /// What "Count for …" offers first, ahead of `project`.
+    public var suggested: String?
 
-    public init(project: String, key: String, from: Date, to: Date, why: String) {
+    public init(project: String, key: String, from: Date, to: Date, why: String,
+                evidence: [AwayEvidence] = [], suggested: String? = nil) {
         self.project = project
         self.key = key
         self.from = DoneLog.timestamp(from)
         self.to = DoneLog.timestamp(to)
         self.seconds = max(0, to.timeIntervalSince(from))
         self.why = why
+        self.evidence = evidence
+        self.suggested = suggested
     }
 
     public var fromDate: Date? { DoneLog.date(from) }
     public var toDate: Date? { DoneLog.date(to) }
+}
+
+/// Something that went on during an away: so far, an agent busy in a folder (`AgentActivity`).
+public struct AwayEvidence: Codable, Equatable, Sendable {
+    /// `agent`. Calendar events join it later.
+    public var kind: String
+    /// Where the agent ran, with the home folder as `~`.
+    public var folder: String
+    /// The project or area that folder belongs to (`AgentFolders`), or nil when none claims it.
+    public var project: String?
+    /// How many minutes of the away it was busy in.
+    public var minutes: Int
+
+    public init(kind: String = "agent", folder: String, project: String?, minutes: Int) {
+        self.kind = kind
+        self.folder = folder
+        self.project = project
+        self.minutes = minutes
+    }
 }
 
 /// A stretch of attention on one project, as a read works it out.
@@ -116,7 +143,8 @@ public struct AttentionSpan: Codable, Equatable, Sendable {
     public enum Basis: String, Codable, Sendable {
         /// An `ended` is on record. The span is what it says.
         case measured
-        /// No `ended`. Closed by the evidence in the other logs, or by the cap — `endOfUnclosed`.
+        /// No `ended`. Closed by the evidence in the other logs, or by the cap — `endOfUnclosed`. Also
+        /// an away an agent's work settled without asking (`AwayCandidate.automatic`).
         case inferred
         /// Neither edge was seen: you said this range was this project's (docs/away-time.md).
         case counted
@@ -183,6 +211,16 @@ public enum AttentionLog {
     /// Past it, the whole stretch is an away, to be counted or not; an unlocked lunch and a long
     /// agent run look the same from here, and only you know which it was.
     public static let longestQuiet: TimeInterval = 15 * 60
+
+    /// The share of an away's minutes an agent has to have been busy in before its folder's project is
+    /// suggested for it, or counted without asking. Under it, the agent most likely finished just after
+    /// you left — the October 2026 log has 40 aways where it was busy for under a fifth of the time.
+    public static let agentCoverage: Double = 0.2
+
+    /// The longest return between two aways with the same evidence that still makes them one. A minute
+    /// back at the Mac to answer an agent, then gone again, is one stretch of the agent's work, not two
+    /// questions about it.
+    public static let awayJoin: TimeInterval = 5 * 60
 
     /// Beside the journal in the config dir, not in a project folder — see the note at the top.
     public static var logPath: String {
@@ -339,8 +377,13 @@ public enum AttentionLog {
     /// `only` keeps the spans of those project folders and drops the rest — *after* the whole log has
     /// been read, never before: another project's `began` is what ends this one's span, and a
     /// `counted` for another project is what takes time away from it.
+    ///
+    /// `agent` is what agents were busy with, resolved to projects (`AgentActivity`). An away whose
+    /// evidence all points back at the project it interrupted is counted to it without asking, as
+    /// `inferred` — estimated, like any span worked out rather than recorded.
     public static func spans(from events: [AttentionEvent], evidence: [String: [Date]] = [:],
-                             now: Date = Date(), only: Set<String>? = nil) -> [AttentionSpan] {
+                             agent: [AgentMoment] = [], now: Date = Date(),
+                             only: Set<String>? = nil) -> [AttentionSpan] {
         let edges = events
             .compactMap { event in DoneLog.date(event.at).map { Edge(at: $0, event: event) } }
             .sorted { $0.at < $1.at }
@@ -390,7 +433,8 @@ public enum AttentionLog {
         if let span = open { closeSpan(span, by: nil) }
         // Quiet first, answers over it: an answer about a range beats what the log implies about it.
         let quiet = resolvingGaps(out, gaps: gaps(edges), now: now)
-        let counted = applyingCounts(to: quiet, from: edges, now: now)
+        let estimated = fillingAutomatic(quiet, candidates: awayCandidates(edges, agent: agent), now: now)
+        let counted = applyingCounts(to: estimated, from: edges, now: now)
         guard let only else { return counted }
         return counted.filter { only.contains($0.project) }
     }
@@ -541,8 +585,11 @@ public enum AttentionLog {
     /// A gap still going isn't one yet: nobody's back to be asked.
     ///
     /// `range`, when given, keeps the aways that *began* in it, as a span belongs to the day it began.
-    public static func aways(from events: [AttentionEvent], in range: DoneRange? = nil)
-        -> [AttentionAway] {
+    ///
+    /// `agent`, resolved to projects, is laid over each one as evidence (`AwayCandidate`). An away the
+    /// evidence settles on its own is counted by `spans` and not asked about here.
+    public static func aways(from events: [AttentionEvent], in range: DoneRange? = nil,
+                             agent: [AgentMoment] = []) -> [AttentionAway] {
         let edges = events
             .compactMap { event in DoneLog.date(event.at).map { Edge(at: $0, event: event) } }
             .sorted { $0.at < $1.at }
@@ -554,14 +601,110 @@ public enum AttentionLog {
             return (from, to)
         }
 
-        return gaps(edges).compactMap { gap in
-            guard !gap.isQuiet, !gap.elsewhere,
-                  gap.seconds >= attentionPause, gap.seconds <= longestAway else { return nil }
-            if let range, !(gap.from >= range.start && gap.from < range.end) { return nil }
-            guard !answers.contains(where: { $0.from < gap.to && $0.to > gap.from }) else { return nil }
-            return AttentionAway(project: gap.project, key: gap.key, from: gap.from, to: gap.to,
-                                 why: gap.why)
+        return awayCandidates(edges, agent: agent).compactMap { away in
+            guard !away.automatic, away.isAsked else { return nil }
+            if let range, !(away.from >= range.start && away.from < range.end) { return nil }
+            guard !answers.contains(where: { $0.from < away.to && $0.to > away.from }) else { return nil }
+            return AttentionAway(project: away.project, key: away.key, from: away.from, to: away.to,
+                                 why: away.why, evidence: away.evidence, suggested: away.suggested)
         }
+    }
+
+    /// A gap that isn't focus, with what the agents were doing during it. What both an away and an
+    /// automatic count are made from.
+    struct AwayCandidate {
+        var from: Date
+        var to: Date
+        var project: String
+        var key: String
+        var why: String
+        var evidence: [AwayEvidence]
+        var suggested: String?
+
+        var seconds: TimeInterval { to.timeIntervalSince(from) }
+        /// Long enough to be more than a break and short enough not to be a night.
+        var isAsked: Bool { seconds >= attentionPause && seconds <= longestAway }
+        /// Settled without asking: the evidence names the project you left and nothing else of note.
+        var automatic: Bool {
+            guard isAsked, suggested == project else { return false }
+            let needed = AttentionLog.minutesNeeded(for: seconds)
+            return !evidence.contains { $0.project != project && $0.minutes >= needed }
+        }
+        /// Two aways a short return apart are one when their evidence says the same thing.
+        func sharesEvidence(with other: AwayCandidate) -> Bool {
+            guard !evidence.isEmpty, !other.evidence.isEmpty else { return false }
+            if let suggested, let theirs = other.suggested { return suggested == theirs }
+            return Set(evidence.map(\.folder)) == Set(other.evidence.map(\.folder))
+        }
+    }
+
+    /// Every gap that isn't quiet focus and had no not-work app in it, oldest first, with its evidence,
+    /// and with neighbours a short return apart joined when their evidence agrees (`awayJoin`). Not yet
+    /// filtered by length: two short gaps can join into one long enough to ask about.
+    static func awayCandidates(_ edges: [Edge], agent: [AgentMoment]) -> [AwayCandidate] {
+        var out: [AwayCandidate] = []
+        for gap in gaps(edges) where !gap.isQuiet && !gap.elsewhere {
+            let next = candidate(from: gap.from, to: gap.to, project: gap.project, key: gap.key,
+                                 why: gap.why, agent: agent)
+            if let last = out.last, next.from.timeIntervalSince(last.to) <= awayJoin,
+               last.sharesEvidence(with: next) {
+                // Weighed again over the whole stretch, the return included: the agent didn't stop for it.
+                out[out.count - 1] = candidate(from: last.from, to: next.to, project: last.project,
+                                               key: last.key, why: last.why, agent: agent)
+            } else {
+                out.append(next)
+            }
+        }
+        return out
+    }
+
+    static func candidate(from: Date, to: Date, project: String, key: String, why: String,
+                          agent: [AgentMoment]) -> AwayCandidate {
+        // A busy minute counts when any of it falls inside the stretch.
+        var minutes: [String: (project: String?, count: Int)] = [:]
+        // Per project too, as a set: a minute busy in two of one project's folders is one minute of it.
+        var byProject: [String: Set<Date>] = [:]
+        for moment in agent where moment.minute.addingTimeInterval(60) > from && moment.minute < to {
+            minutes[moment.folder, default: (moment.project, 0)].count += 1
+            if let project = moment.project { byProject[project, default: []].insert(moment.minute) }
+        }
+        let evidence = minutes
+            .map { AwayEvidence(folder: abbreviatingHome(in: $0.key), project: $0.value.project,
+                                minutes: $0.value.count) }
+            .sorted { $0.minutes != $1.minutes ? $0.minutes > $1.minutes : $0.folder < $1.folder }
+        let needed = minutesNeeded(for: to.timeIntervalSince(from))
+        let suggested = byProject
+            .filter { $0.value.count >= needed }
+            .max { $0.value.count != $1.value.count ? $0.value.count < $1.value.count : $0.key > $1.key }?
+            .key
+        return AwayCandidate(from: from, to: to, project: project, key: key, why: why,
+                             evidence: evidence, suggested: suggested)
+    }
+
+    /// Busy minutes an agent needs in a stretch this long to say whose it was (`agentCoverage`).
+    static func minutesNeeded(for seconds: TimeInterval) -> Int {
+        max(1, Int((seconds / 60 * agentCoverage).rounded(.up)))
+    }
+
+    /// The spans with each automatic away filled by an estimated span on the project it interrupted.
+    /// Before the answers, so anything you said about the same time still wins.
+    static func fillingAutomatic(_ spans: [AttentionSpan], candidates: [AwayCandidate],
+                                 now: Date) -> [AttentionSpan] {
+        var spans = spans
+        for away in candidates where away.automatic {
+            let to = min(away.to, now)
+            guard to > away.from else { continue }
+            spans = spans.flatMap { removing(away.from, to, from: $0) }
+            spans.append(AttentionSpan(project: away.project, key: away.key, task: nil,
+                                       start: away.from, end: to, basis: .inferred))
+        }
+        return coalescing(spans)
+    }
+
+    static func abbreviatingHome(in path: String) -> String {
+        let home = NSHomeDirectory()
+        guard path == home || path.hasPrefix(home + "/") else { return path }
+        return "~" + path.dropFirst(home.count)
     }
 
     /// What's left of `span` once `from`..`to` is taken out of it: itself, one piece or two.

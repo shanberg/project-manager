@@ -158,8 +158,9 @@ public func attentionSpans(in range: DoneRange, projects: [String]? = nil, now: 
     }
 
     let horizon = min(now, range.end)
+    let agent = agentMoments(around: range)
     let spans = AttentionLog.splittingAtMidnight(
-        AttentionLog.spans(from: events, evidence: evidence, now: horizon, only: only),
+        AttentionLog.spans(from: events, evidence: evidence, agent: agent, now: horizon, only: only),
         calendar: calendar)
     return AttentionLog.clipped(spans, to: range)
 }
@@ -170,8 +171,20 @@ public func attentionAways(in range: DoneRange, projects: [String]? = nil) throw
     let only = try projects.map(projectFolders(named:))
     // The whole log, like `attentionSpans`: an answer given about another project still settles an
     // away, and a return to another project is still what ends one.
-    return AttentionLog.aways(from: AttentionLog.events(), in: range)
+    return AttentionLog.aways(from: AttentionLog.events(), in: range, agent: agentMoments(around: range))
         .filter { only?.contains($0.project) ?? true }
+}
+
+/// What agents were busy with around `range`, each minute given to the project its folder belongs to.
+/// Widened by the longest away either side: an away that began in the range can run past its end, and
+/// one that ended in it began before.
+func agentMoments(around range: DoneRange) -> [AgentMoment] {
+    let wide = DoneRange(start: range.start.addingTimeInterval(-AttentionLog.longestAway),
+                         end: range.end.addingTimeInterval(AttentionLog.longestAway))
+    let moments = AgentActivity.moments(in: wide)
+    // Only worth reading every notes file's head when there's a folder to place.
+    guard !moments.isEmpty, let folders = try? AgentFolders.load() else { return moments }
+    return folders.resolve(moments)
 }
 
 /// Today's newest away still waiting for an answer — the one the menu bar offers (docs/away-time.md).
@@ -184,7 +197,8 @@ public func latestAway(now: Date = Date(), calendar: Calendar = .current) -> Att
     guard let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
           let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) else { return nil }
     let events = AttentionLog.events(since: yesterday)
-    return AttentionLog.aways(from: events, in: DoneRange(start: today, end: tomorrow)).last
+    let range = DoneRange(start: today, end: tomorrow)
+    return AttentionLog.aways(from: events, in: range, agent: agentMoments(around: range)).last
 }
 
 /// A moment as a person types it at a prompt: ISO 8601 with a zone, or a clock time today —

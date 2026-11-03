@@ -611,3 +611,105 @@ final class AttentionLogTests: XCTestCase {
         XCTAssertEqual(spans.map(minutes), [60, 60])
     }
 }
+
+// MARK: - Agent evidence (docs/away-time.md, untracked activity)
+
+extension AttentionLogTests {
+    /// An agent busy in `folder` every minute from `from` up to `to`, given to `project`.
+    private func agent(_ folder: String, _ project: String?, _ from: Date, _ to: Date) -> [AgentMoment] {
+        stride(from: from.timeIntervalSince1970, to: to.timeIntervalSince1970, by: 60).map {
+            AgentMoment(minute: Date(timeIntervalSince1970: $0), folder: folder, project: project)
+        }
+    }
+
+    private var lunchOnW1: [AttentionEvent] {
+        [began("W-1", at(10)), paused("W-1", at(11)), resumed("W-1", at(12))]
+    }
+
+    func testAnAgentBusyElsewhereIsEvidenceAndASuggestion() {
+        let aways = AttentionLog.aways(from: lunchOnW1,
+                                       agent: agent("/dev/carmody", "H-4", at(11, 5), at(11, 50)))
+        XCTAssertEqual(aways.count, 1)
+        XCTAssertEqual(aways.first?.suggested, "H-4")
+        XCTAssertEqual(aways.first?.evidence, [AwayEvidence(folder: "/dev/carmody", project: "H-4", minutes: 45)])
+    }
+
+    /// Busy for under a fifth of the away: shown, but it doesn't say whose the time was.
+    func testAnAgentThatStoppedSoonAfterIsEvidenceOnly() {
+        let aways = AttentionLog.aways(from: lunchOnW1,
+                                       agent: agent("/dev/carmody", "H-4", at(11), at(11, 10)))
+        XCTAssertNil(aways.first?.suggested)
+        XCTAssertEqual(aways.first?.evidence.map(\.minutes), [10])
+    }
+
+    func testAFolderNobodyClaimsSuggestsNothing() {
+        let aways = AttentionLog.aways(from: lunchOnW1, agent: agent("/dev/designs", nil, at(11), at(12)))
+        XCTAssertNil(aways.first?.suggested)
+        XCTAssertEqual(aways.first?.evidence.first?.project, nil)
+    }
+
+    /// Two folders of one project add up, and a minute busy in both is one minute.
+    func testASuggestionCountsAProjectsFoldersTogether() {
+        let moments = agent("/dev/carmody", "H-4", at(11), at(11, 8))
+            + agent("/dev/carmody/core", "H-4", at(11, 4), at(11, 14))
+        let aways = AttentionLog.aways(from: lunchOnW1, agent: moments)
+        XCTAssertEqual(aways.first?.suggested, "H-4", "14 distinct minutes of 60 reach the 12 needed")
+    }
+
+    /// The evidence names the project you left: counted to it, estimated, and not asked about.
+    func testAnAgentOnTheInterruptedProjectCountsWithoutAsking() {
+        let moments = agent("/dev/w1", "W-1", at(11), at(12))
+        XCTAssertTrue(AttentionLog.aways(from: lunchOnW1, agent: moments).isEmpty)
+        let spans = AttentionLog.spans(from: lunchOnW1 + [ended("W-1", at(12, 30))], agent: moments, now: at(13))
+        XCTAssertEqual(spans.map(\.basis), [.measured, .inferred, .measured])
+        XCTAssertEqual(spans.map(minutes), [60, 60, 30])
+        XCTAssertEqual(Set(spans.map(\.project)), ["W-1"])
+    }
+
+    func testAnAnswerBeatsAnAutomaticCount() {
+        let log = lunchOnW1 + [ended("W-1", at(12, 30)), counted(nil, at(11), at(12), answeredAt: at(13))]
+        let spans = AttentionLog.spans(from: log, agent: agent("/dev/w1", "W-1", at(11), at(12)),
+                                       now: at(14))
+        XCTAssertEqual(spans.map(minutes), [60, 30], "not work takes the estimated hour back out")
+    }
+
+    /// Something else busy enough to matter means it isn't settled.
+    func testOtherEvidenceKeepsAnAwayAsked() {
+        let moments = agent("/dev/w1", "W-1", at(11), at(12)) + agent("/dev/designs", nil, at(11), at(11, 30))
+        let aways = AttentionLog.aways(from: lunchOnW1, agent: moments)
+        XCTAssertEqual(aways.count, 1)
+        XCTAssertEqual(aways.first?.suggested, "W-1")
+    }
+
+    func testAnAutomaticCountStaysInsideTheAwayLimits() {
+        let night = [began("W-1", at(10)), paused("W-1", at(11)), resumed("W-1", at(16)), ended("W-1", at(16, 30))]
+        let spans = AttentionLog.spans(from: night, agent: agent("/dev/w1", "W-1", at(11), at(16)),
+                                       now: at(17))
+        XCTAssertFalse(spans.contains { $0.basis == .inferred }, "over four hours is never filled")
+    }
+
+    /// A minute back to answer the agent, then gone again: one stretch of its work.
+    func testNeighboursWithTheSameEvidenceJoin() {
+        let log = [began("W-1", at(10)), paused("W-1", at(11)), resumed("W-1", at(11, 40)),
+                   paused("W-1", at(11, 42)), resumed("W-1", at(12, 30))]
+        let moments = agent("/dev/carmody", "H-4", at(11), at(12, 30))
+        let aways = AttentionLog.aways(from: log, agent: moments)
+        XCTAssertEqual(aways.map(\.fromDate), [at(11)])
+        XCTAssertEqual(aways.map(\.toDate), [at(12, 30)])
+        XCTAssertEqual(AttentionLog.aways(from: log).count, 2, "without evidence they stay two")
+    }
+
+    func testNeighboursWithDifferentEvidenceStayApart() {
+        let log = [began("W-1", at(10)), paused("W-1", at(11)), resumed("W-1", at(11, 40)),
+                   paused("W-1", at(11, 42)), resumed("W-1", at(12, 30))]
+        let moments = agent("/dev/carmody", "H-4", at(11), at(11, 40)) + agent("/dev/w2", "W-2", at(11, 42), at(12, 30))
+        XCTAssertEqual(AttentionLog.aways(from: log, agent: moments).count, 2)
+    }
+
+    func testNeighboursFurtherApartThanTheJoinStayApart() {
+        let log = [began("W-1", at(10)), paused("W-1", at(11)), resumed("W-1", at(11, 40)),
+                   paused("W-1", at(11, 50)), resumed("W-1", at(12, 30))]
+        let moments = agent("/dev/carmody", "H-4", at(11), at(12, 30))
+        XCTAssertEqual(AttentionLog.aways(from: log, agent: moments).count, 2)
+    }
+}
