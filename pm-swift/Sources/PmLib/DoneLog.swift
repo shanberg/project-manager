@@ -270,7 +270,45 @@ public enum DoneLog {
     }
 
     public static func date(_ timestamp: String) -> Date? {
-        iso.date(from: timestamp)
+        utcSeconds(timestamp) ?? iso.date(from: timestamp)
+    }
+
+    /// `timestamp` read by hand when it is exactly what `timestamp(_:)` writes — `2026-11-02T09:30:00Z`
+    /// — and nil for anything else, which the formatter reads. The formatter costs tens of microseconds
+    /// a call, and a time report parses every span several times over.
+    ///
+    /// Only an unambiguous, in-range date takes this path, so it never reads a string differently from
+    /// the formatter: an offset, a fraction, a 31 February or a leap second all go to the formatter.
+    static func utcSeconds(_ timestamp: String) -> Date? {
+        timestamp.utf8.withContiguousStorageIfAvailable { b -> Date? in
+            guard b.count == 20, b[4] == 0x2D, b[7] == 0x2D, b[10] == 0x54, b[13] == 0x3A,
+                  b[16] == 0x3A, b[19] == 0x5A else { return nil }
+            func number(_ at: Int, _ length: Int) -> Int? {
+                var value = 0
+                for i in at..<(at + length) {
+                    let digit = Int(b[i]) - 0x30
+                    guard (0...9).contains(digit) else { return nil }
+                    value = value * 10 + digit
+                }
+                return value
+            }
+            guard let year = number(0, 4), let month = number(5, 2), let day = number(8, 2),
+                  let hour = number(11, 2), let minute = number(14, 2), let second = number(17, 2),
+                  (1970...9999).contains(year), (1...12).contains(month), hour < 24, minute < 60,
+                  second < 60 else { return nil }
+            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+            let lengths = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+            guard (1...lengths[month - 1]).contains(day) else { return nil }
+            // Days since 1970-01-01 (Hinnant's days_from_civil, for years from 1970 on).
+            let y = month <= 2 ? year - 1 : year
+            let era = y / 400
+            let yearOfEra = y - era * 400
+            let dayOfYear = (153 * (month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1
+            let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+            let days = era * 146_097 + dayOfEra - 719_468
+            return Date(timeIntervalSince1970: TimeInterval(days * 86_400 + hour * 3600 + minute * 60
+                                                            + second))
+        } ?? nil
     }
 }
 

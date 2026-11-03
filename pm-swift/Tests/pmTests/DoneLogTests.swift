@@ -314,4 +314,27 @@ final class DoneLogTests: XCTestCase {
         call("task.complete", ["project": "W-1", "task": reference("Book the venue")])
         XCTAssertEqual(done(["since": "2020-01-01", "until": "2020-01-31"]), [])
     }
+
+    /// The hand-read timestamps agree with the formatter, and leave it everything they don't cover.
+    func testTimestampsReadAsTheFormatterReadsThem() {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<20_000 {
+            let date = Date(timeIntervalSince1970: TimeInterval(Int.random(in: 0...8_000_000_000,
+                                                                           using: &generator)))
+            let stamp = DoneLog.timestamp(date)
+            XCTAssertEqual(DoneLog.utcSeconds(stamp), formatter.date(from: stamp), stamp)
+        }
+        for stamp in ["2024-02-29T23:59:59Z", "2000-02-29T00:00:00Z", "1970-01-01T00:00:00Z",
+                      "2026-12-31T23:59:59Z", "2026-03-01T00:00:00Z"] {
+            XCTAssertEqual(DoneLog.utcSeconds(stamp), formatter.date(from: stamp), stamp)
+        }
+        for stamp in ["2026-02-29T00:00:00Z", "2026-13-01T00:00:00Z", "2026-11-02T24:00:00Z",
+                      "2026-11-02T09:30:60Z", "2026-11-02T09:30:00+01:00", "2026-11-02T09:30:00.5Z",
+                      "2026-11-02 09:30:00Z", "1969-12-31T23:59:59Z", "２026-11-02T09:30:00Z", ""] {
+            XCTAssertNil(DoneLog.utcSeconds(stamp), stamp)
+            XCTAssertEqual(DoneLog.date(stamp), formatter.date(from: stamp), stamp)
+        }
+    }
 }
