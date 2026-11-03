@@ -160,7 +160,8 @@ public func attentionSpans(in range: DoneRange, projects: [String]? = nil, now: 
     let horizon = min(now, range.end)
     let agent = agentMoments(around: range)
     let spans = AttentionLog.splittingAtMidnight(
-        AttentionLog.spans(from: events, evidence: evidence, agent: agent, now: horizon, only: only),
+        AttentionLog.spans(from: events, evidence: evidence, agent: agent,
+                           calendar: AwayCalendar.events(around: range), now: horizon, only: only),
         calendar: calendar)
     return AttentionLog.clipped(spans, to: range)
 }
@@ -171,8 +172,31 @@ public func attentionAways(in range: DoneRange, projects: [String]? = nil) throw
     let only = try projects.map(projectFolders(named:))
     // The whole log, like `attentionSpans`: an answer given about another project still settles an
     // away, and a return to another project is still what ends one.
-    return AttentionLog.aways(from: AttentionLog.events(), in: range, agent: agentMoments(around: range))
+    return AttentionLog.aways(from: AttentionLog.events(), in: range, agent: agentMoments(around: range),
+                              calendar: AwayCalendar.events(around: range))
         .filter { only?.contains($0.project) ?? true }
+}
+
+/// The calendar events that can say where you were during an away. Only Folio reads calendars, so
+/// only Folio sets `provider`; `pm`, MCP and Raycast see none, as with every other event (views.md C1).
+public enum AwayCalendar {
+    public typealias Provider = @Sendable (DateInterval, [ProjectEventLink]) -> [ProjectEvent]
+
+    private static var stored: Provider?
+    private static let lock = NSLock()
+
+    /// What reads events for the projects with `pm-events`, over an interval. Set once at launch.
+    public static var provider: Provider? {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
+    }
+
+    /// The events of every project with `pm-events` around `range`, widened like `agentMoments`.
+    static func events(around range: DoneRange) -> [ProjectEvent] {
+        guard let provider, let links = try? projectEventLinks(), !links.isEmpty else { return [] }
+        return provider(DateInterval(start: range.start.addingTimeInterval(-AttentionLog.longestAway),
+                                     end: range.end.addingTimeInterval(AttentionLog.longestAway)), links)
+    }
 }
 
 /// What agents were busy with around `range`, each minute given to the project its folder belongs to.
@@ -198,7 +222,8 @@ public func latestAway(now: Date = Date(), calendar: Calendar = .current) -> Att
           let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) else { return nil }
     let events = AttentionLog.events(since: yesterday)
     let range = DoneRange(start: today, end: tomorrow)
-    return AttentionLog.aways(from: events, in: range, agent: agentMoments(around: range)).last
+    return AttentionLog.aways(from: events, in: range, agent: agentMoments(around: range),
+                              calendar: AwayCalendar.events(around: range)).last
 }
 
 /// A moment as a person types it at a prompt: ISO 8601 with a zone, or a clock time today —

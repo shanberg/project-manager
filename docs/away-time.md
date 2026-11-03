@@ -87,7 +87,11 @@ Added 2026-11-02 (untracked activity, steps 1–2). Real log, Oct 2026: Claude C
 - Joined: neighbouring aways ≤ 5 min apart (`awayJoin`) with the same suggestion, or the same folders when neither has one.
 - Counted without asking: suggestion = the interrupted project, no other folder at 20%, 10 min–4 h. Becomes an `inferred` span (estimated). Not listed. Any answer over it wins.
 - Answering an away for a project claims the busy folders nobody has (≥ 20%), into that project's `pm-folders`.
-- Count as a Sitting (`time.count` `sitting`): a session at the away's start, placed by time, body `3h 44m counted. Claude Code in ~/dev/x.`
+- Count as a Sitting (`time.count` `sitting`): a session at the away's start, placed by time, body `3h 44m counted. Calendar: <event>. Claude Code in ~/dev/x.`
+- Calendar evidence (step 3): timed events of projects with `pm-events`, overlapping the away by ≥ 1 min. All-day events skipped.
+  - Folio only (`AwayCalendar.provider`, set at launch from EventKit). `pm`, MCP and Raycast see none.
+  - A meeting at ≥ 20% is the suggestion, ahead of any agent.
+  - Never counted without asking. Another project's meeting at ≥ 20% stops an agent's automatic count.
 
 ### Where aways appear
 
@@ -222,6 +226,5 @@ Contract 1.22.0. Details in [api-contract.md](api-contract.md).
 
 - Notifications for aways.
 - Call detection (microphone in use). Dropped 2026-09-23: during a meeting you're likely taking notes in Folio, which is input.
-- Calendar events as evidence (waits on calendars, views.md).
 - A configurable pause threshold.
 - Fragmentation / switching stats (separate task).

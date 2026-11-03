@@ -713,3 +713,57 @@ extension AttentionLogTests {
         XCTAssertEqual(AttentionLog.aways(from: log, agent: moments).count, 2)
     }
 }
+
+// MARK: - Calendar evidence
+
+extension AttentionLogTests {
+    private func meeting(_ title: String, _ project: String, _ start: Date, _ end: Date,
+                         allDay: Bool = false) -> ProjectEvent {
+        ProjectEvent(id: "\(project)/\(title)", title: title, start: start, end: end, isAllDay: allDay,
+                     projectFolder: project, projectName: project, projectColor: nil)
+    }
+
+    private var lunch: [AttentionEvent] { [began("W-1", at(10)), paused("W-1", at(11)), resumed("W-1", at(12))] }
+
+    private func busy(_ folder: String, _ project: String?, _ from: Date, _ to: Date) -> [AgentMoment] {
+        stride(from: from.timeIntervalSince1970, to: to.timeIntervalSince1970, by: 60).map {
+            AgentMoment(minute: Date(timeIntervalSince1970: $0), folder: folder, project: project)
+        }
+    }
+
+    func testAMeetingIsEvidenceAndASuggestion() {
+        let aways = AttentionLog.aways(from: lunch, calendar: [meeting("Carmody review", "H-4", at(11, 15), at(11, 45))])
+        XCTAssertEqual(aways.first?.suggested, "H-4")
+        XCTAssertEqual(aways.first?.evidence, [AwayEvidence(event: "Carmody review", project: "H-4", minutes: 30)])
+    }
+
+    /// Where you were beats what ran while you were there.
+    func testAMeetingBeatsAnAgentForTheSuggestion() {
+        let aways = AttentionLog.aways(from: lunch, agent: busy("/dev/w2", "W-2", at(11), at(12)),
+                                       calendar: [meeting("Standup", "H-4", at(11), at(11, 30))])
+        XCTAssertEqual(aways.first?.suggested, "H-4")
+        XCTAssertEqual(aways.first?.evidence.map(\.kind), ["calendar", "agent"])
+    }
+
+    /// An agent on the project you left would count it without asking; another project's meeting stops that.
+    func testAnotherProjectsMeetingKeepsAnAwayAsked() {
+        let agent = busy("/dev/w1", "W-1", at(11), at(12))
+        XCTAssertTrue(AttentionLog.aways(from: lunch, agent: agent).isEmpty)
+        let aways = AttentionLog.aways(from: lunch, agent: agent,
+                                       calendar: [meeting("Standup", "H-4", at(11), at(11, 30))])
+        XCTAssertEqual(aways.map(\.suggested), ["H-4"])
+    }
+
+    /// A meeting alone never counts time without asking, even on the project you left.
+    func testAMeetingAloneIsNeverCountedWithoutAsking() {
+        let aways = AttentionLog.aways(from: lunch, calendar: [meeting("Review", "W-1", at(11), at(12))])
+        XCTAssertEqual(aways.map(\.suggested), ["W-1"])
+    }
+
+    func testAllDayAndBriefEventsSayLittle() {
+        let aways = AttentionLog.aways(from: lunch, calendar: [meeting("Offsite", "H-4", at(0), at(23, 59), allDay: true),
+                                                               meeting("Ping", "W-2", at(11, 50), at(12, 30))])
+        XCTAssertEqual(aways.first?.evidence.map(\.minutes), [10], "the all-day one is left out")
+        XCTAssertNil(aways.first?.suggested, "ten minutes of sixty is under the fifth needed")
+    }
+}

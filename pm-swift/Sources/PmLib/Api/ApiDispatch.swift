@@ -1104,10 +1104,14 @@ private func pastMoment(_ text: String, field: String) throws -> Date {
 /// asked, a sitting that began at `from`. Nil rawText change when there's neither.
 private func countedNotes(rawText: String, folder: String, from: Date, to: Date,
                           sitting: Bool) throws -> (rawText: String, claimed: [String], session: Int?) {
+    let stretch = DoneRange(start: from, end: to)
     let away = AttentionLog.candidate(from: from, to: to, project: folder, key: "", why: "counted",
-                                      agent: agentMoments(around: DoneRange(start: from, end: to)))
+                                      agent: agentMoments(around: stretch),
+                                      calendar: AwayCalendar.events(around: stretch))
     let needed = AttentionLog.minutesNeeded(for: to.timeIntervalSince(from))
-    let claimed = away.evidence.filter { $0.project == nil && $0.minutes >= needed }.map(\.folder)
+    let claimed = away.evidence
+        .filter { $0.isAgent && $0.project == nil && $0.minutes >= needed }
+        .compactMap(\.folder)
     var out = rawText
     if !claimed.isEmpty {
         let existing = projectAgentFolders(rawText: out)
@@ -1116,8 +1120,12 @@ private func countedNotes(rawText: String, folder: String, from: Date, to: Date,
                                       to: "[" + all.map { "\"\($0)\"" }.joined(separator: ", ") + "]", in: out)
     }
     guard sitting else { return (out, claimed, nil) }
-    let ours = away.evidence.filter { $0.project == folder || claimed.contains($0.folder) }.map(\.folder)
+    let ours = away.evidence
+        .filter { $0.isAgent && ($0.project == folder || claimed.contains($0.folder ?? "")) }
+        .compactMap(\.folder)
+    let meetings = away.evidence.filter { $0.isCalendar && $0.project == folder }.compactMap(\.title)
     var body = "\(durationLabel(to.timeIntervalSince(from))) counted."
+    if !meetings.isEmpty { body += " Calendar: \(meetings.joined(separator: ", "))." }
     if !ours.isEmpty { body += " Claude Code in \(ours.joined(separator: ", "))." }
     guard let made = try sessionInsertPreservingFormat(rawText: out, label: sessionTimeLabel(from),
                                                        date: from, body: body)

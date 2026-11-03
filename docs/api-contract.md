@@ -107,7 +107,7 @@ Where a card *sits*, how big it is and what is tiled stay the app's — they are
 
 `time.aways`, `time.count`, `session.start` (1.24.0) — untracked activity, see [away-time.md](away-time.md#agent-evidence):
 
-- `time.aways`: each away gains `evidence` (`kind` `agent`, `folder`, `project`?, `minutes`) and `suggested`?.
+- `time.aways`: each away gains `evidence` (`kind` `agent` with `folder`, or `calendar` with `title`; `project`?, `minutes`) and `suggested`?. Calendar evidence only in Folio's in-process calls.
 - `time.aways`: aways an agent's evidence settles are absent; `time.spent` counts them as `inferred`.
 - `time.count`: `sitting: true` (needs `project`) also writes a session at `from`: `<duration> counted.` plus `Claude Code in <folders>.` when any were busy.
 - `time.count` for a project claims busy folders no project has, into its `pm-folders`.

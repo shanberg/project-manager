@@ -107,7 +107,7 @@ private func runTimeAways(args: [String]) {
             if let suggested = away.suggested, suggested != away.project {
                 line += " → \(projectTitle(fromFolderName: suggested))?"
             }
-            let folders = away.evidence.map { "\($0.folder) \($0.minutes)m" }
+            let folders = away.evidence.filter(\.isAgent).compactMap { e in e.folder.map { "\($0) \(e.minutes)m" } }
             if !folders.isEmpty { line += "  (Claude Code: \(folders.joined(separator: ", ")))" }
             print(line)
         }

@@ -88,31 +88,65 @@ final class CalendarEvents {
     /// The events in `interval` for each of these projects, by start: one per project an event belongs
     /// to, since two projects can both claim a meeting (views.md C3). One EventKit read for all of them.
     func events(in interval: DateInterval, links: [ProjectEventLink]) -> [ProjectEvent] {
-        var out: [ProjectEvent] = []
-        for event in occurrences(in: interval, for: links.flatMap(\.sources)) {
-            let title = event.title ?? ""
-            for link in links where link.sources.matches(calendar: event.calendar.title,
-                                                         account: event.calendar.source?.title, title: title) {
-                out.append(ProjectEvent(
-                    id: "\(link.projectFolder)/\(event.eventIdentifier ?? "")@\(event.startDate.timeIntervalSinceReferenceDate)",
-                    title: title, start: event.startDate, end: event.endDate, isAllDay: event.isAllDay,
-                    projectFolder: link.projectFolder, projectName: link.projectName,
-                    projectColor: link.projectColor))
-            }
-        }
-        return out
+        guard access == .granted else { return [] }
+        return projectEvents(in: store, interval: interval, links: links)
+    }
+
+    /// Where an away's meetings come from (docs/away-time.md, Agent evidence). PmLib asks from whatever
+    /// thread reads the aways, so this keeps its own store rather than borrowing the main actor's.
+    static func supplyAwayEvidence() {
+        let reader = AwayCalendarReader()
+        AwayCalendar.provider = { interval, links in reader.events(in: interval, links: links) }
     }
 
     /// Every occurrence in the calendars `sources` name, unfiltered by title, by start.
     private func occurrences(in interval: DateInterval, for sources: [ProjectEventSource]) -> [EKEvent] {
-        guard access == .granted, !sources.isEmpty else { return [] }
-        let calendars = store.calendars(for: .event).filter { calendar in
-            sources.contains { $0.namesCalendar(calendar) }
-        }
-        guard !calendars.isEmpty else { return [] }
-        let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: calendars)
-        return store.events(matching: predicate).sorted { $0.startDate < $1.startDate }
+        guard access == .granted else { return [] }
+        return eventOccurrences(in: store, interval: interval, for: sources)
     }
+}
+
+/// `CalendarEvents.events(in:links:)` off the main actor, for the away derivation.
+private final class AwayCalendarReader: @unchecked Sendable {
+    private let store = EKEventStore()
+    private let lock = NSLock()
+
+    func events(in interval: DateInterval, links: [ProjectEventLink]) -> [ProjectEvent] {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return [] }
+        lock.lock()
+        defer { lock.unlock() }
+        return projectEvents(in: store, interval: interval, links: links)
+    }
+}
+
+/// The events in `interval` for each of these projects, by start: one per project an event belongs to.
+private func projectEvents(in store: EKEventStore, interval: DateInterval,
+                           links: [ProjectEventLink]) -> [ProjectEvent] {
+    var out: [ProjectEvent] = []
+    for event in eventOccurrences(in: store, interval: interval, for: links.flatMap(\.sources)) {
+        let title = event.title ?? ""
+        for link in links where link.sources.matches(calendar: event.calendar.title,
+                                                     account: event.calendar.source?.title, title: title) {
+            out.append(ProjectEvent(
+                id: "\(link.projectFolder)/\(event.eventIdentifier ?? "")@\(event.startDate.timeIntervalSinceReferenceDate)",
+                title: title, start: event.startDate, end: event.endDate, isAllDay: event.isAllDay,
+                projectFolder: link.projectFolder, projectName: link.projectName,
+                projectColor: link.projectColor))
+        }
+    }
+    return out
+}
+
+/// Every occurrence in the calendars `sources` name, unfiltered by title, by start.
+private func eventOccurrences(in store: EKEventStore, interval: DateInterval,
+                              for sources: [ProjectEventSource]) -> [EKEvent] {
+    guard !sources.isEmpty else { return [] }
+    let calendars = store.calendars(for: .event).filter { calendar in
+        sources.contains { $0.namesCalendar(calendar) }
+    }
+    guard !calendars.isEmpty else { return [] }
+    let predicate = store.predicateForEvents(withStart: interval.start, end: interval.end, calendars: calendars)
+    return store.events(matching: predicate).sorted { $0.startDate < $1.startDate }
 }
 
 private extension ProjectEventSource {

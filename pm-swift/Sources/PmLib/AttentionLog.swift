@@ -118,23 +118,39 @@ public struct AttentionAway: Codable, Equatable, Sendable {
     public var toDate: Date? { DoneLog.date(to) }
 }
 
-/// Something that went on during an away: so far, an agent busy in a folder (`AgentActivity`).
+/// Something that went on during an away: an agent busy in a folder (`AgentActivity`), or a calendar
+/// event a project's `pm-events` claims (`AwayCalendar`).
 public struct AwayEvidence: Codable, Equatable, Sendable {
-    /// `agent`. Calendar events join it later.
+    /// `agent` or `calendar`.
     public var kind: String
-    /// Where the agent ran, with the home folder as `~`.
-    public var folder: String
-    /// The project or area that folder belongs to (`AgentFolders`), or nil when none claims it.
+    /// `agent`: where it ran, with the home folder as `~`.
+    public var folder: String?
+    /// `calendar`: the event's title.
+    public var title: String?
+    /// The project or area it belongs to — the folder's (`AgentFolders`), or nil when none claims it;
+    /// always the event's.
     public var project: String?
-    /// How many minutes of the away it was busy in.
+    /// How many minutes of the away it covered.
     public var minutes: Int
 
-    public init(kind: String = "agent", folder: String, project: String?, minutes: Int) {
-        self.kind = kind
+    /// An agent busy in `folder`.
+    public init(folder: String, project: String?, minutes: Int) {
+        self.kind = "agent"
         self.folder = folder
         self.project = project
         self.minutes = minutes
     }
+
+    /// A calendar event of `project`'s.
+    public init(event title: String, project: String, minutes: Int) {
+        self.kind = "calendar"
+        self.title = title
+        self.project = project
+        self.minutes = minutes
+    }
+
+    public var isAgent: Bool { kind == "agent" }
+    public var isCalendar: Bool { kind == "calendar" }
 }
 
 /// A stretch of attention on one project, as a read works it out.
@@ -382,8 +398,8 @@ public enum AttentionLog {
     /// evidence all points back at the project it interrupted is counted to it without asking, as
     /// `inferred` — estimated, like any span worked out rather than recorded.
     public static func spans(from events: [AttentionEvent], evidence: [String: [Date]] = [:],
-                             agent: [AgentMoment] = [], now: Date = Date(),
-                             only: Set<String>? = nil) -> [AttentionSpan] {
+                             agent: [AgentMoment] = [], calendar: [ProjectEvent] = [],
+                             now: Date = Date(), only: Set<String>? = nil) -> [AttentionSpan] {
         let edges = events
             .compactMap { event in DoneLog.date(event.at).map { Edge(at: $0, event: event) } }
             .sorted { $0.at < $1.at }
@@ -433,7 +449,8 @@ public enum AttentionLog {
         if let span = open { closeSpan(span, by: nil) }
         // Quiet first, answers over it: an answer about a range beats what the log implies about it.
         let quiet = resolvingGaps(out, gaps: gaps(edges), now: now)
-        let estimated = fillingAutomatic(quiet, candidates: awayCandidates(edges, agent: agent), now: now)
+        let estimated = fillingAutomatic(quiet, candidates: awayCandidates(edges, agent: agent, calendar: calendar),
+                                         now: now)
         let counted = applyingCounts(to: estimated, from: edges, now: now)
         guard let only else { return counted.map(\.span) }
         return counted.map(\.span).filter { only.contains($0.project) }
@@ -630,7 +647,7 @@ public enum AttentionLog {
     /// `agent`, resolved to projects, is laid over each one as evidence (`AwayCandidate`). An away the
     /// evidence settles on its own is counted by `spans` and not asked about here.
     public static func aways(from events: [AttentionEvent], in range: DoneRange? = nil,
-                             agent: [AgentMoment] = []) -> [AttentionAway] {
+                             agent: [AgentMoment] = [], calendar: [ProjectEvent] = []) -> [AttentionAway] {
         let edges = events
             .compactMap { event in DoneLog.date(event.at).map { Edge(at: $0, event: event) } }
             .sorted { $0.at < $1.at }
@@ -642,7 +659,7 @@ public enum AttentionLog {
             return (from, to)
         }
 
-        return awayCandidates(edges, agent: agent).compactMap { away in
+        return awayCandidates(edges, agent: agent, calendar: calendar).compactMap { away in
             guard !away.automatic, away.isAsked else { return nil }
             if let range, !(away.from >= range.start && away.from < range.end) { return nil }
             guard !answers.contains(where: { $0.from < away.to && $0.to > away.from }) else { return nil }
@@ -661,13 +678,16 @@ public enum AttentionLog {
         var why: String
         var evidence: [AwayEvidence]
         var suggested: String?
+        /// What the agent evidence alone would suggest. Only that is ever counted without asking.
+        var agentSuggested: String?
 
         var seconds: TimeInterval { to.timeIntervalSince(from) }
         /// Long enough to be more than a break and short enough not to be a night.
         var isAsked: Bool { seconds >= attentionPause && seconds <= longestAway }
-        /// Settled without asking: the evidence names the project you left and nothing else of note.
+        /// Settled without asking: an agent's evidence names the project you left, and nothing else of
+        /// note — another folder, or a meeting of another project's — says otherwise.
         var automatic: Bool {
-            guard isAsked, suggested == project else { return false }
+            guard isAsked, agentSuggested == project, suggested == project else { return false }
             let needed = AttentionLog.minutesNeeded(for: seconds)
             return !evidence.contains { $0.project != project && $0.minutes >= needed }
         }
@@ -675,23 +695,25 @@ public enum AttentionLog {
         func sharesEvidence(with other: AwayCandidate) -> Bool {
             guard !evidence.isEmpty, !other.evidence.isEmpty else { return false }
             if let suggested, let theirs = other.suggested { return suggested == theirs }
-            return Set(evidence.map(\.folder)) == Set(other.evidence.map(\.folder))
+            return Set(evidence.compactMap(\.folder)) == Set(other.evidence.compactMap(\.folder))
         }
     }
 
     /// Every gap that isn't quiet focus and had no not-work app in it, oldest first, with its evidence,
     /// and with neighbours a short return apart joined when their evidence agrees (`awayJoin`). Not yet
     /// filtered by length: two short gaps can join into one long enough to ask about.
-    static func awayCandidates(_ edges: [Edge], agent: [AgentMoment]) -> [AwayCandidate] {
+    static func awayCandidates(_ edges: [Edge], agent: [AgentMoment],
+                               calendar: [ProjectEvent] = []) -> [AwayCandidate] {
         var out: [AwayCandidate] = []
         for gap in gaps(edges) where !gap.isQuiet && !gap.elsewhere {
             let next = candidate(from: gap.from, to: gap.to, project: gap.project, key: gap.key,
-                                 why: gap.why, agent: agent)
+                                 why: gap.why, agent: agent, calendar: calendar)
             if let last = out.last, next.from.timeIntervalSince(last.to) <= awayJoin,
                last.sharesEvidence(with: next) {
                 // Weighed again over the whole stretch, the return included: the agent didn't stop for it.
                 out[out.count - 1] = candidate(from: last.from, to: next.to, project: last.project,
-                                               key: last.key, why: last.why, agent: agent)
+                                               key: last.key, why: last.why, agent: agent,
+                                               calendar: calendar)
             } else {
                 out.append(next)
             }
@@ -700,7 +722,7 @@ public enum AttentionLog {
     }
 
     static func candidate(from: Date, to: Date, project: String, key: String, why: String,
-                          agent: [AgentMoment]) -> AwayCandidate {
+                          agent: [AgentMoment], calendar: [ProjectEvent] = []) -> AwayCandidate {
         // A busy minute counts when any of it falls inside the stretch.
         var minutes: [String: (project: String?, count: Int)] = [:]
         // Per project too, as a set: a minute busy in two of one project's folders is one minute of it.
@@ -709,17 +731,29 @@ public enum AttentionLog {
             minutes[moment.folder, default: (moment.project, 0)].count += 1
             if let project = moment.project { byProject[project, default: []].insert(moment.minute) }
         }
-        let evidence = minutes
+        let agentEvidence = minutes
             .map { AwayEvidence(folder: abbreviatingHome(in: $0.key), project: $0.value.project,
                                 minutes: $0.value.count) }
-            .sorted { $0.minutes != $1.minutes ? $0.minutes > $1.minutes : $0.folder < $1.folder }
+            .sorted { $0.minutes != $1.minutes ? $0.minutes > $1.minutes : ($0.folder ?? "") < ($1.folder ?? "") }
+        // A timed event, for as many whole minutes as it overlaps the stretch. All-day events say
+        // nothing about an afternoon.
+        let meetings = calendar.compactMap { event -> AwayEvidence? in
+            guard !event.isAllDay else { return nil }
+            let overlap = min(event.end, to).timeIntervalSince(max(event.start, from))
+            guard overlap >= 60 else { return nil }
+            return AwayEvidence(event: event.title, project: event.projectFolder, minutes: Int(overlap / 60))
+        }.sorted { $0.minutes > $1.minutes }
         let needed = minutesNeeded(for: to.timeIntervalSince(from))
-        let suggested = byProject
+        let agentSuggested = byProject
             .filter { $0.value.count >= needed }
             .max { $0.value.count != $1.value.count ? $0.value.count < $1.value.count : $0.key > $1.key }?
             .key
+        // A meeting is where you were; an agent is what ran while you were there. When both say
+        // something, the meeting is the suggestion.
+        let meeting = meetings.first { $0.minutes >= needed }?.project
         return AwayCandidate(from: from, to: to, project: project, key: key, why: why,
-                             evidence: evidence, suggested: suggested)
+                             evidence: meetings + agentEvidence, suggested: meeting ?? agentSuggested,
+                             agentSuggested: agentSuggested)
     }
 
     /// Busy minutes an agent needs in a stretch this long to say whose it was (`agentCoverage`).

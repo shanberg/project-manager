@@ -253,7 +253,8 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Apps marked not work (`PMNotWorkApps`) end a span after 60 seconds in front.
 - Aways carry agent evidence: the minutes Claude Code transcripts (`~/.claude/projects`) were busy, per folder. Read on demand, never stored.
 - A folder belongs to a project by `pm-folders` in its frontmatter, else by a folder name spelling its title. Counting an away for a project claims the busy folders nobody has.
-- An away whose agent evidence names only the project it interrupted is counted to it as estimated, without asking.
+- In Folio, aways also carry calendar evidence: timed events of projects with `pm-events`. A meeting is the suggestion ahead of an agent.
+- An away whose agent evidence names only the project it interrupted, with no other project's meeting, is counted to it as estimated, without asking.
 - `time.count` with `sitting` also writes a session at the away's start.
 - `time.spent`, `time.aways`, `time.count`; `pm time [aways|count [--sitting]]`.
 
