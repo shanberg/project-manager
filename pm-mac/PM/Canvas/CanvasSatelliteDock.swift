@@ -12,10 +12,10 @@ import SwiftUI
 /// says where its windows are and how to get them back.
 ///
 /// **A mark per project, folded.** The mark is dressed as the project — its colour, its icon. Hovering
-/// opens a flyout to the mark's right: the project and Show Window on one row, then a row per workspace
-/// with windows out — its name, a button per window, Gather. Out to the side and over the screen, so
-/// the column itself never changes size and nothing in it moves under the pointer. Clicking the mark
-/// shows the project's window.
+/// opens a flyout to the mark's right: the project and Show Window on one row, its focused task and
+/// current session, then a row per workspace with windows out — its name, a button per window,
+/// Gather. Out to the side and over the screen, so the column itself never changes size and nothing
+/// in it moves under the pointer. Clicking the mark shows the project's window.
 ///
 /// **Dressed as the Mac's own Dock**: a column of Liquid Glass, and each project an app icon — a
 /// squircle in the project's colour, lit from above, with its icon in white — so a row of them reads as
@@ -37,6 +37,8 @@ final class CanvasSatelliteDock: NSObject {
         var icon: ProjectIcon?
         weak var window: NSWindow?
         var show: () -> Void
+        /// The project the window is on, for the flyout's card. None for a window opened on a file.
+        var projectKey: String?
     }
 
     /// The project windows open, in the order they opened. Set by `WindowManager`.
@@ -57,6 +59,8 @@ final class CanvasSatelliteDock: NSObject {
         var color: NSColor?
         var icon: ProjectIcon?
         var project: OpenProject?
+        /// The project its card shows: its window's, or its board's.
+        var projectKey: String?
         var workspaces: [Workspace] = []
         var windowCount: Int { workspaces.reduce(0) { $0 + $1.satellites.count } }
     }
@@ -64,7 +68,9 @@ final class CanvasSatelliteDock: NSObject {
     private(set) var groups: [Group] = []
     private var panel: NSPanel?
     private let column = NSStackView()
-    private var flyout: NSPanel?
+    private var flyout: KeyablePanel?
+    /// The project card the flyout shows. See `CanvasDockCard`.
+    private let card = CanvasDockCard()
     private var flyoutKey: String?
     private var hideFlyout: DispatchWorkItem?
     private var refreshQueued = false
@@ -99,7 +105,7 @@ final class CanvasSatelliteDock: NSObject {
         func key(_ url: URL?) -> String? { url?.standardizedFileURL.path }
         var groups = projects.enumerated().map { index, project in
             Group(key: key(project.canvas) ?? "window \(index)", canvas: project.canvas, title: project.title,
-                  color: project.color, icon: project.icon, project: project)
+                  color: project.color, icon: project.icon, project: project, projectKey: project.projectKey)
         }
         for satellite in open where satellite.board != nil && !satellite.cards.isEmpty {
             let canvas = key(satellite.canvas)
@@ -107,7 +113,8 @@ final class CanvasSatelliteDock: NSObject {
             if index == nil {
                 groups.append(Group(key: canvas ?? satellite.canvas.path, canvas: satellite.canvas,
                                     title: satellite.projectTitle ?? satellite.canvas.deletingPathExtension().lastPathComponent,
-                                    color: satellite.projectColor, icon: satellite.projectMarkIcon))
+                                    color: satellite.projectColor, icon: satellite.projectMarkIcon,
+                                    projectKey: satellite.board?.boardProject?.key))
                 index = groups.count - 1
             }
             guard let index else { continue }
@@ -270,13 +277,18 @@ final class CanvasSatelliteDock: NSObject {
         let visible = anchor.screen?.visibleFrame ?? .infinite
         let right = anchor.frame.maxX + 6
         let x = right + size.width <= visible.maxX ? right : anchor.frame.minX - 6 - size.width
-        let origin = NSPoint(x: x, y: (markOnScreen.maxY - size.height + 2).rounded())
+        // Its top at the mark's, unless that would run it off the bottom of the screen.
+        let y = max(markOnScreen.maxY - size.height + 2, visible.minY + Self.margin)
+        let origin = NSPoint(x: x, y: min(y, visible.maxY - size.height).rounded())
         flyout.setFrame(NSRect(origin: origin, size: size), display: true)
         flyout.orderFront(nil)
     }
 
+    /// The pointer has left. Not while the card has the keyboard: you are working in it, wherever the
+    /// pointer goes, and it goes when the keyboard does (`windowDidResignKey`).
     private func scheduleFlyoutHide() {
         hideFlyout?.cancel()
+        guard flyout?.isKeyWindow != true else { return }
         let work = DispatchWorkItem { [weak self] in self?.closeFlyout() }
         hideFlyout = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
@@ -289,39 +301,79 @@ final class CanvasSatelliteDock: NSObject {
         CanvasDockTip.shared.hide()
         flyout?.orderOut(nil)
         flyoutKey = nil
+        card.release()
     }
 
-    private func makeFlyout() -> NSPanel {
-        let panel = Self.floatingPanel()
+    private func makeFlyout() -> KeyablePanel {
+        let panel = KeyablePanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
+                                 backing: .buffered, defer: true)
+        Self.float(panel)
+        panel.delegate = self
         let hover = CanvasHoverView()
         hover.onHover = { [weak self] over in
             if over { self?.hideFlyout?.cancel() } else { self?.scheduleFlyoutHide() }
         }
         panel.contentView = hover
+        card.panel = panel
+        card.onDismiss = { [weak self] in self?.closeFlyout() }
         flyout = panel
         return panel
     }
 
-    /// The project and Show Window; then, for each workspace with windows out, its name, a button per
-    /// window, and Gather.
+    /// For a project: its card, then a row per workspace with windows out — its name, a button per
+    /// window, and Gather. For a window on a file, which has no project to show: its name and Show
+    /// Window over the rows.
     private func fillFlyout(_ key: String) {
         guard let flyout, let content = flyout.contentView, let group = group(key) else { return }
+        // Rebuilt while you are working in it, the card would lose its editor and its keyboard; it
+        // takes the new rows next time it opens.
+        if card.isEngaged, flyout.isVisible { return }
         content.subviews.forEach { $0.removeFromSuperview() }
 
-        let name = NSTextField(labelWithString: group.title)
-        name.font = .systemFont(ofSize: 13, weight: .semibold)
-        Self.fitted(name, upTo: 260)
-        let show = Self.button("macwindow", "Show Window") { [weak self] in self?.show(group) }
-        let header = NSStackView(views: [name, Self.spacer(), show])
-        header.spacing = 6
-
-        let rows = NSStackView(views: [header] + group.workspaces.map(Self.row))
-        rows.orientation = .vertical
-        rows.alignment = .width
-        rows.spacing = 2
-        rows.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 6, right: 10)
-        let fitted = rows.fittingSize
-        flyoutSize = NSSize(width: max(220, fitted.width), height: fitted.height)
+        let laidOut: NSView
+        if let project = group.projectKey, let canvas = group.canvas {
+            let size = CanvasDockCard.size
+            var rowsHeight: CGFloat = 0
+            var rows: NSStackView?
+            if !group.workspaces.isEmpty {
+                let stack = NSStackView(views: [Self.separator()] + group.workspaces.map(Self.row))
+                stack.orientation = .vertical
+                stack.alignment = .width
+                stack.spacing = 2
+                stack.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 6, right: 10)
+                rowsHeight = ceil(stack.fittingSize.height)
+                rows = stack
+            }
+            let container = FlippedView(frame: NSRect(origin: .zero, size: size))
+            let cardView = card.view(project: project, canvas: canvas, title: group.title, color: group.color,
+                                     icon: group.icon, height: size.height - rowsHeight) { [weak self] in
+                self?.closeFlyout()
+                self?.show(group)
+            }
+            container.addSubview(cardView)
+            if let rows {
+                rows.translatesAutoresizingMaskIntoConstraints = true
+                rows.frame = NSRect(x: 0, y: size.height - rowsHeight, width: size.width, height: rowsHeight)
+                container.addSubview(rows)
+            }
+            flyoutSize = size
+            laidOut = container
+        } else {
+            let name = NSTextField(labelWithString: group.title)
+            name.font = .systemFont(ofSize: 13, weight: .semibold)
+            Self.fitted(name, upTo: 260)
+            let show = Self.button("macwindow", "Show Window") { [weak self] in self?.show(group) }
+            let header = NSStackView(views: [name, Self.spacer(), show])
+            header.spacing = 6
+            let rows = NSStackView(views: [header] + group.workspaces.map(Self.row))
+            rows.orientation = .vertical
+            rows.alignment = .width
+            rows.spacing = 2
+            rows.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 6, right: 10)
+            let fitted = rows.fittingSize
+            flyoutSize = NSSize(width: max(220, fitted.width), height: fitted.height)
+            laidOut = rows
+        }
         // Glass tinted toward the project's colour: a flavour of its board, as its windows' headers lie
         // on its wash.
         // The window takes its new size first, keeping its top where it was, and only then the glass is
@@ -332,10 +384,20 @@ final class CanvasSatelliteDock: NSObject {
         frame.origin.y += frame.height - flyoutSize.height
         frame.size = flyoutSize
         flyout.setFrame(frame, display: false)
-        let glass = Self.glass(radius: Self.flyoutRadius, tint: group.color, holding: rows)
+        let glass = Self.glass(radius: Self.flyoutRadius, tint: group.color, holding: laidOut)
+        if laidOut is FlippedView {
+            // Laid out by hand, so its fitting size says nothing.
+            laidOut.frame = NSRect(origin: .zero, size: flyoutSize)
+        }
         glass.frame = content.bounds
         glass.autoresizingMask = [.width, .height]
         content.addSubview(glass)
+    }
+
+    private static func separator() -> NSView {
+        let line = NSBox()
+        line.boxType = .separator
+        return line
     }
 
     /// A workspace with windows out: its name, a button per window — ringing that window on the screen
@@ -402,6 +464,11 @@ final class CanvasSatelliteDock: NSObject {
     private static func floatingPanel() -> NSPanel {
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: true)
+        float(panel)
+        return panel
+    }
+
+    private static func float(_ panel: NSPanel) {
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.hidesOnDeactivate = false
@@ -411,7 +478,6 @@ final class CanvasSatelliteDock: NSObject {
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        return panel
     }
 
     /// Liquid Glass round `content`, as the Dock is made of — tinted toward `tint`, faintly, when there
@@ -839,5 +905,24 @@ final class CanvasWindowGhost {
 
     private static func windowJustAbove(_ window: NSWindow) -> Int? {
         windowsAbove(window).last?[kCGWindowNumber as String] as? Int
+    }
+}
+
+/// Laid out top down, as the flyout's card and the rows under it are.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+extension CanvasSatelliteDock: NSWindowDelegate {
+    func windowDidBecomeKey(_ notification: Notification) {
+        card.becameKey()
+    }
+
+    /// The keyboard has gone elsewhere: out of the card, and the flyout goes too unless the pointer is
+    /// still on it.
+    func windowDidResignKey(_ notification: Notification) {
+        card.resignedKey()
+        guard let flyout, flyout.isVisible else { return }
+        if !flyout.frame.contains(NSEvent.mouseLocation) { closeFlyout() }
     }
 }

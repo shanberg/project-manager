@@ -386,7 +386,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         CanvasSatelliteDock.OpenProject(
             canvas: openedCanvas ?? store.canvasPath.map { URL(fileURLWithPath: $0) },
             title: windowName, color: store.color?.nsColor, icon: store.icon, window: window,
-            show: { [weak self] in self?.show() })
+            show: { [weak self] in self?.show() },
+            projectKey: openedCanvas == nil ? store.boundKey : nil)
     }
 
     func applyTitle() {

@@ -17,6 +17,14 @@ final class CanvasCompanionState {
     /// The tallest the card gets before it scrolls — a share of the satellite's height, so the panel
     /// stays a thing beside the window rather than a second one.
     var cardCap: CGFloat = 420
+    /// A height the panel always is, the card scrolling inside it, in place of sizing to the card —
+    /// the dock flyout's, which is the same shape whatever the project holds.
+    var fixedHeight: CGFloat?
+    /// Off where the panel is laid on glass of its own: the dock flyout's.
+    var drawsGlass = true
+    /// The header's way to the project's window: Show Window in the dock, as its other surfaces say it.
+    var openTitle = "Show Project"
+    var openHelp = "Show the project's window"
 
     var showsPill: Bool { asPill && !pillOpen }
 
@@ -119,17 +127,20 @@ struct CanvasCompanionView: View {
 
     private var panel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
+            // At its own height: in a panel of fixed height, the spacer that makes the header a drag
+            // handle top to bottom would otherwise take half of it.
+            header.fixedSize(horizontal: false, vertical: true)
             Divider().opacity(0.5)
             CanvasProjectNote(store: store, engagement: engagement, noteURL: noteURL,
                               onOpenProject: { WindowManager.shared.open(named: $0) },
                               commands: commands, display: display)
                 // A new project is a new card, with nothing of the last one's selection or editors.
                 .id(ObjectIdentifier(commands))
-                .frame(height: cardHeight)
+                .frame(height: state.fixedHeight == nil ? cardHeight : nil)
+                .frame(maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: CanvasCompanionPlacement.width)
-        .background(CompanionGlass(tint: state.tint, cornerRadius: 14))
+        .frame(width: CanvasCompanionPlacement.width, height: state.fixedHeight)
+        .background { if state.drawsGlass { CompanionGlass(tint: state.tint, cornerRadius: 14) } }
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -166,9 +177,9 @@ struct CanvasCompanionView: View {
             }
             .labelStyle(.iconOnly)
             .help("New Session — hold ⌥ to start another, unless this one is still empty")
-            Button("Show Project", systemImage: "arrow.up.forward.app", action: onOpenProject)
+            Button(state.openTitle, systemImage: "arrow.up.forward.app", action: onOpenProject)
                 .labelStyle(.iconOnly)
-                .help("Show the project's window")
+                .help(state.openHelp)
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 10)

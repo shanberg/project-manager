@@ -13,6 +13,8 @@ enum RowPlace: Hashable {
     case origin
     /// Drawn again in the sitting at this index, which picked it up.
     case picked(into: Int)
+    /// Drawn again at the top of the card, as the focused task (`CanvasProjectCardDisplay.pinsFocus`).
+    case pinned
 }
 
 /// A task's coordinates in one read of the document — what `PMStore.key` spells as a string.

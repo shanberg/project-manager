@@ -57,6 +57,9 @@ struct CanvasProjectNote: View {
 
     /// The open inline editor, if any. One at a time, exactly as in the task list and the focus panel.
     @State private var activeEditor: EditorTarget?
+    /// What a cap left out, brought back by its line. See `proseTail` and `pileCap`.
+    @State private var showsWholeNote = false
+    @State private var showsWholePile = false
     /// Which position a freshly opened add editor seeds to, set by the menu's Add commands before the
     /// editor opens.
     @State private var addPosition: TaskInsertPosition = .after
@@ -907,15 +910,53 @@ struct CanvasProjectNote: View {
     private var cardLines: [CardLine] {
         switch shows.layout {
         case .sittings:
-            return shownSessions.flatMap { sessionLines($0.session, at: $0.index) }
+            return pinnedLines + shownSessions.flatMap { sessionLines($0.session, at: $0.index) }
         case .pile(let withLatest):
             let latest = withLatest ? shownSessions.first.map { sessionLines($0.session, at: $0.index) } : nil
-            return (latest ?? []) + pileLines(withLatest: withLatest)
+            return pinnedLines + (latest ?? []) + pileLines(withLatest: withLatest)
         }
     }
 
+    /// The focused task, first, while the card pins it and nothing is narrowing the card.
+    private var pinnedLines: [CardLine] {
+        guard display.pinsFocus, display.find.isEmpty, let todo = store.focusedTodo, todo.state == .open else { return [] }
+        return [.caption("Focused", at: nil, extraTop: 0), .focused(todo)]
+    }
+
+    /// The sitting's blocks with its prose cut to the last `proseTail` lines, and how many lines that
+    /// left out. A paragraph that straddles the cut keeps its last lines.
+    private func tail(of blocks: [SessionBlock], at index: Int) -> (blocks: [SessionBlock], hidden: Int) {
+        guard let limit = display.proseTail, !showsWholeNote, display.find.isEmpty,
+              index == notes?.sessions.indices.first else { return (blocks, 0) }
+        var budget = limit
+        var hidden = 0
+        var kept: [SessionBlock] = []
+        for block in blocks.reversed() {
+            guard case .prose(let id, let text) = block else { kept.append(block); continue }
+            let lines = text.components(separatedBy: "\n")
+            let counted = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+            if counted <= budget {
+                budget -= counted
+                kept.append(block)
+            } else if budget > 0 {
+                var left = budget
+                var from = lines.count
+                while from > 0, left > 0 {
+                    from -= 1
+                    if !lines[from].trimmingCharacters(in: .whitespaces).isEmpty { left -= 1 }
+                }
+                hidden += counted - budget
+                budget = 0
+                kept.append(.prose(id: id, text: lines[from...].joined(separator: "\n")))
+            } else {
+                hidden += counted
+            }
+        }
+        return (kept.reversed(), hidden)
+    }
+
     private func sessionLines(_ session: Session, at index: Int) -> [CardLine] {
-        let blocks = blocks(for: session, at: index)
+        let (blocks, hiddenLines) = tail(of: blocks(for: session, at: index), at: index)
         let picked = pickedRows(into: index)
         let caption = session.label.isEmpty ? session.date : "\(session.date) · \(session.label)"
         var lines: [CardLine] = []
@@ -933,6 +974,7 @@ struct CanvasProjectNote: View {
             lines.append(.heading(session, at: index))
         }
         if showsEmpty { lines.append(.empty(at: index)) }
+        if hiddenLines > 0 { lines.append(.more(.prose, hidden: hiddenLines, at: index)) }
         lines += blocks.map { .block($0, at: index) }
         // The new-task field at the end of the sitting's own tasks — where the task it makes will be.
         if activeEditor == Self.quickAdd, quickAddHost == index { lines.append(.quickAdd(at: index)) }
@@ -958,12 +1000,43 @@ struct CanvasProjectNote: View {
     /// Captioned **Still open** under the latest sitting, where it is the second of two groups; a Tasks
     /// card is nothing but the pile, and a caption over the only thing on the card says nothing.
     private func pileLines(withLatest: Bool) -> [CardLine] {
-        let rows = pileRows(withLatest: withLatest)
+        var rows = pileRows(withLatest: withLatest)
         var lines: [CardLine] = []
         if !rows.isEmpty, withLatest {
             lines.append(.caption("Still open", at: nil, extraTop: shownSessions.isEmpty ? 0 : 8))
         }
-        return lines + rows.map { .pile($0) }
+        // Capped by task, not by line: a tree's root carries the origin chip, and the lines under it
+        // go with it.
+        var hidden = 0
+        if let cap = display.pileCap, !showsWholePile, display.find.isEmpty {
+            let roots = rows.indices.filter { rows[$0].row.showsOrigin }
+            if roots.count > cap {
+                hidden = roots.count - cap
+                rows = Array(rows[..<roots[cap]])
+            }
+        }
+        lines += rows.map { .pile($0) }
+        if hidden > 0 { lines.append(.more(.pile, hidden: hidden, at: nil)) }
+        return lines
+    }
+
+    /// The line that brings back what a cap left out: the note's earlier lines, or the rest of the pile.
+    private func moreLine(_ kind: CardLine.More, hidden: Int) -> some View {
+        let title = switch kind {
+        case .prose: "\(hidden) earlier \(hidden == 1 ? "line" : "lines")"
+        case .pile: "\(hidden) more"
+        }
+        return HStack {
+            quietAction(title, symbol: kind == .prose ? "chevron.up" : "chevron.down") {
+                switch kind {
+                case .prose: showsWholeNote = true
+                case .pile: showsWholePile = true
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, margin)
+        .padding(.vertical, 3)
     }
 
     @ViewBuilder private func lineView(_ line: CardLine) -> some View {
@@ -1006,9 +1079,16 @@ struct CanvasProjectNote: View {
         case .caption(let text, _, let extraTop):
             groupCaption(text).padding(.top, extraTop)
         case .picked(let entry, let index):
-            row(entry.row.todo, place: .picked(into: index), showsOrigin: entry.row.showsOrigin)
+            row(entry.row.todo, place: .picked(into: index), showsOrigin: entry.row.showsOrigin && display.showsOrigins)
         case .pile(let entry):
-            row(entry.row.todo, showsOrigin: entry.row.showsOrigin)
+            row(entry.row.todo, showsOrigin: entry.row.showsOrigin && display.showsOrigins)
+        case .focused(let todo):
+            row(todo, place: .pinned)
+                .padding(.vertical, 2)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05))
+                    .padding(.horizontal, max(margin - 6, 2)))
+        case .more(let kind, let hidden, _):
+            moreLine(kind, hidden: hidden)
         }
     }
 
@@ -1492,6 +1572,7 @@ struct CanvasProjectNote: View {
         switch place {
         case .origin: return PMStore.key(for: todo)
         case .picked(let into): return "picked\(into)/\(PMStore.key(for: todo))"
+        case .pinned: return "pinned/\(PMStore.key(for: todo))"
         }
     }
 
@@ -1637,6 +1718,12 @@ private enum CardLine: Identifiable {
     case caption(String, at: Int?, extraTop: CGFloat)
     case picked(PileEntry, into: Int)
     case pile(PileEntry)
+    /// The focused task, pinned first (`CanvasProjectCardDisplay.pinsFocus`).
+    case focused(Todo)
+    /// What a cap left out, and the way to bring it back.
+    case more(More, hidden: Int, at: Int?)
+
+    enum More { case prose, pile }
 
     /// Built from what the line draws, so a completion that reindexes the list slides the lines below
     /// rather than cross-fading them. A block's own id is unique only within its sitting.
@@ -1650,6 +1737,8 @@ private enum CardLine: Identifiable {
         case .caption(let text, let index, _): return "caption/\(index.map(String.init) ?? "")/\(text)"
         case .picked(let entry, _): return entry.id
         case .pile(let entry): return "pile/\(entry.id)"
+        case .focused: return "focused"
+        case .more(let kind, _, _): return "more/\(kind)"
         }
     }
 
@@ -1659,8 +1748,8 @@ private enum CardLine: Identifiable {
         case .heading(_, let index), .empty(let index), .block(_, let index), .quickAdd(let index),
              .noteEntry(let index), .picked(_, let index):
             return index
-        case .caption(_, let index, _): return index
-        case .pile: return nil
+        case .caption(_, let index, _), .more(_, _, let index): return index
+        case .pile, .focused: return nil
         }
     }
 
@@ -1828,6 +1917,23 @@ final class CanvasProjectCardDisplay {
     /// Whether the latest sitting ends in a line to add to its note — a sentence written down without
     /// opening the note. The companion's, where the card is a thing you glance at beside other work.
     var appendsToNote = false
+
+    /// Whether the focused task is drawn first, under its own caption, as well as on its own line — a
+    /// task in two places, as one under Picked up is. The dock flyout's, where the card is glanced at
+    /// to see where a project stands.
+    var pinsFocus = false
+
+    /// At most this many lines of the latest sitting's prose — its last ones, which are where you left
+    /// off — under a line that brings back the rest. Nil draws all of it. Its tasks are all drawn.
+    var proseTail: Int?
+
+    /// At most this many of the pile's tasks, each with the lines under it, before a line that brings
+    /// back the rest. Nil draws them all.
+    var pileCap: Int?
+
+    /// Whether an older task carries the chip that says which sitting it is from. Off in the dock
+    /// flyout, which is read at a glance rather than worked through.
+    var showsOrigins = true
 
     /// How tall the card's content is, written back by the card while `reportsHeight` — what a panel
     /// sizes itself to, up to a cap. Infinite while a note or the brief has the card, since those fill
