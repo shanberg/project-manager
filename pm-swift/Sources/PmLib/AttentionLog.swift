@@ -344,7 +344,7 @@ public enum AttentionLog {
         let edges = events
             .compactMap { event in DoneLog.date(event.at).map { Edge(at: $0, event: event) } }
             .sorted { $0.at < $1.at }
-        var out: [AttentionSpan] = []
+        var out: [Piece] = []
         // The span still open, if any: where it began, and on what.
         var open: (start: Date, project: String, key: String, task: String?)?
 
@@ -363,8 +363,8 @@ public enum AttentionLog {
                 basis = .inferred
             }
             guard end > span.start else { open = nil; return }
-            out.append(AttentionSpan(project: span.project, key: span.key, task: span.task,
-                                     start: span.start, end: end, basis: basis))
+            out.append(Piece(AttentionSpan(project: span.project, key: span.key, task: span.task,
+                                           start: span.start, end: end, basis: basis)))
             open = nil
         }
 
@@ -391,8 +391,49 @@ public enum AttentionLog {
         // Quiet first, answers over it: an answer about a range beats what the log implies about it.
         let quiet = resolvingGaps(out, gaps: gaps(edges), now: now)
         let counted = applyingCounts(to: quiet, from: edges, now: now)
-        guard let only else { return counted }
-        return counted.filter { only.contains($0.project) }
+        guard let only else { return counted.map(\.span) }
+        return counted.map(\.span).filter { only.contains($0.project) }
+    }
+
+    /// A span with its edges parsed once. Cutting and sorting work on these: parsing `start` and `end`
+    /// again at every comparison made a read cost gaps × spans parses, a minute on a few months' log.
+    ///
+    /// The dates are always the span's own strings read back, never the `Date`s it was built from,
+    /// so every cut and comparison sees exactly what it would by parsing the span.
+    struct Piece {
+        let span: AttentionSpan
+        let start: Date?
+        let end: Date?
+
+        init(_ span: AttentionSpan) {
+            self.span = span
+            start = span.startDate
+            end = span.endDate
+        }
+
+        var sortKey: Date { start ?? .distantPast }
+    }
+
+    /// `pieces` with `from`..`to` taken out of each, in place and in order. Only the pieces that
+    /// overlap it are touched.
+    static func remove(_ from: Date, _ to: Date, from pieces: inout [Piece]) {
+        guard let first = pieces.firstIndex(where: { overlaps($0, from, to) }) else { return }
+        var out = Array(pieces[..<first])
+        out.reserveCapacity(pieces.count + 1)
+        for piece in pieces[first...] {
+            if overlaps(piece, from, to) {
+                out.append(contentsOf: removing(from, to, from: piece.span).map(Piece.init))
+            } else {
+                out.append(piece)
+            }
+        }
+        pieces = out
+    }
+
+    /// Whether `removing` would cut `piece`.
+    private static func overlaps(_ piece: Piece, _ from: Date, _ to: Date) -> Bool {
+        guard let start = piece.start, let end = piece.end else { return false }
+        return from < end && to > start
     }
 
     /// The spans with every standing `counted` laid over them (docs/away-time.md).
@@ -400,8 +441,7 @@ public enum AttentionLog {
     /// Applied in the order the answers were *given*, so a later answer about a range beats an earlier
     /// one — including an earlier `counted` span, which the later one cuts like any other. A `counted`
     /// that a `withdrawn` names is skipped entirely, which puts back exactly what it covered.
-    static func applyingCounts(to spans: [AttentionSpan], from edges: [Edge], now: Date)
-        -> [AttentionSpan] {
+    static func applyingCounts(to spans: [Piece], from edges: [Edge], now: Date) -> [Piece] {
         let withdrawn = Set(edges.compactMap { $0.event.event == .withdrawn ? $0.event.ref : nil })
         var spans = spans
         for edge in edges where edge.event.event == .counted && !withdrawn.contains(edge.event.id) {
@@ -409,13 +449,13 @@ public enum AttentionLog {
             guard let from = edge.event.from.flatMap(DoneLog.date),
                   let to = edge.event.to.flatMap(DoneLog.date).map({ min($0, now) }),
                   to > from else { continue }
-            spans = spans.flatMap { removing(from, to, from: $0) }
+            remove(from, to, from: &spans)
             if let project = edge.event.project, let key = edge.event.key {
-                spans.append(AttentionSpan(project: project, key: key, task: nil,
-                                           start: from, end: to, basis: .counted))
+                spans.append(Piece(AttentionSpan(project: project, key: key, task: nil,
+                                                 start: from, end: to, basis: .counted)))
             }
         }
-        return spans.sorted { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }
+        return spans.sorted { $0.sortKey < $1.sortKey }
     }
 
     // MARK: Gaps
@@ -499,31 +539,32 @@ public enum AttentionLog {
     /// joined to the spans either side of it — measured, not counted: nobody answered anything, and
     /// the log says exactly where the quiet began and ended. Any other gap is emptied of the
     /// touch-short spans its joining swallowed: it's one away, not an away with seconds of work in it.
-    static func resolvingGaps(_ spans: [AttentionSpan], gaps: [Gap], now: Date) -> [AttentionSpan] {
+    static func resolvingGaps(_ spans: [Piece], gaps: [Gap], now: Date) -> [Piece] {
         var spans = spans
         for gap in gaps {
             let to = min(gap.to, now)
             guard to > gap.from else { continue }
-            spans = spans.flatMap { removing(gap.from, to, from: $0) }
+            remove(gap.from, to, from: &spans)
             if gap.isQuiet {
-                spans.append(AttentionSpan(project: gap.project, key: gap.key, task: nil,
-                                           start: gap.from, end: to, basis: .measured))
+                spans.append(Piece(AttentionSpan(project: gap.project, key: gap.key, task: nil,
+                                                 start: gap.from, end: to, basis: .measured)))
             }
         }
         return coalescing(spans)
     }
 
     /// Adjacent spans of one project on one basis, as one span. Keeps the first one's task.
-    static func coalescing(_ spans: [AttentionSpan]) -> [AttentionSpan] {
-        var out: [AttentionSpan] = []
-        for span in spans.sorted(by: { ($0.startDate ?? .distantPast) < ($1.startDate ?? .distantPast) }) {
-            if let last = out.last, last.key == span.key, last.basis == span.basis, last.end == span.start,
-               let start = last.startDate, let end = span.endDate {
-                out[out.count - 1] = AttentionSpan(project: last.project, key: last.key,
-                                                   task: last.task ?? span.task, start: start, end: end,
-                                                   basis: last.basis)
+    static func coalescing(_ spans: [Piece]) -> [Piece] {
+        var out: [Piece] = []
+        for piece in spans.sorted(by: { $0.sortKey < $1.sortKey }) {
+            let span = piece.span
+            if let last = out.last?.span, last.key == span.key, last.basis == span.basis,
+               last.end == span.start, let start = out.last?.start, let end = piece.end {
+                out[out.count - 1] = Piece(AttentionSpan(project: last.project, key: last.key,
+                                                         task: last.task ?? span.task, start: start,
+                                                         end: end, basis: last.basis))
             } else {
-                out.append(span)
+                out.append(piece)
             }
         }
         return out
