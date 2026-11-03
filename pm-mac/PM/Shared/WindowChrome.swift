@@ -530,6 +530,33 @@ struct HeaderMenuButton: View {
     }
 }
 
+/// `HeaderMenuButton` with words beside its glyph — the away chip, where a bare symbol wouldn't say
+/// what's being asked. The same control underneath, so it carves its press out of the drag band too.
+struct HeaderMenuChip: View {
+    let symbol: String
+    let title: String
+    let help: String
+    var tint: Color = .secondary
+    let open: (NSView) -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+                .font(.system(size: HeaderMetrics.iconSize, weight: .medium))
+            Text(title)
+                .font(.caption)
+                .monospacedDigit()
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, HeaderMetrics.textInset)
+        .frame(height: HeaderMetrics.itemHeight)
+        .accessibilityHidden(true)
+        .overlay(MenuPressArea(help: help, openToken: 0, open: open, hovering: $hovering))
+        .modifier(HeaderHoverCapsule(visible: hovering))
+    }
+}
+
 private struct MenuPressArea: NSViewRepresentable {
     let help: String
     let openToken: Int

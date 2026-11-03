@@ -1,4 +1,5 @@
 import AppKit
+import PmLib
 import SwiftUI
 
 /// A board's chrome: a pill naming it at the leading edge, the controls at the trailing one, and nothing
@@ -270,6 +271,10 @@ final class CanvasHeaderModel {
     /// The `+`: open what can be added to the board, against the view given — see `addMenu`.
     @ObservationIgnored
     var showAddMenu: (NSView) -> Void = { _ in }
+    /// The away chip's answers, against the view given — set by a project window, which has the store
+    /// they need. Nil, and there's no chip: a satellite or a workspace window doesn't ask.
+    @ObservationIgnored
+    var showAwayMenu: ((AttentionAway, NSView) -> Void)?
     @ObservationIgnored
     var pageBack: () -> Void = {}
     @ObservationIgnored
@@ -499,5 +504,23 @@ private struct CanvasHeaderHeightKey: PreferenceKey {
     static let defaultValue: CGFloat? = nil
     static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
         value = value ?? nextValue()
+    }
+}
+
+/// Today's newest unanswered away, as a chip at the head of the trailing row: "Away 1h 30m". It stays
+/// until the away is answered, here or anywhere else (docs/away-time.md). Its menu is `AwayAnswers`,
+/// with Count and Switch first.
+struct CanvasAwayCapsule: View {
+    var model: CanvasHeaderModel
+    let away: AttentionAway
+    @Environment(\.controlActiveState) private var controlActiveState
+
+    var body: some View {
+        HeaderCapsule(chrome: HeaderChrome(active: controlActiveState), glass: "away") {
+            HeaderMenuChip(symbol: "clock.badge.questionmark", title: "Away \(durationLabel(away.seconds))",
+                           help: "\(AwayAnswers.heading(away)) — count it, or not", tint: Color(nsColor: .systemOrange)) { view in
+                model.showAwayMenu?(away, view)
+            }
+        }
     }
 }

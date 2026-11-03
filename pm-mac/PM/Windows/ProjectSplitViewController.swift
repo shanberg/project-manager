@@ -572,6 +572,12 @@ final class ProjectSplitViewController: NSSplitViewController {
         pane.trafficLightsAreElsewhere = { [weak self] in self?.sidebarItem.isCollapsed == false }
         pane.focus = focus
         pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
+        // The away chip: answered against this window's project, read when the menu opens, since a
+        // retarget swaps the store under the pane.
+        pane.header.showAwayMenu = { [weak self] away, view in
+            guard let self else { return }
+            AwayAnswers.menu(for: away, store: self.store, switching: true).popUpBelow(view)
+        }
         return pane
     }
 

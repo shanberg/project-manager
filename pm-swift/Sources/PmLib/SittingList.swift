@@ -68,6 +68,10 @@ public struct SittingEntry: Codable, Equatable {
     /// zero when there's nothing on record: a sitting PM wasn't watching has no duration, which is a
     /// different thing from one that took no time.
     public var seconds: Double? = nil
+    /// True when it stands for an away that was counted as a sitting (docs/away-time.md): a standing
+    /// `counted` answer for this project began in the minute its heading names. Nil otherwise, so a
+    /// sitting written before this decodes as it always did.
+    public var counted: Bool? = nil
 }
 
 /// A span's sittings, newest day first and in time order within a day, and the completions that fell
@@ -357,9 +361,31 @@ public func sessionList(in range: DoneRange, projects: [String]? = nil, now: Dat
             answer = answer.merged(with: part)
         }
     }
-    let sorted = answer.sorted()
+    // The log's tail only, from a day before the range: an answer is given after the away it's about.
+    let sorted = markingCounted(answer.sorted(),
+                                events: AttentionLog.events(since: range.start.addingTimeInterval(-86_400)))
     guard time, let spans = try? attentionSpans(in: range, projects: projects, now: now) else {
         return sorted
     }
     return withDurations(sorted, spans: spans)
+}
+
+/// `list` with each sitting that stands for a counted away marked so: a standing `counted` answer for
+/// its project whose range begins in the minute the sitting's heading names. Pure.
+func markingCounted(_ list: SittingList, events: [AttentionEvent]) -> SittingList {
+    let withdrawn = Set(events.compactMap { $0.event == .withdrawn ? $0.ref : nil })
+    var starts: [String: Set<Int>] = [:]
+    for event in events where event.event == .counted && !withdrawn.contains(event.id) {
+        guard let project = event.project, let from = event.from.flatMap(DoneLog.date) else { continue }
+        starts[project, default: []].insert(Int(from.timeIntervalSince1970 / 60))
+    }
+    guard !starts.isEmpty else { return list }
+    var out = list
+    for i in out.sittings.indices {
+        let sitting = out.sittings[i]
+        guard let began = sitting.startedAt.flatMap(DoneLog.date),
+              starts[sitting.projectFolder]?.contains(Int(began.timeIntervalSince1970 / 60)) == true else { continue }
+        out.sittings[i].counted = true
+    }
+    return out
 }

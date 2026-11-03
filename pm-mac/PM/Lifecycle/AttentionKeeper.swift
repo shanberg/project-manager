@@ -175,7 +175,12 @@ final class AttentionKeeper {
         // reason.
         guard !alreadyBegan(key: key, within: 10, of: now) else { return }
         AttentionLog.began(project: project, key: key, task: focusedTaskText(), source: "app", at: now)
+        NotificationCenter.default.post(name: Self.didBegin, object: self)
     }
+
+    /// Posted after a `began` is written: attention landed, so whatever gap was open is now an away
+    /// that can be asked about (the menu bar's dot listens).
+    static let didBegin = Notification.Name("PMAttentionDidBegin")
 
     /// Quitting. The last chance to write an edge, so the span doesn't have to be inferred.
     func stop() {
@@ -224,6 +229,7 @@ final class AttentionKeeper {
             schedule(every: Self.tick)
             AttentionLog.began(project: open.project, key: open.key, task: focusedTaskText(),
                                why: "resumed", source: "app", at: now.addingTimeInterval(-idle))
+            NotificationCenter.default.post(name: Self.didBegin, object: self)
         }
     }
 

@@ -51,6 +51,10 @@ struct CanvasHeaderTrailingChrome: View {
             // the same height today — one row of `itemHeight` in the same inset — and centring them
             // would hide it the day one of them isn't.
             HStack(alignment: .bottom, spacing: HeaderMetrics.capsuleGap) {
+                // A question about time you weren't here, ahead of everything about where you are.
+                if model.showAwayMenu != nil, let away = AwayWatch.shared.newest {
+                    CanvasAwayCapsule(model: model, away: away)
+                }
                 // **First, so the scopes widen toward the window's edge**: what you are standing in,
                 // then the board it is on. In a tiled view the focused tile *is* the engaged card
                 // (`CanvasBoardView.tileClicked` selects and engages together), so one capsule is

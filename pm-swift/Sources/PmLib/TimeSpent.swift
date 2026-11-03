@@ -211,19 +211,24 @@ func agentMoments(around range: DoneRange) -> [AgentMoment] {
     return folders.resolve(moments)
 }
 
-/// Today's newest away still waiting for an answer — the one the menu bar offers (docs/away-time.md).
-/// Nil most of the time.
+/// Today's aways still waiting for an answer, oldest first — what the menu bar offers and its dot
+/// stands for (docs/away-time.md). Empty most of the time.
 ///
 /// Reads only the log's tail, from the start of yesterday: the menu asks every time it opens, and the
 /// log is never pruned. Yesterday's slack covers the back-dating the tail reader has to allow for.
-public func latestAway(now: Date = Date(), calendar: Calendar = .current) -> AttentionAway? {
+public func todaysAways(now: Date = Date(), calendar: Calendar = .current) -> [AttentionAway] {
     let today = calendar.startOfDay(for: now)
     guard let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
-          let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) else { return nil }
+          let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) else { return [] }
     let events = AttentionLog.events(since: yesterday)
     let range = DoneRange(start: today, end: tomorrow)
     return AttentionLog.aways(from: events, in: range, agent: agentMoments(around: range),
-                              calendar: AwayCalendar.events(around: range)).last
+                              calendar: AwayCalendar.events(around: range))
+}
+
+/// Today's newest away still waiting for an answer. Nil most of the time.
+public func latestAway(now: Date = Date(), calendar: Calendar = .current) -> AttentionAway? {
+    todaysAways(now: now, calendar: calendar).last
 }
 
 /// A moment as a person types it at a prompt: ISO 8601 with a zone, or a clock time today —

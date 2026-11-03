@@ -119,14 +119,17 @@ struct CanvasTimeCard: View {
     var onOpenProject: (String) -> Void = { _ in }
     /// The card a row dragged off this one makes. Nil: rows don't drag.
     var projectCard: ((TimeSpentItem) -> NSItemProvider?)?
-    /// Answer for some stretches: they were this project's (a folder), or weren't work (nil).
-    var onAnswer: ([CanvasTimeStretch], String?) -> Void = { _, _ in }
+    /// Answer for some stretches: they were this project's (a folder), or weren't work (nil); and
+    /// whether to write the one away as a sitting too.
+    var onAnswer: ([CanvasTimeStretch], String?, Bool) -> Void = { _, _, _ in }
 
     /// The stretches picked, by `CanvasTimeStretch.key` — the aways, and the spans of any project
     /// that's open. Answers act on all of them at once (docs/away-time.md).
     @State private var selection = RowSelection()
     /// The projects showing the spans their time is made of.
     @State private var expanded: Set<String> = []
+    /// Whether the aways more than a week old are shown, or folded under "Older (n)".
+    @State private var showsOlder = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -317,8 +320,38 @@ struct CanvasTimeCard: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
-            ForEach(model.aways.map(CanvasTimeStretch.away), id: \.key) { stretchRow($0) }
+            ForEach(recentAways.map(CanvasTimeStretch.away), id: \.key) { stretchRow($0) }
+            if !olderAways.isEmpty {
+                // Unanswered and a week old: still there to answer, but not asking any more.
+                Button {
+                    showsOlder.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: showsOlder ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8 * zoom, weight: .semibold))
+                        Text("Older (\(olderAways.count))")
+                    }
+                    .font(.system(size: 11 * zoom))
+                    .foregroundStyle(.tertiary)
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if showsOlder {
+                    ForEach(olderAways.map(CanvasTimeStretch.away), id: \.key) { stretchRow($0) }
+                }
+            }
         }
+    }
+
+    /// The aways that began in the last week, and the ones before — folded (docs/away-time.md).
+    private var recentAways: [AttentionAway] { model.aways.filter { !Self.isOlder($0) } }
+    private var olderAways: [AttentionAway] { model.aways.filter(Self.isOlder) }
+
+    private static func isOlder(_ away: AttentionAway) -> Bool {
+        guard let from = away.fromDate else { return false }
+        return from < Date().addingTimeInterval(-7 * 86_400)
     }
 
     /// Every stretch row in the order the card draws them — what a ⇧-click ranges over.
@@ -327,7 +360,7 @@ struct CanvasTimeCard: View {
         let spans = CanvasTimeRows.split(report).tracked
             .filter { expanded.contains($0.projectFolder) }
             .flatMap { $0.spans.map(CanvasTimeStretch.span) }
-        return spans + model.aways.map(CanvasTimeStretch.away)
+        return spans + (recentAways + (showsOlder ? olderAways : [])).map(CanvasTimeStretch.away)
     }
 
     /// One stretch: when, and how long. An away also says what it interrupted; a span, how sure it is.
@@ -338,10 +371,25 @@ struct CanvasTimeCard: View {
                 .font(.system(size: 11.5 * zoom).monospacedDigit())
                 .lineLimit(1)
             if case .away(let away) = stretch {
-                Text(title(of: away.project))
-                    .font(.system(size: 11 * zoom))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                // The evidence's project when it names another, with the one interrupted after it.
+                if let suggested = away.suggested, suggested != away.project {
+                    Text("\(title(of: suggested))?")
+                        .font(.system(size: 11 * zoom))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text("was on \(title(of: away.project))")
+                        .font(.system(size: 11 * zoom))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                } else {
+                    Text(title(of: away.project))
+                        .font(.system(size: 11 * zoom))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                ForEach(Array(away.evidence.prefix(2).enumerated()), id: \.offset) { _, evidence in
+                    evidenceChip(evidence)
+                }
             }
             Spacer(minLength: 4)
             if case .span(let span) = stretch {
@@ -364,6 +412,23 @@ struct CanvasTimeCard: View {
         .contextMenu { answers(for: targets(of: stretch)) }
     }
 
+    /// What went on during an away, small: "◆ Claude Code" with its folder, or "▣" and a meeting.
+    private func evidenceChip(_ evidence: AwayEvidence) -> some View {
+        let calendar = evidence.isCalendar
+        let text = calendar ? (evidence.title ?? "") : ((evidence.folder ?? "") as NSString).lastPathComponent
+        return HStack(spacing: 3) {
+            Image(systemName: calendar ? "calendar" : "sparkle")
+                .font(.system(size: 8.5 * zoom))
+            Text(text).lineLimit(1)
+        }
+        .font(.system(size: 10 * zoom))
+        .foregroundStyle(calendar ? Color.green : Color.accentColor)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 0.5)
+        .background(Capsule().fill((calendar ? Color.green : Color.accentColor).opacity(0.12)))
+        .help(calendar ? "Calendar: \(evidence.title ?? "")" : "Claude Code in \(evidence.folder ?? "") for \(evidence.minutes)m")
+    }
+
     /// What a right-click acts on: the selection when the row is in it, the row alone when it isn't —
     /// the Finder's rule.
     private func targets(of stretch: CanvasTimeStretch) -> [CanvasTimeStretch] {
@@ -376,6 +441,9 @@ struct CanvasTimeCard: View {
                                                 candidates: model.report?.projects.map(\.projectFolder) ?? [])
         if let suggested = offered.suggested {
             Button(offered.countTitle(for: title(of: suggested))) { answer(picked, suggested) }
+            if offered.canBeSitting {
+                Button(offered.sittingTitle(for: title(of: suggested))) { answer(picked, suggested, sitting: true) }
+            }
         }
         if !offered.projects.isEmpty {
             Menu(offered.countSubmenuTitle) {
@@ -388,9 +456,9 @@ struct CanvasTimeCard: View {
         Button(offered.notWorkTitle) { answer(picked, nil) }
     }
 
-    private func answer(_ picked: [CanvasTimeStretch], _ project: String?) {
+    private func answer(_ picked: [CanvasTimeStretch], _ project: String?, sitting: Bool = false) {
         selection = RowSelection()
-        onAnswer(picked, project)
+        onAnswer(picked, project, sitting)
     }
 
     /// A project by title, never code — the one the report prints when it has it.

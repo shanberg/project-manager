@@ -114,6 +114,7 @@ Where a card *sits*, how big it is and what is tiled stay the app's — they are
 - `time.count` writes notes only for `sitting` or a claim. That write is journaled; `journal.undo` reverses it and leaves the `counted` event.
 - `time.count` `data`: the event, plus `session` (as `session.start` reports one) and `claimed` (folders) when written.
 - `time.count` refuses `sitting` with `notWork`.
+- `session.list`: a sitting standing for a counted away has `counted: true` (a standing `counted` answer for its project began in its start minute).
 - `session.start`: `at` (ISO 8601 with a zone, not in the future) always starts a new session, headed with that time, placed among the others by time. `label` names it.
 
 `time.aways`, `time.count` (1.22.0) — see [away-time.md](away-time.md):

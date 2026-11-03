@@ -17,6 +17,8 @@ import SwiftUI
 @Observable
 final class CanvasDayModel {
     private(set) var list: SittingList?
+    /// The aways in the range nobody has answered, drawn between the sittings (docs/away-time.md).
+    private(set) var aways: [AttentionAway] = []
     private(set) var range: DoneRange?
     private(set) var failure: String?
     /// The calendar events of the card's projects, over what the rail, week or month draws (views.md C4).
@@ -134,19 +136,21 @@ final class CanvasDayModel {
         let eventRange = drawsEvents ? ((try? spec.calendarSpan())?.map(\.range) ?? (try? spec.period.range())) : nil
         events.load(projects: projects, interval: eventRange.map { DateInterval(start: $0.start, end: $0.end) })
         queue.async { [weak self] in
-            let result = Result { () throws -> (DoneRange, SittingList) in
+            let result = Result { () throws -> (DoneRange, SittingList, [AttentionAway]) in
                 // A week or a month laid out asks about the whole of it, not only the period's days.
                 let range = try spec.calendarSpan()?.range ?? spec.period.range()
                 // An empty board asks about no projects, and the answer to that is nothing, not everything.
-                if projects?.isEmpty == true { return (range, SittingList()) }
-                return (range, try sessionList(in: range, projects: projects, time: wantsTime))
+                if projects?.isEmpty == true { return (range, SittingList(), []) }
+                let aways = (try? attentionAways(in: range, projects: projects)) ?? []
+                return (range, try sessionList(in: range, projects: projects, time: wantsTime), aways)
             }
             Task { @MainActor in
                 guard let self, mine == self.generation else { return }
                 switch result {
-                case .success(let (range, list)):
+                case .success(let (range, list, aways)):
                     self.failure = nil
                     if range != self.range { self.range = range }
+                    if aways != self.aways { self.aways = aways }
                     if list != self.list {
                         self.list = list
                         self.selection.keep(within: Dictionary(
@@ -190,6 +194,9 @@ struct CanvasDayCard: View {
     var onSetPeriod: ((CanvasViewSpec.Period) -> Void)?
     /// Open a day of a week or month as a Day card of its own. Nil: days don't open.
     var onOpenDay: ((String) -> Void)?
+    /// Answer an away: this project's (a folder) or not work (nil), and whether as a sitting. Nil: aways
+    /// are drawn but not answered here.
+    var onAnswerAway: ((AttentionAway, String?, Bool) -> Void)?
 
     /// The row being retyped, and what it says so far.
     @State private var editing: String?
@@ -366,6 +373,7 @@ struct CanvasDayCard: View {
     @ViewBuilder private func dayBlock(_ day: String, in list: SittingList) -> some View {
         let sittings = list.sittings.filter { $0.session == day }
         let elsewhere = list.elsewhere.filter { Self.localISO($0.at) == day }
+        let aways = model.aways.filter { $0.fromDate.map(Self.isoDay) == day }
         if model.spec.period.isSpan {
             Text(Self.dayCaption(day))
                 .font(.system(size: 11 * zoom, weight: .semibold))
@@ -374,8 +382,12 @@ struct CanvasDayCard: View {
                 .padding(.top, 10)
                 .padding(.bottom, 2)
         }
-        ForEach(sittings, id: \.id) { sitting in
-            sittingBlock(sitting)
+        // The aways between the sittings, each where it began: a sitting with no time comes first.
+        ForEach(Self.interleaved(sittings, aways), id: \.id) { item in
+            switch item {
+            case .sitting(let sitting): sittingBlock(sitting)
+            case .away(let away): awayBand(away)
+            }
         }
         if !elsewhere.isEmpty { alsoFinished(elsewhere) }
     }
@@ -390,7 +402,7 @@ struct CanvasDayCard: View {
     private var railEvents: [ProjectEvent] { railDay.map { model.events.events.on($0) } ?? [] }
 
     private func rail(_ list: SittingList) -> some View {
-        let entries = CanvasTimeGrid.railEntries(list, events: model.events.events, day: railDay)
+        let entries = CanvasTimeGrid.railEntries(list, events: model.events.events, aways: model.aways, day: railDay)
         return CanvasRailLayout(perMinute: 0.8 * zoom, gap: 0) {
             ForEach(entries) { entry in
                 Group {
@@ -398,6 +410,7 @@ struct CanvasDayCard: View {
                     case .sitting(let sitting): sittingBlock(sitting)
                     case .done(let item): railDone(item)
                     case .event(let event): railEvent(event)
+                    case .away(let away): awayBand(away)
                     }
                 }
                 .layoutValue(key: CanvasRailLayout.Minute.self, value: entry.minute)
@@ -463,6 +476,95 @@ struct CanvasDayCard: View {
         .help(CanvasCalendarCells.help(event, namesProject: !model.showsOneProject))
     }
 
+    // MARK: An away
+
+    /// A sitting or an away, in the order a day went.
+    enum DayItem: Identifiable {
+        case sitting(SittingEntry)
+        case away(AttentionAway)
+        var id: String {
+            switch self {
+            case .sitting(let sitting): sitting.id
+            case .away(let away): "away/\(away.from)"
+            }
+        }
+    }
+
+    /// The day's sittings with its aways between them by start; a sitting with no time first, as ever.
+    static func interleaved(_ sittings: [SittingEntry], _ aways: [AttentionAway]) -> [DayItem] {
+        let timed = sittings.map { (at: $0.startedAt.flatMap(DoneLog.date), item: DayItem.sitting($0)) }
+            + aways.map { (at: $0.fromDate, item: DayItem.away($0)) }
+        return timed.enumerated().sorted { a, b in
+            switch (a.element.at, b.element.at) {
+            case (nil, nil): return a.offset < b.offset
+            case (nil, _): return true
+            case (_, nil): return false
+            case (let x?, let y?): return x != y ? x < y : a.offset < b.offset
+            }
+        }.map(\.element.item)
+    }
+
+    /// An away between the sittings: a hatched band with its length, whose it probably was and what
+    /// went on, and a click that answers it (docs/away-time.md).
+    private func awayBand(_ away: AttentionAway) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(Self.clock(away.from) ?? "")
+                .font(.system(size: 11 * zoom).monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .frame(width: Self.gutter * zoom, alignment: .trailing)
+                .lineLimit(1)
+            Menu {
+                awayAnswers(away)
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Away · \(durationLabel(away.seconds))")
+                    if let suggested = away.suggested, suggested != away.project {
+                        Text("\(projectTitle(fromFolderName: suggested))?").fontWeight(.medium)
+                        Text("was on \(projectTitle(fromFolderName: away.project))").foregroundStyle(.tertiary)
+                    } else if !model.showsOneProject {
+                        Text(projectTitle(fromFolderName: away.project)).foregroundStyle(.tertiary)
+                    }
+                    ForEach(Array(away.evidence.prefix(2).enumerated()), id: \.offset) { _, evidence in
+                        Text(evidence.isCalendar ? "▣ \(evidence.title ?? "")"
+                             : "◆ \(((evidence.folder ?? "") as NSString).lastPathComponent)")
+                            .foregroundStyle(evidence.isCalendar ? Color.green : Color.accentColor)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 11.5 * zoom))
+                .foregroundStyle(Color(nsColor: .systemOrange))
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AwayHatch(zoom: zoom))
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .disabled(onAnswerAway == nil)
+            .help(AwayAnswers.evidenceLines(away).joined(separator: "\n"))
+        }
+        .padding(.leading, 4)
+        .padding(.trailing, 12)
+        .padding(.vertical, 3)
+    }
+
+    /// The same answers the menu bar offers (`AwayAnswers`), less Count and Switch: a Day card is a
+    /// record, not where you are.
+    @ViewBuilder private func awayAnswers(_ away: AttentionAway) -> some View {
+        let offered = AwayAnswers.offered(for: away, focused: PMFiles.focusedProjectKey().flatMap(PMFiles.projectName(fromKey:)))
+        ForEach(offered, id: \.self) { folder in
+            Button("Count for \(AwayAnswers.title(folder))") { onAnswerAway?(away, folder, false) }
+        }
+        if let first = offered.first {
+            Button("Count as a Sitting in \(AwayAnswers.title(first, limit: 30))") { onAnswerAway?(away, first, true) }
+        }
+        Divider()
+        Button("Not Work") { onAnswerAway?(away, nil, false) }
+    }
+
     // MARK: A sitting
 
     private func sittingBlock(_ sitting: SittingEntry) -> some View {
@@ -480,6 +582,16 @@ struct CanvasDayCard: View {
                     Text(durationLabel(seconds))
                         .font(.system(size: 9.5 * zoom).monospacedDigit())
                         .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                // An away counted as this sitting, rather than one you sat down to.
+                if sitting.counted == true {
+                    Text("counted")
+                        .font(.system(size: 9.5 * zoom))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 0.5)
+                        .background(Capsule().fill(Color.green.opacity(0.14)))
                         .lineLimit(1)
                 }
             }
@@ -764,5 +876,33 @@ struct CanvasDayCard: View {
         let f = DateFormatter()
         f.dateFormat = "EEE, MMM d"
         return f.string(from: date)
+    }
+}
+
+/// The hatching an away is drawn with: diagonal stripes in the away's orange, under a dashed leading
+/// edge, so it reads as time missing from the day rather than a block of it.
+private struct AwayHatch: View {
+    var zoom: Double
+
+    var body: some View {
+        let tint = Color(nsColor: .systemOrange)
+        ZStack(alignment: .leading) {
+            Canvas { context, size in
+                let step = 9 * zoom
+                var x = -size.height
+                while x < size.width {
+                    var stripe = Path()
+                    stripe.move(to: CGPoint(x: x, y: size.height))
+                    stripe.addLine(to: CGPoint(x: x + size.height, y: 0))
+                    context.stroke(stripe, with: .color(tint.opacity(0.16)), lineWidth: 3 * zoom)
+                    x += step
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 5 * zoom))
+            Rectangle()
+                .fill(tint.opacity(0.55))
+                .frame(width: 2)
+                .mask(VStack(spacing: 2) { ForEach(0..<40, id: \.self) { _ in Rectangle().frame(height: 3) } })
+        }
     }
 }

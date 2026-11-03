@@ -660,6 +660,21 @@ extension CanvasViewSpecTests {
                       "no day, no events: the rail's day is what places them")
     }
 
+    /// Aways join the rail on the day they began, at the minute they began (docs/away-time.md).
+    func testAwaysJoinTheRailOnTheirOwnDay() throws {
+        let calendar = Calendar.current
+        let day = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 9, day: 25)))
+        func away(_ dayOffset: Double, _ hour: Int) -> AttentionAway {
+            let from = day.addingTimeInterval(dayOffset * 86_400 + TimeInterval(hour * 3600))
+            return AttentionAway(project: "W-1 Launch", key: "/P:W-1 Launch", from: from,
+                                 to: from.addingTimeInterval(3600), why: "paused")
+        }
+        let entries = CanvasTimeGrid.railEntries(SittingList(), aways: [away(0, 14), away(1, 9), away(0, 9)],
+                                                 day: "2026-09-25", calendar: calendar)
+        XCTAssertEqual(entries.map(\.minute), [540, 840], "the next day's away isn't on this rail")
+        XCTAssertTrue(entries.allSatisfy { $0.id.hasPrefix("away/") })
+    }
+
     /// A week's grid is the working day, widened for an early or late sitting; a column pushes a block
     /// down when two began too close together to fit.
     func testAWeeksGridTakesInEverySitting() {

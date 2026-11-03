@@ -218,6 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusController.onSetPinned = { [weak self] on in self?.updateSettings { $0.pinned = on } }
         statusController.onOpenSettings = { SettingsWindowController.shared.show() }
         statusController.onFailure = { [weak self] message in self?.notifier?.reportFailure(message) }
+        AwayAnswers.onFailure = { [weak self] message in self?.notifier?.reportFailure(message) }
     }
 
     // MARK: Settings

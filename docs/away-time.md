@@ -95,18 +95,34 @@ Added 2026-11-02 (untracked activity, steps 1–2). Real log, Oct 2026: Claude C
 
 ### Where aways appear
 
-- Menubar menu: top item, today's newest unanswered away only (`latestAway`). Absent when there's none.
-  - Title: "Away 12:05 – 12:35 PM"; subtitle: duration · interrupted project.
+- Menubar menu: top item, today's newest unanswered away (`todaysAways`). Absent when there's none.
+  - Then "N More Today" ▸, today's other unanswered aways, newest first, each with the same submenu. Absent with one.
+  - Title: "Away 12:05 – 12:35 PM"; subtitle: duration · interrupted project, or duration · <suggested>? · was on <interrupted>.
   - Projects named by title, not code, regardless of the show-codes setting. Same in `pm time aways` and `time.count` summaries.
-  - Submenu: Count for <interrupted project>; Count for <focused project> if different;
-    Other Project ▸ (recents); Not Work.
+  - Submenu: one disabled line per evidence ("Claude Code · ~/dev/x · 58m", "Calendar · <title> · 30m");
+    Count for <suggested>; Count for <interrupted>; Count for <focused> (each once);
+    Count as a Sitting in <first of those>; Other Project ▸ (recents); Not Work.
   - Answers go through `time.count`, source `app`. A refusal becomes a failure notification.
   - Reads only the log's tail from the start of yesterday (`AttentionLog.events(since:)`). ~30 ms on the 2026-09-23 log.
-  - No undo from the menu yet (step 7).
-- Menubar: no badge, no count, no tint.
+  - No undo from the menu or the chip yet.
+- Menubar status item: an orange dot on the ring or icon while today has an unanswered away (amended 2026-11-03; was no badge).
+  - Worked out off the main thread; refreshed when attention lands (`AttentionKeeper.didBegin`), when the menu closes, and every 5 min.
+  - No count, no tint.
+- Project window titlebar: a chip, "Away 1h 30m", at the head of the trailing capsules, for today's newest unanswered away (`CanvasAwayCapsule`).
+  - Stays until that away is answered, anywhere. Project windows only; satellites and workspace windows have none.
+  - Its menu (`AwayAnswers`): heading and subtitle as the menubar; evidence lines; Count and Switch to <suggested> (when not the focused project); then the menubar's answers.
+  - Count and Switch: counts, then focuses that project and opens its window.
+- `AwayWatch`: today's aways, shared by the dot and the chip. Off the main thread; refreshed on `AttentionKeeper.didBegin`, after any answer, every 5 min.
 - Time card: **Away** section below the project rows, all unanswered aways in the card's period and projects.
-  - Row: time range · interrupted project (title) · duration.
+  - Row: time range · interrupted project (title) · duration. With a suggestion: "<suggested>? was on <interrupted>". Up to two evidence chips (folder name, or meeting title).
   - Multi-day periods show the date in the range.
+  - Aways that began more than 7 days ago fold under "Older (n)", a disclosure row.
+  - Menu: Count for <suggested> first when the selection is all aways that agree (evidence first, else interrupted project). The evidence's project is offered even when the card doesn't list it.
+  - Count as a Sitting in <suggested>: one away selected only. ⌘Z withdraws the count and reverses the sitting through `journal.undo`; a refused reversal leaves the sitting. Edit menu: "Undo Count as a Sitting".
+- Day card: unanswered aways in its period and projects, between the sittings by start (list and rail; not week or month).
+  - A hatched orange band: "Away · 1h 30m", the suggestion, up to two evidence marks. Tooltip: the evidence lines.
+  - Click: Count for <suggested / interrupted / focused>, Count as a Sitting, Not Work. Same undo as the Time card.
+  - A sitting standing for a counted away carries a green "counted" mark under its time (`SittingEntry.counted`).
 - No notification. Revisit only if long aways routinely go unanswered.
 - Focus panel: not used (it opens on summon only).
 

@@ -178,6 +178,7 @@
 		67FAF85CC9DA84982DAB16E3 /* CodeEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57121E3E580CB310F5C374DF /* CodeEditor.swift */; };
 		682B885D994EC5F7B065C269 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3644D4885A6C393A632399AA /* main.swift */; };
 		687ED4FFFF9C488BAA3797DB /* CanvasDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DBEF0C051683508E6C2D9F1 /* CanvasDocumentStore.swift */; };
+		68A21EBFB0F57989845ECB3A /* AwayAnswers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42167DD23DEDE9125F47314A /* AwayAnswers.swift */; };
 		691DECDD0755227C8B02BE30 /* CanvasPagePaintTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 314DB933D1070001DBE5CA47 /* CanvasPagePaintTests.swift */; };
 		6928D4167DAD7A53AF2177F8 /* CanvasNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638B1B5554C563993A9A241C /* CanvasNavigation.swift */; };
 		6A02BDACC60D2013AD7DCD81 /* ObsidianLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17912D894364C3FC66AC8134 /* ObsidianLink.swift */; };
@@ -561,6 +562,7 @@
 		3FBD825DDFD05CF50FA02B24 /* CanvasFocusCodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFocusCodingTests.swift; sourceTree = "<group>"; };
 		3FC5C81D79C2F574B7D02B35 /* CanvasItemDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasItemDetailView.swift; sourceTree = "<group>"; };
 		3FD61ED8BD3E04B223F2FA78 /* CanvasDrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDrop.swift; sourceTree = "<group>"; };
+		42167DD23DEDE9125F47314A /* AwayAnswers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AwayAnswers.swift; sourceTree = "<group>"; };
 		4246023F7864C429AC13E0AD /* CanvasProjectNoteCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasProjectNoteCard.swift; sourceTree = "<group>"; };
 		44A6DF0164FC83CE59AED01C /* CanvasCardActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardActions.swift; sourceTree = "<group>"; };
 		4667E73DFF145A0BFD7B98F4 /* ImmersivePresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmersivePresenter.swift; sourceTree = "<group>"; };
@@ -929,6 +931,7 @@
 		7BB897246CA7746C4DB3E2BA /* Menubar */ = {
 			isa = PBXGroup;
 			children = (
+				42167DD23DEDE9125F47314A /* AwayAnswers.swift */,
 				D69731046CF949BED6A9B753 /* StatusItemController.swift */,
 				03D61F922F8CA7E0774CC25B /* TaskMenuRow.swift */,
 			);
@@ -1508,6 +1511,7 @@
 				ECA021765D64B690699581FE /* AppDelegate.swift in Sources */,
 				33D33AEB3B2F4596B3A4E5D4 /* AppIcons.swift in Sources */,
 				24303FA69FF5DF1DBF4D2730 /* AttentionKeeper.swift in Sources */,
+				68A21EBFB0F57989845ECB3A /* AwayAnswers.swift in Sources */,
 				F98DB959DA6E1E9083C92D3C /* BrowserTab.swift in Sources */,
 				E08DD21B11A6482A5E20CB20 /* CalendarEvents.swift in Sources */,
 				DF0BF2DC5FA2C8EE946A7501 /* CanvasAddCommand.swift in Sources */,

@@ -160,6 +160,39 @@ final class CanvasTimeRowsTests: XCTestCase {
         XCTAssertEqual(answers.notWorkTitle, "Mark 3 as Not Work")
     }
 
+    private func away(_ project: String, _ minute: Int, suggesting suggested: String?) -> CanvasTimeStretch {
+        let from = Date(timeIntervalSince1970: 1_790_000_000 + Double(minute) * 60)
+        return .away(AttentionAway(project: project, key: "/P:\(project)", from: from,
+                                   to: from.addingTimeInterval(1200), why: "paused", suggested: suggested))
+    }
+
+    /// The evidence's project goes first, even one the card doesn't list.
+    func testAnAwaysEvidenceIsSuggestedAheadOfWhatItInterrupted() {
+        let answers = CanvasTimeAnswers.offered(for: [away("Self", 0, suggesting: "H-4")], candidates: ["W-1"])
+        XCTAssertEqual(answers.suggested, "H-4")
+        XCTAssertTrue(answers.projects.contains("H-4"))
+        XCTAssertTrue(answers.canBeSitting)
+        XCTAssertEqual(answers.sittingTitle(for: "Carmody"), "Count as a Sitting in Carmody")
+    }
+
+    func testAwaysWhoseEvidenceAgreesShareTheSuggestion() {
+        let answers = CanvasTimeAnswers.offered(for: [away("Self", 0, suggesting: "H-4"),
+                                                      away("W-1", 60, suggesting: "H-4")], candidates: [])
+        XCTAssertEqual(answers.suggested, "H-4")
+        XCTAssertFalse(answers.canBeSitting, "one sitting stands for one away")
+    }
+
+    func testAnAwayWithoutEvidenceAmongOnesWithFallsBackToWhatTheyInterrupted() {
+        let answers = CanvasTimeAnswers.offered(for: [away("W-1", 0, suggesting: "H-4"), away("W-1", 60)],
+                                                candidates: [])
+        XCTAssertEqual(answers.suggested, "W-1")
+    }
+
+    func testOnlyAnAwayCanBeASitting() {
+        XCTAssertFalse(CanvasTimeAnswers.offered(for: [span("W-1", 0)], candidates: ["W-2"]).canBeSitting)
+        XCTAssertEqual(CanvasTimeAnswers.undoName(notWork: false, sitting: true), "Count as a Sitting")
+    }
+
     func testStretchKeysAreDistinctAndStable() {
         let keys = [away("W-1", 0), away("W-1", 60), span("W-1", 0), span("W-2", 0)].map(\.key)
         XCTAssertEqual(Set(keys).count, 4)

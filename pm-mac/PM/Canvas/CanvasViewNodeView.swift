@@ -194,6 +194,9 @@ final class CanvasViewNodeView: CanvasNodeView {
                 onOpenDay: { [weak self] day in
                     guard let self else { return }
                     self.board.addDayCard(pinnedTo: day, beside: self.node.id)
+                },
+                onAnswerAway: { [weak self] away, project, sitting in
+                    self?.count([(away.from, away.to)], for: project, sitting: sitting)
                 }))
         case .tasks(let tasks):
             root = AnyView(CanvasTaskListCard(
@@ -226,8 +229,8 @@ final class CanvasViewNodeView: CanvasNodeView {
                     self?.sittingCardProvider(project: project.projectFolder, session: nil,
                                               title: [project.projectName])
                 },
-                onAnswer: { [weak self] stretches, project in
-                    self?.count(stretches.map { ($0.from, $0.to) }, for: project)
+                onAnswer: { [weak self] stretches, project, sitting in
+                    self?.count(stretches.map { ($0.from, $0.to) }, for: project, sitting: sitting)
                 }))
         }
         let view = NSHostingView(rootView: root.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top))
@@ -244,18 +247,28 @@ final class CanvasViewNodeView: CanvasNodeView {
     /// project's file, so a project's stack is the wrong place; and clearing `lastEditedProject` is
     /// what makes ⌘Z, pressed right after, take back the answer rather than an earlier tick — the
     /// same thing a canvas edit does (`CanvasPaneController.documentChanged`).
-    private func count(_ ranges: [(from: String, to: String)], for project: String?) {
+    ///
+    /// `sitting` writes each stretch into the project's notes as a session too. The notes write is in
+    /// the journal, so ⌘Z reverses it there as well (`journal.undo`): half an undo is worse than none.
+    private func count(_ ranges: [(from: String, to: String)], for project: String?, sitting: Bool = false) {
         var ids: [String] = []
+        var entries: [String] = []
         for range in ranges {
             var input = ApiInput()
             input.from = range.from
             input.to = range.to
             if let project { input.project = project } else { input.notWork = true }
+            if sitting { input.sitting = true }
             do {
                 let result = try PMContract.perform(.timeCount, input)
                 if let data = result.data,
                    let event = try? JSONDecoder().decode(AttentionEvent.self, from: JSONEncoder().encode(data)) {
                     ids.append(event.id)
+                }
+                // The write just made is the journal's newest; nothing else writes on the main thread
+                // between the two.
+                if sitting, let entry = ApiJournal.entries(limit: 1).first, entry.action == "time.count" {
+                    entries.append(entry.id)
                 }
             } catch {
                 Log.write("time answer refused: \(ApiError.from(error).message)")
@@ -263,27 +276,43 @@ final class CanvasViewNodeView: CanvasNodeView {
             }
         }
         reloadTime()
+        AwayWatch.shared.refresh()
         guard !ids.isEmpty else { return }
         let undo = board.store.undoManager
-        undo.registerUndo(withTarget: self) { target in target.withdraw(ids, ranges: ranges, for: project) }
-        undo.setActionName(CanvasTimeAnswers.undoName(notWork: project == nil))
+        undo.registerUndo(withTarget: self) { target in
+            target.withdraw(ids, entries: entries, ranges: ranges, for: project, sitting: sitting)
+        }
+        undo.setActionName(CanvasTimeAnswers.undoName(notWork: project == nil, sitting: sitting))
         board.lastEditedProject = nil
     }
 
     /// Take the answers back. The log is never rewritten: a `withdrawn` for each, and the ranges read
-    /// as they did before (AttentionLog.applyingCounts).
-    private func withdraw(_ ids: [String], ranges: [(from: String, to: String)], for project: String?) {
+    /// as they did before (AttentionLog.applyingCounts). A sitting written with them is reversed through
+    /// the journal, which refuses if the notes have moved on since — and then the sitting stays.
+    private func withdraw(_ ids: [String], entries: [String] = [], ranges: [(from: String, to: String)],
+                          for project: String?, sitting: Bool = false) {
         for id in ids { AttentionLog.withdraw(id, source: "app") }
+        for entry in entries {
+            var input = ApiInput()
+            input.entry = entry
+            do { _ = try PMContract.perform(.journalUndo, input) } catch {
+                Log.write("sitting undo refused: \(ApiError.from(error).message)")
+            }
+        }
         reloadTime()
+        AwayWatch.shared.refresh()
         let undo = board.store.undoManager
-        undo.registerUndo(withTarget: self) { target in target.count(ranges, for: project) }
-        undo.setActionName(CanvasTimeAnswers.undoName(notWork: project == nil))
+        undo.registerUndo(withTarget: self) { target in target.count(ranges, for: project, sitting: sitting) }
+        undo.setActionName(CanvasTimeAnswers.undoName(notWork: project == nil, sitting: sitting))
         board.lastEditedProject = nil
     }
 
     private func reloadTime() {
-        guard case .time(let time) = model else { return }
-        time.reload()
+        switch model {
+        case .time(let time): time.reload()
+        case .day(let day): day.reload()
+        default: break
+        }
     }
 
     /// What a Search card's field says, kept on the node as one undoable change — when it's different.

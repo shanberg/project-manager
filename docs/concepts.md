@@ -255,7 +255,8 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - A folder belongs to a project by `pm-folders` in its frontmatter, else by a folder name spelling its title. Counting an away for a project claims the busy folders nobody has.
 - In Folio, aways also carry calendar evidence: timed events of projects with `pm-events`. A meeting is the suggestion ahead of an agent.
 - An away whose agent evidence names only the project it interrupted, with no other project's meeting, is counted to it as estimated, without asking.
-- `time.count` with `sitting` also writes a session at the away's start.
+- `time.count` with `sitting` also writes a session at the away's start; `session.list` marks it `counted`.
+- Aways show in: the menubar (dot, newest, N More Today), the project window's titlebar chip (Count and Switch), the Time card, and the Day card (hatched bands).
 - `time.spent`, `time.aways`, `time.count`; `pm time [aways|count [--sitting]]`.
 
 ## Master project

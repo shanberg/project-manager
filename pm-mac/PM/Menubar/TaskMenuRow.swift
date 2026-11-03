@@ -108,15 +108,24 @@ struct MenubarTitleContent: View {
     let project: String
     let move: FocusMove
     let moveToken: Int
+    /// An away today nobody has answered: a dot on the mark (docs/away-time.md).
+    var away = false
 
     private var titleFont: Font { Font(NSFont.menuBarFont(ofSize: 0)) }
 
     var body: some View {
         HStack(spacing: 5) {
-            if let icon, ProjectIconMark.canDraw(icon) {
-                ProjectIconMark(icon: icon, size: 13, tint: tint.map { Color(nsColor: $0) })
-            } else {
-                Image(nsImage: ring)   // template ring tints to the label color; a stale (colored) ring draws as-is
+            Group {
+                if let icon, ProjectIconMark.canDraw(icon) {
+                    ProjectIconMark(icon: icon, size: 13, tint: tint.map { Color(nsColor: $0) })
+                } else {
+                    Image(nsImage: ring)   // template ring tints to the label color; a stale (colored) ring draws as-is
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if away {
+                    Circle().fill(Color(nsColor: .systemOrange)).frame(width: 5, height: 5).offset(x: 2, y: -1)
+                }
             }
             if let task {
                 taskView(task)

@@ -365,6 +365,26 @@ extension TimeCountTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: notesURL.path))
     }
 
+    /// The Day card draws a sitting that stands for a counted away as counted, and only that one.
+    func testTheSittingAnAnswerWroteIsMarkedCounted() throws {
+        try writeNotes()
+        _ = try countAsSitting(at(11), at(12))
+        let day = DoneRange(start: Calendar.current.startOfDay(for: at(9)),
+                            end: Calendar.current.startOfDay(for: at(9)).addingTimeInterval(86_400))
+        let list = try sessionList(in: day, projects: ["W-001"])
+        XCTAssertEqual(list.sittings.map(\.startTime), ["9:00 AM", "11:00 AM", "4:00 PM"])
+        XCTAssertEqual(list.sittings.map { $0.counted == true }, [false, true, false])
+    }
+
+    func testAWithdrawnAnswerIsNotMarked() throws {
+        try writeNotes()
+        let result = try countAsSitting(at(11), at(12))
+        AttentionLog.withdraw(try decode(AttentionEvent.self, XCTUnwrap(result.data)).id)
+        let day = DoneRange(start: Calendar.current.startOfDay(for: at(9)),
+                            end: Calendar.current.startOfDay(for: at(9)).addingTimeInterval(86_400))
+        XCTAssertFalse(try sessionList(in: day, projects: ["W-001"]).sittings.contains { $0.counted == true })
+    }
+
     // MARK: session.start at
 
     private func start(at moment: Date, label: String? = nil) throws -> ApiResult {

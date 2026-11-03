@@ -356,9 +356,11 @@ enum CanvasTimeStretch: Equatable {
 /// **One menu for aways and spans alike**, because both answers are the same event: "this stretch was
 /// that project's, or wasn't work". Counting an away fills a gap; counting a span moves it.
 struct CanvasTimeAnswers: Equatable {
-    /// The project offered first, at the top of the menu: the one every away in the selection
-    /// interrupted, when the selection is only aways and they agree. Nil otherwise.
+    /// The project offered first, at the top of the menu, when the selection is only aways and they
+    /// agree: the one their evidence suggests, else the one they interrupted. Nil otherwise.
     let suggested: String?
+    /// Count as a Sitting is offered: one away, which a sitting can stand for.
+    let canBeSitting: Bool
     /// Every project it could be counted for, in the order given, less any it would be a no-op for.
     let projects: [String]
     /// How many stretches the answer is for — what the titles say when it's more than one.
@@ -374,9 +376,19 @@ struct CanvasTimeAnswers: Equatable {
         projects.removeAll { folder in
             !stretches.isEmpty && stretches.allSatisfy { !$0.isAway && $0.project == folder }
         }
+        let aways = stretches.compactMap { stretch -> AttentionAway? in
+            if case .away(let away) = stretch { return away } else { return nil }
+        }
+        let allAways = !stretches.isEmpty && aways.count == stretches.count
+        let evidence = Set(aways.compactMap(\.suggested))
         let interrupted = Set(stretches.map(\.project))
-        let suggested = stretches.allSatisfy(\.isAway) && interrupted.count == 1 ? interrupted.first : nil
+        let suggested = !allAways ? nil
+            : evidence.count == 1 && aways.allSatisfy({ $0.suggested != nil }) ? evidence.first
+            : interrupted.count == 1 ? interrupted.first : nil
+        // The evidence's project may be one the card doesn't list; it's still the answer to offer.
+        for folder in aways.compactMap(\.suggested) where !projects.contains(folder) { projects.append(folder) }
         return CanvasTimeAnswers(suggested: suggested.flatMap { projects.contains($0) ? $0 : nil },
+                                 canBeSitting: allAways && aways.count == 1,
                                  projects: projects, count: stretches.count)
     }
 
@@ -390,6 +402,11 @@ struct CanvasTimeAnswers: Equatable {
 
     var notWorkTitle: String { count > 1 ? "Mark \(count) as Not Work" : "Not Work" }
 
+    /// "Count as a Sitting in Website".
+    func sittingTitle(for title: String) -> String { "Count as a Sitting in \(title)" }
+
     /// The Edit menu's name for the answer, for ⌘Z.
-    static func undoName(notWork: Bool) -> String { notWork ? "Mark Not Work" : "Count Time" }
+    static func undoName(notWork: Bool, sitting: Bool = false) -> String {
+        notWork ? "Mark Not Work" : sitting ? "Count as a Sitting" : "Count Time"
+    }
 }

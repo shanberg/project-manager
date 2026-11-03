@@ -200,6 +200,8 @@ enum CanvasTimeGrid {
             case sitting(SittingEntry)
             case done(DoneItem)
             case event(ProjectEvent)
+            /// A stretch nobody was at the keys, still to be answered (docs/away-time.md).
+            case away(AttentionAway)
         }
         let id: String
         let minute: Int?
@@ -210,8 +212,8 @@ enum CanvasTimeGrid {
     /// with no time first, as the list has it ("Earlier"), and an all-day event with them. An event that
     /// began the day before is on the rail from midnight. A sitting and an event at the same minute: the
     /// event first, since it was on the calendar before the sitting began.
-    static func railEntries(_ list: SittingList, events: [ProjectEvent] = [], day: String? = nil,
-                            calendar: Calendar = .current) -> [RailEntry] {
+    static func railEntries(_ list: SittingList, events: [ProjectEvent] = [], aways: [AttentionAway] = [],
+                            day: String? = nil, calendar: Calendar = .current) -> [RailEntry] {
         var entries = day.map { day in
             events.on(day, calendar: calendar).map {
                 RailEntry(id: "event/\($0.id)", minute: $0.startMinute(on: day, calendar: calendar), kind: .event($0))
@@ -219,6 +221,16 @@ enum CanvasTimeGrid {
         } ?? []
         entries += list.sittings.map {
             RailEntry(id: $0.id, minute: CanvasTimeGrid.minutes(of: $0.startTime), kind: .sitting($0))
+        }
+        // On the day it began, at the minute it began: between the sitting it interrupted and the next.
+        entries += aways.filter { away in
+            guard let day else { return true }
+            guard let from = away.fromDate else { return false }
+            let parts = calendar.dateComponents([.year, .month, .day], from: from)
+            return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0) == day
+        }.map {
+            RailEntry(id: "away/\($0.from)", minute: CanvasTimeGrid.minutes(ofInstant: $0.from, calendar: calendar),
+                      kind: .away($0))
         }
         entries += list.elsewhere.enumerated().map { index, item in
             RailEntry(id: "done/\(index)/\(item.at)", minute: CanvasTimeGrid.minutes(ofInstant: item.at, calendar: calendar),
