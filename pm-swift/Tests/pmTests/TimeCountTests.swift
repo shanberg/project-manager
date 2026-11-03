@@ -255,3 +255,146 @@ final class AttentionLogTailTests: XCTestCase {
         XCTAssertEqual(AttentionLog.events(since: start), [])
     }
 }
+
+// MARK: - Count as a sitting, and the folders an answer claims
+
+extension TimeCountTests {
+    private var notesURL: URL {
+        projects.appendingPathComponent("W-001 Website/docs/Notes - Website.md")
+    }
+
+    private func writeNotes(_ sessions: [String] = ["### Tue, Sep 1, 2026 4:00 PM", "Afternoon.",
+                                                    "", "### Tue, Sep 1, 2026 9:00 AM", "Morning."]) throws {
+        try FileManager.default.createDirectory(at: notesURL.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try (["---", "pm-color: blue", "---", "# Website", "", "## Sessions", ""] + sessions + [""])
+            .joined(separator: "\n").write(to: notesURL, atomically: true, encoding: .utf8)
+    }
+
+    private func notes() throws -> String { try String(contentsOf: notesURL, encoding: .utf8) }
+
+    private func headings() throws -> [String] {
+        try notes().components(separatedBy: "\n").filter { $0.hasPrefix("### ") }
+    }
+
+    /// A Claude Code transcript in the test's transcripts folder, busy every minute of `from`..<`to`.
+    private func transcript(_ folder: String, _ from: Date, _ to: Date) throws {
+        let dir = root.appendingPathComponent("transcripts/x")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let lines = stride(from: from.timeIntervalSince1970, to: to.timeIntervalSince1970, by: 60).map {
+            #"{"type":"assistant","cwd":"\#(folder)","timestamp":"\#(DoneLog.timestamp(Date(timeIntervalSince1970: $0)))"}"#
+        }
+        let url = dir.appendingPathComponent(UUID().uuidString + ".jsonl")
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.creationDate: from], ofItemAtPath: url.path)
+    }
+
+    private func countAsSitting(_ from: Date, _ to: Date, dryRun: Bool = false) throws -> ApiResult {
+        var input = ApiInput()
+        input.from = DoneLog.timestamp(from)
+        input.to = DoneLog.timestamp(to)
+        input.project = "W-001"
+        input.sitting = true
+        return try performApi("time.count", input, options: ApiOptions(dryRun: dryRun, source: "test"))
+    }
+
+    func testASittingIsPlacedAmongTheOthersByTime() throws {
+        try writeNotes()
+        let result = try countAsSitting(at(11), at(12, 30))
+        XCTAssertEqual(try headings(), ["### Tue, Sep 1, 2026 4:00 PM", "### Tue, Sep 1, 2026 11:00 AM",
+                                        "### Tue, Sep 1, 2026 9:00 AM"])
+        XCTAssertTrue(try notes().contains("### Tue, Sep 1, 2026 11:00 AM\n1h 30m counted.\n\n### Tue, Sep 1, 2026 9:00 AM"))
+        XCTAssertTrue(result.summary.contains("as a session"), result.summary)
+        XCTAssertEqual(AttentionLog.events().map(\.event), [.counted], "the time is counted as well")
+        guard case .object(let fields)? = result.data else { return XCTFail("no data") }
+        XCTAssertEqual(fields["session"].flatMap { if case .object(let s) = $0 { return s["index"] } else { return nil } },
+                       .number(1))
+        XCTAssertNotNil(try decode(AttentionEvent.self, XCTUnwrap(result.data)).id, "still decodes as the event")
+    }
+
+    func testASittingOlderThanEveryOtherGoesLast() throws {
+        try writeNotes()
+        _ = try countAsSitting(at(7), at(8))
+        XCTAssertEqual(try headings().last, "### Tue, Sep 1, 2026 7:00 AM")
+        XCTAssertTrue(try notes().hasSuffix("Morning.\n\n### Tue, Sep 1, 2026 7:00 AM\n1h counted.\n"))
+    }
+
+    func testADryRunSittingWritesNothing() throws {
+        try writeNotes()
+        let before = try notes()
+        let result = try countAsSitting(at(11), at(12), dryRun: true)
+        XCTAssertTrue(result.summary.hasPrefix("Would count "), result.summary)
+        XCTAssertEqual(try notes(), before)
+        XCTAssertEqual(AttentionLog.events(), [])
+    }
+
+    func testNotWorkCantBeASitting() throws {
+        var input = ApiInput()
+        input.from = DoneLog.timestamp(at(11))
+        input.to = DoneLog.timestamp(at(12))
+        input.notWork = true
+        input.sitting = true
+        XCTAssertThrowsError(try performApi("time.count", input)) { error in
+            XCTAssertEqual((error as? ApiError)?.detail, .string("sitting"))
+        }
+        XCTAssertEqual(AttentionLog.events(), [])
+    }
+
+    /// Answering an away an unclaimed folder's agent was busy in gives the project that folder.
+    func testAnAnswerClaimsTheFoldersNobodyHad() throws {
+        try writeNotes()
+        try transcript("/dev/designs", at(11), at(12))
+        let result = try count(at(11), at(12), project: "W-001")
+        XCTAssertTrue(result.summary.contains("gave it /dev/designs"), result.summary)
+        let written = try notes()
+        XCTAssertTrue(written.contains(#"pm-folders: ["/dev/designs"]"#), written)
+        _ = try count(at(11), at(12), project: "W-001")
+        XCTAssertEqual(projectAgentFolders(rawText: try notes()), ["/dev/designs"], "claimed once")
+    }
+
+    func testTheSittingSaysWhichFoldersWereBusy() throws {
+        try writeNotes()
+        try transcript("/dev/designs", at(11), at(12))
+        _ = try countAsSitting(at(11), at(12))
+        XCTAssertTrue(try notes().contains("### Tue, Sep 1, 2026 11:00 AM\n1h counted. Claude Code in /dev/designs.\n"))
+    }
+
+    /// A project with no notes isn't given a file just because an answer was counted for it.
+    func testAPlainAnswerLeavesAProjectWithoutNotesAlone() throws {
+        _ = try count(at(11), at(12), project: "W-001")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: notesURL.path))
+    }
+
+    // MARK: session.start at
+
+    private func start(at moment: Date, label: String? = nil) throws -> ApiResult {
+        var input = ApiInput()
+        input.project = "W-001"
+        input.at = DoneLog.timestamp(moment)
+        input.label = label
+        return try performApi("session.start", input)
+    }
+
+    func testStartingASessionAtATimePlacesIt() throws {
+        try writeNotes()
+        let result = try start(at: at(13, 5), label: "Review")
+        XCTAssertEqual(try headings()[1], "### Tue, Sep 1, 2026 1:05 PM · Review")
+        guard case .object(let fields)? = result.data else { return XCTFail("no data") }
+        XCTAssertEqual(fields["index"], .number(1))
+        XCTAssertEqual(fields["isoDate"], .string("2026-09-01"))
+    }
+
+    func testASessionCantStartInTheFuture() throws {
+        try writeNotes()
+        XCTAssertThrowsError(try start(at: Date().addingTimeInterval(3600))) { error in
+            XCTAssertEqual((error as? ApiError)?.detail, .string("at"))
+        }
+    }
+
+    /// Another day sorts by its date first: a sitting from last week goes below this week's.
+    func testAnEarlierDaySortsBelow() throws {
+        try writeNotes()
+        _ = try start(at: Calendar.current.date(byAdding: .day, value: -3, to: at(22))!)
+        XCTAssertEqual(try headings().last, "### Sat, Aug 29, 2026 10:00 PM")
+    }
+}

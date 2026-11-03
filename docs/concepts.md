@@ -17,7 +17,7 @@ Where a doc and the code disagree, this follows the code — see [Mismatches](#m
 ## Notes file
 
 - `docs/Notes - {Title}.md`. The title is the folder name without its `CODE-N ` prefix.
-- Frontmatter keys: `pm-icon`, `pm-icon-recolor`, `pm-color`, `pm-texture` (+ `-reach`, `-strength`, `-pixel`, `-tile`), `pm-events`, `pm-part-of`.
+- Frontmatter keys: `pm-icon`, `pm-icon-recolor`, `pm-color`, `pm-texture` (+ `-reach`, `-strength`, `-pixel`, `-tile`), `pm-events`, `pm-part-of`, `pm-folders`.
 - The first `# ` line is the title.
 - Callouts, in order: `[!summary] Summary`, `[!question] Problem`, `[!info] Goals` (numbered, three slots), `[!info] Approach`. ([templates/notes.md](../templates/notes.md))
 - An area has Summary and Goals. Problem and Approach are kept only if they already hold text.
@@ -49,6 +49,7 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - A session reference is `{date, ordinal, index, digest}`. The digest is of the label and ignores the time. It resolves as hit, relocated (same day) or stale. ([SessionRef.swift](../pm-swift/Sources/PmLib/SessionRef.swift))
 - Sessions with nothing in them (blank lines only) are removed when a project is opened. A session holding only picks is kept. The file's modification time is restored, so the idle window isn't reset.
 - Delete Session is offered only for a session with no tasks.
+- `session.start` with `at` starts a session at a past time, placed among the others by time; untimed sessions count as their day's earliest.
 - `session.backfillTimes` / `pm backfill-times [--write]` dates untimed sessions:
   - from the earliest journal, done-log or pick-log event that day, rounded down to 5 minutes;
   - 9:00 AM when there is no evidence;
@@ -250,7 +251,11 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - A gap of 15 minutes or less, opened by a pause and ended on the same project, counts as work.
 - Away time: gaps of 10 minutes to 4 hours are asked about — the newest in the menubar, all of them in the Time card. Answered with Count for… or Not Work (`time.count`).
 - Apps marked not work (`PMNotWorkApps`) end a span after 60 seconds in front.
-- `time.spent`, `time.aways`, `time.count`; `pm time [aways|count]`.
+- Aways carry agent evidence: the minutes Claude Code transcripts (`~/.claude/projects`) were busy, per folder. Read on demand, never stored.
+- A folder belongs to a project by `pm-folders` in its frontmatter, else by a folder name spelling its title. Counting an away for a project claims the busy folders nobody has.
+- An away whose agent evidence names only the project it interrupted is counted to it as estimated, without asking.
+- `time.count` with `sitting` also writes a session at the away's start.
+- `time.spent`, `time.aways`, `time.count`; `pm time [aways|count [--sitting]]`.
 
 ## Master project
 

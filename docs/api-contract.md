@@ -105,6 +105,17 @@ Where a card *sits*, how big it is and what is tiled stay the app's — they are
 - A `docs` that can't be written gets a text card, as before.
 - `journal.undo` restores the canvas and leaves the document.
 
+`time.aways`, `time.count`, `session.start` (1.24.0) — untracked activity, see [away-time.md](away-time.md#agent-evidence):
+
+- `time.aways`: each away gains `evidence` (`kind` `agent`, `folder`, `project`?, `minutes`) and `suggested`?.
+- `time.aways`: aways an agent's evidence settles are absent; `time.spent` counts them as `inferred`.
+- `time.count`: `sitting: true` (needs `project`) also writes a session at `from`: `<duration> counted.` plus `Claude Code in <folders>.` when any were busy.
+- `time.count` for a project claims busy folders no project has, into its `pm-folders`.
+- `time.count` writes notes only for `sitting` or a claim. That write is journaled; `journal.undo` reverses it and leaves the `counted` event.
+- `time.count` `data`: the event, plus `session` (as `session.start` reports one) and `claimed` (folders) when written.
+- `time.count` refuses `sitting` with `notWork`.
+- `session.start`: `at` (ISO 8601 with a zone, not in the future) always starts a new session, headed with that time, placed among the others by time. `label` names it.
+
 `time.aways`, `time.count` (1.22.0) — see [away-time.md](away-time.md):
 
 - `time.aways`: query. Period fields as `time.spent`, plus `projects`. Returns `AttentionAway[]`: `project`, `key`, `from`, `to`, `seconds`, `why`.

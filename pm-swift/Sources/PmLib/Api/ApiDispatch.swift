@@ -128,6 +128,8 @@ internal func fieldValues(_ input: ApiInput) -> [String: JSONValue?] {
         "from": input.from.map(JSONValue.string),
         "to": input.to.map(JSONValue.string),
         "notWork": input.notWork.map(JSONValue.bool),
+        "sitting": input.sitting.map(JSONValue.bool),
+        "at": input.at.map(JSONValue.string),
     ]
 }
 
@@ -289,6 +291,18 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
 
     // MARK: Sessions
     case "session.start":
+        if let text = input.at {
+            let at = try pastMoment(text, field: "at")
+            return try document(spec, input, options) { rawText in
+                let label = SessionLabel(time: sessionTimeLabel(at), name: input.label ?? "").text
+                guard let made = try sessionInsertPreservingFormat(rawText: rawText, label: label, date: at)
+                else { throw PmError.notesNotFound("## Sessions") }
+                return Outcome(rawText: made.rawText,
+                               note: Phrase(past: "Started a session at \(SessionTimes.clockLabel(at, calendar: .current))",
+                                            future: "start a session at \(SessionTimes.clockLabel(at, calendar: .current))"),
+                               data: try sessionData(in: made.rawText, index: made.sessionIndex))
+            }
+        }
         return try document(spec, input, options) { rawText, lastEdited in
             // "The current session" rather than "today's": the first sitting of a day starts one, and
             // so does coming back to the project after `sessionIdleWindow` — see `SessionWindow.swift`.
@@ -298,16 +312,7 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
                                              forcingNew: input.new == true)
             // Reported either way, so a caller can ask for the current session and use the answer
             // without knowing whether it had to be made — and without formatting a date to find it.
-            let sessions = try parseNotes(markdown: session.rawText).sessions
-            let data: JSONValue = session.sessionIndex < sessions.count
-                ? .object([
-                    "date": .string(sessions[session.sessionIndex].date),
-                    "isoDate": sessionISODate(heading: sessions[session.sessionIndex].date)
-                        .map(JSONValue.string) ?? .null,
-                    "label": .string(sessions[session.sessionIndex].label),
-                    "index": .number(Double(session.sessionIndex)),
-                  ])
-                : .null
+            let data = try sessionData(in: session.rawText, index: session.sessionIndex)
             guard session.started else {
                 return Outcome(rawText: session.rawText,
                                note: .statement("The current session was already there"), data: data)
@@ -548,6 +553,10 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         }
         let stretch = "\(SessionTimes.clockLabel(from, calendar: .current))–\(SessionTimes.clockLabel(to, calendar: .current)) (\(durationLabel(to.timeIntervalSince(from))))"
         if input.notWork == true {
+            guard input.sitting != true else {
+                throw ApiError(.invalidField, "A stretch that wasn't work can't be a session.",
+                               detail: .string("sitting"))
+            }
             var data: JSONValue?
             if !options.dryRun {
                 data = try JSONValue.encoding(AttentionLog.counted(from: from, to: to, source: options.source))
@@ -567,17 +576,54 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         // The key is spelled the way `project.focus` and `focused.json` spell it, so the answer and the
         // spans either side of it are one project, not two that happen to share a name.
         let key = "\((path as NSString).deletingLastPathComponent):\(folder)"
-        var data: JSONValue?
-        if !options.dryRun {
-            let event = AttentionLog.counted(from: from, to: to, project: folder, key: key,
-                                             source: options.source)
-            data = try JSONValue.encoding(event)
+        let title = projectTitle(fromFolderName: folder)
+        // The notes first: a refused write (a stale revision, no Sessions) must not leave an answer
+        // behind it. Journaled like any notes write, so `journal.undo` takes back the sitting and the
+        // claim; the `counted` event is withdrawn separately, as before.
+        //
+        // Without `sitting`, the notes are only touched when there's a folder to claim, and a project
+        // with no notes file isn't given one just for that.
+        var claimed: [String] = []
+        var session: JSONValue?
+        var written: ApiResult?
+        let sitting = input.sitting == true
+        var claims: [String] = []
+        if !sitting, let notesPath = (try? resolveNotesPath(projectPath: path)) ?? nil,
+           let text = try? String(contentsOfFile: notesPath, encoding: .utf8) {
+            claims = try countedNotes(rawText: text, folder: folder, from: from, to: to, sitting: false).claimed
         }
-        return ApiResult(action: spec.name,
-                         summary: Phrase(past: "Counted \(stretch) for \(projectTitle(fromFolderName: folder))",
-                                         future: "count \(stretch) for \(projectTitle(fromFolderName: folder))")
-                             .sentence(dryRun: options.dryRun),
-                         dryRun: options.dryRun, data: data)
+        if sitting || !claims.isEmpty {
+            written = try document(spec, input, options) { rawText in
+                let made = try countedNotes(rawText: rawText, folder: folder, from: from, to: to,
+                                            sitting: sitting)
+                claimed = made.claimed
+                session = try made.session.map { try sessionData(in: made.rawText, index: $0) }
+                return Outcome(rawText: made.rawText,
+                               note: Phrase(past: "Counted \(stretch) for \(title)",
+                                            future: "count \(stretch) for \(title)"))
+            }
+        }
+        var data: JSONValue = .object([:])
+        if !options.dryRun {
+            data = try JSONValue.encoding(AttentionLog.counted(from: from, to: to, project: folder, key: key,
+                                                               source: options.source))
+        }
+        // The event as before, so a caller that only reads it still can; what the notes gained beside it.
+        if case .object(var fields) = data {
+            if let session { fields["session"] = session }
+            if !claimed.isEmpty { fields["claimed"] = .array(claimed.map(JSONValue.string)) }
+            data = .object(fields)
+        }
+        var past = "Counted \(stretch) for \(title)", future = "count \(stretch) for \(title)"
+        if session != nil { past += " as a session"; future += " as a session" }
+        if !claimed.isEmpty {
+            let folders = claimed.joined(separator: ", ")
+            past += ", and gave it \(folders)"; future += ", and give it \(folders)"
+        }
+        var result = written ?? ApiResult(action: spec.name, summary: "", dryRun: options.dryRun)
+        result.summary = Phrase(past: past, future: future).sentence(dryRun: options.dryRun)
+        result.data = options.dryRun && data == .object([:]) ? nil : data
+        return result
 
     case "task.search":
         let scope = input.scope ?? "all"
@@ -1029,6 +1075,56 @@ private func metadata(_ spec: ApiActionSpec, _ options: ApiOptions, path: String
 // MARK: - The document pipeline
 
 /// What an action did to the markdown.
+/// The sitting at `index`, as `session.start` reports it: its date, ISO date, label and index.
+private func sessionData(in rawText: String, index: Int) throws -> JSONValue {
+    let sessions = try parseNotes(markdown: rawText).sessions
+    guard index < sessions.count else { return .null }
+    return .object([
+        "date": .string(sessions[index].date),
+        "isoDate": sessionISODate(heading: sessions[index].date).map(JSONValue.string) ?? .null,
+        "label": .string(sessions[index].label),
+        "index": .number(Double(index)),
+    ])
+}
+
+/// A moment that has happened, ISO 8601 with a zone — with the minute's grace `time.count` gives.
+private func pastMoment(_ text: String, field: String) throws -> Date {
+    guard let date = DoneLog.date(text) else {
+        throw ApiError(.invalidField, "\(field) needs to be ISO 8601 with a zone, like 2026-09-23T11:07:00Z.",
+                       detail: .string(field))
+    }
+    guard date <= Date().addingTimeInterval(60) else {
+        throw ApiError(.invalidField, "\(field) is in the future.", detail: .string(field))
+    }
+    return date
+}
+
+/// What answering `from`..`to` for a project writes into its notes, beside the `counted` event: the
+/// agent folders busy in it that no project claims yet, claimed for this one (`pm-folders`), and, when
+/// asked, a sitting that began at `from`. Nil rawText change when there's neither.
+private func countedNotes(rawText: String, folder: String, from: Date, to: Date,
+                          sitting: Bool) throws -> (rawText: String, claimed: [String], session: Int?) {
+    let away = AttentionLog.candidate(from: from, to: to, project: folder, key: "", why: "counted",
+                                      agent: agentMoments(around: DoneRange(start: from, end: to)))
+    let needed = AttentionLog.minutesNeeded(for: to.timeIntervalSince(from))
+    let claimed = away.evidence.filter { $0.project == nil && $0.minutes >= needed }.map(\.folder)
+    var out = rawText
+    if !claimed.isEmpty {
+        let existing = projectAgentFolders(rawText: out)
+        let all = existing + claimed.filter { !existing.contains($0) }
+        out = settingFrontmatterValue(AgentFolders.frontmatterKey,
+                                      to: "[" + all.map { "\"\($0)\"" }.joined(separator: ", ") + "]", in: out)
+    }
+    guard sitting else { return (out, claimed, nil) }
+    let ours = away.evidence.filter { $0.project == folder || claimed.contains($0.folder) }.map(\.folder)
+    var body = "\(durationLabel(to.timeIntervalSince(from))) counted."
+    if !ours.isEmpty { body += " Claude Code in \(ours.joined(separator: ", "))." }
+    guard let made = try sessionInsertPreservingFormat(rawText: out, label: sessionTimeLabel(from),
+                                                       date: from, body: body)
+    else { throw PmError.notesNotFound("## Sessions") }
+    return (made.rawText, claimed, made.sessionIndex)
+}
+
 struct Outcome {
     var rawText: String
     var relocated: Bool = false

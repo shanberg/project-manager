@@ -70,6 +70,25 @@ Covers tasks: idle-time handling; "no focus" apps (called not-work apps here).
 - Answers: **Count for <focused project>**, **Other project…**, **Not work**.
 - "Not work" only hides the away from lists; totals unchanged.
 
+### Agent evidence
+
+Added 2026-11-02 (untracked activity, steps 1–2). Real log, Oct 2026: Claude Code busy inside 122 of 157 unanswered aways (137 h of 165 h); Folio's own logs inside none.
+
+- Source: Claude Code transcripts, `~/.claude/projects/**/*.jsonl` (`AgentActivity.swift`). `PM_AGENT_TRANSCRIPTS` overrides the folder.
+- Read per line: `timestamp` (to the minute) and the session's `cwd`. Nothing else.
+- Read on demand, cached per process, topped up from where the last read stopped. Never written anywhere.
+- A transcript is read only when changed since the range began and created before it ended.
+- Evidence per away: folder, its project, busy minutes. A minute counts when any of it is inside the away.
+- Folder → project (`AgentFolders`):
+  - `pm-folders` in a notes file's frontmatter: a flow list or one path. A folder inside a claimed one is claimed. Deepest claim wins.
+  - Else a folder name, or any folder above it short of `~`, spelling a project's title (case and punctuation ignored).
+  - A title two projects share matches neither.
+- Suggested: the project with the most busy minutes, when at least 20% of the away (`agentCoverage`). Its folders' minutes are added, each minute once.
+- Joined: neighbouring aways ≤ 5 min apart (`awayJoin`) with the same suggestion, or the same folders when neither has one.
+- Counted without asking: suggestion = the interrupted project, no other folder at 20%, 10 min–4 h. Becomes an `inferred` span (estimated). Not listed. Any answer over it wins.
+- Answering an away for a project claims the busy folders nobody has (≥ 20%), into that project's `pm-folders`.
+- Count as a Sitting (`time.count` `sitting`): a session at the away's start, placed by time, body `3h 44m counted. Claude Code in ~/dev/x.`
+
 ### Where aways appear
 
 - Menubar menu: top item, today's newest unanswered away only (`latestAway`). Absent when there's none.
@@ -154,7 +173,9 @@ Contract 1.22.0. Details in [api-contract.md](api-contract.md).
 - `time.count` — mutation. `from`, `to` (ISO 8601 with a zone), exactly one of `project` / `notWork`.
   - `notWork` is explicit because every other action reads a missing `project` as the focused one.
   - Returns the `counted` event, for undo.
-- `pm time aways [today|yesterday|week]` — clock times for today; day + time for other ranges.
+- `pm time aways [today|yesterday|week]` — clock times for today; day + time for other ranges. Shows the suggestion (`→ P?`) and busy folders.
+- 1.24.0: `time.aways` evidence and suggestion; `time.count` `sitting` and folder claims; `session.start` `at`. See [api-contract.md](api-contract.md).
+- `pm time count … <project> --sitting`.
 - `pm time count <from> <to> (<project> | --not-work) [--day today|yesterday|YYYY-MM-DD] [--dry-run]`
   - `from` / `to`: `11:07`, `14:05`, `2:05pm`, or ISO 8601 with a zone.
 - `time.spent`, `pm time`, Copy as Text mark counted time `(counted)`, as they mark `(inferred)`.
@@ -176,7 +197,8 @@ Contract 1.22.0. Details in [api-contract.md](api-contract.md).
 ## Tests
 
 - `pm-swift/Tests/pmTests/AttentionLogTests.swift`: derivation — spans, counts, gaps, quiet, aways.
-- `pm-swift/Tests/pmTests/TimeCountTests.swift`: `time.count`, `time.aways`, `parseMoment`.
+- `pm-swift/Tests/pmTests/TimeCountTests.swift`: `time.count` (sittings, claims), `time.aways`, `session.start` `at`, `parseMoment`.
+- `pm-swift/Tests/pmTests/AgentActivityTests.swift`: transcript reading, folder → project.
 - `pm-mac/PMViewTests/AttentionKeeperTests.swift`: the timekeeper on an injected clock, idle and list.
 
 ## Privacy facts
@@ -184,6 +206,7 @@ Contract 1.22.0. Details in [api-contract.md](api-contract.md).
 - Log is local, unsynced, plain NDJSON.
 - Log holds only: project, time, reason, source, focused task text.
 - No app names, window titles, keystrokes, or screen content.
+- Reads Claude Code transcripts for timestamps and working folders only; stores none of it.
 
 ## Build order
 

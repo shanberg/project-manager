@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.23.0"
+public let apiContractVersion = "1.24.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -169,7 +169,9 @@ public enum ApiRegistry {
                       summary: "Start a session, unless the current one is still open.",
                       fields: [project, ApiField("label", .string, "Optional label for the session."),
                                ApiField("new", .boolean,
-                                        "Start a new session even if the current one is still open. An empty one is still reused.")]),
+                                        "Start a new session even if the current one is still open. An empty one is still reused."),
+                               ApiField("at", .string,
+                                        "When the session began, ISO 8601 with a zone, not in the future. Always starts a new session, placed among the others by time.")]),
         ApiActionSpec(name: "session.note", tier: .mutation,
                       summary: "Append a note to the current session, starting one if needed.",
                       fields: [project, ApiField("prose", .string, required: true, "The note.")]),
@@ -239,7 +241,9 @@ public enum ApiRegistry {
                                ApiField("project", .string,
                                         "The project the time was. Give this or `notWork`, not both."),
                                ApiField("notWork", .boolean,
-                                        "The time wasn't work. Give this or `project`, not both.")],
+                                        "The time wasn't work. Give this or `project`, not both."),
+                               ApiField("sitting", .boolean,
+                                        "Also write it into the project's notes as a session that began at `from`, saying how long was counted and which agent folders were busy. Needs `project`.")],
                       oneOf: [["project", "notWork"]]),
 
         // MARK: Queries

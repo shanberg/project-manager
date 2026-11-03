@@ -102,7 +102,14 @@ private func runTimeAways(args: [String]) {
             let sameDay = Calendar.current.isDate(from, inSameDayAs: to)
             let when = "\(clock.string(from: from))–\(sameDay ? clockOnly.string(from: to) : clock.string(from: to))"
             let length = durationLabel(away.seconds).padding(toLength: 7, withPad: " ", startingAt: 0)
-            print("  \(when)  \(length)  \(projectTitle(fromFolderName: away.project))")
+            var line = "  \(when)  \(length)  \(projectTitle(fromFolderName: away.project))"
+            // What else was going on, so the answer can be given here: the suggestion, then the folders.
+            if let suggested = away.suggested, suggested != away.project {
+                line += " → \(projectTitle(fromFolderName: suggested))?"
+            }
+            let folders = away.evidence.map { "\($0.folder) \($0.minutes)m" }
+            if !folders.isEmpty { line += "  (Claude Code: \(folders.joined(separator: ", ")))" }
+            print(line)
         }
     } catch {
         stderr(String(describing: error))
@@ -110,14 +117,16 @@ private func runTimeAways(args: [String]) {
     }
 }
 
-/// `pm time count <from> <to> (<project> | --not-work) [--day today|yesterday|YYYY-MM-DD] [--dry-run]`
+/// `pm time count <from> <to> (<project> [--sitting] | --not-work) [--day today|yesterday|YYYY-MM-DD] [--dry-run]`
 ///
-/// Answer for a stretch: it was this project's, or it wasn't work. `from` and `to` are clock times on
+/// Answer for a stretch: it was this project's, or it wasn't work. `--sitting` also writes it into the
+/// project's notes as a session that began at `from`. `from` and `to` are clock times on
 /// `--day` (today by default) — `11:07`, `2:05pm` — or ISO 8601 with a zone.
 private func runTimeCount(args: [String]) {
-    let usage = "Usage: pm time count <from> <to> (<project> | --not-work) [--day today|yesterday|YYYY-MM-DD] [--dry-run]"
+    let usage = "Usage: pm time count <from> <to> (<project> [--sitting] | --not-work) [--day today|yesterday|YYYY-MM-DD] [--dry-run]"
     var dryRun = false
     var notWork = false
+    var sitting = false
     var day = Date()
     var words: [String] = []
     var index = 0
@@ -125,6 +134,7 @@ private func runTimeCount(args: [String]) {
         switch args[index] {
         case "--dry-run": dryRun = true
         case "--not-work": notWork = true
+        case "--sitting": sitting = true
         case "--day" where index + 1 < args.count:
             index += 1
             guard let range = try? DoneRange.resolve(period: args[index] == "yesterday" ? "yesterday" : nil,
@@ -138,7 +148,7 @@ private func runTimeCount(args: [String]) {
         }
         index += 1
     }
-    guard words.count >= 2, notWork == (words.count == 2) else {
+    guard words.count >= 2, notWork == (words.count == 2), !(notWork && sitting) else {
         stderr(usage)
         exit(1)
     }
@@ -154,6 +164,7 @@ private func runTimeCount(args: [String]) {
         input.notWork = true
     } else {
         input.project = words.dropFirst(2).joined(separator: " ")
+        if sitting { input.sitting = true }
     }
     do {
         let result = try performApi("time.count", input, options: ApiOptions(dryRun: dryRun, source: "cli"))

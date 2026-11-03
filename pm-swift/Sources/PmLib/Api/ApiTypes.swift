@@ -187,6 +187,10 @@ public struct ApiInput: Codable, Equatable {
     public var to: String?
     /// `time.count`: the stretch wasn't work. Given instead of `project`, never beside it.
     public var notWork: Bool?
+    /// `time.count`: also write the stretch into the project's notes as a sitting that began at `from`.
+    public var sitting: Bool?
+    /// `session.start`: when the sitting began, ISO 8601 with a zone. Always a new sitting, placed by time.
+    public var at: String?
 
     public init() {}
 }

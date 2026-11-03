@@ -346,6 +346,12 @@ final class ApiTests: XCTestCase {
         // *optional* one passes vacuously — an unset optional never trips `missingField` — which is
         // how `kind` came to be published with two allowed values and validated against neither.
         // `testEveryPublishedFieldIsValidated` is the half that catches those.
+        //
+        // The time actions would otherwise read every real Claude Code transcript, which this doesn't
+        // need and which costs minutes.
+        setenv("PM_AGENT_TRANSCRIPTS", FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString).path, 1)
+        defer { unsetenv("PM_AGENT_TRANSCRIPTS") }
         for spec in ApiRegistry.actions where spec.tier != .affordance {
             // Given every field a value, nothing should be reported missing. What fails here is a
             // field the validator can't see, not a field the caller didn't send.

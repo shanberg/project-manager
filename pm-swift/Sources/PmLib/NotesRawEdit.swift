@@ -648,6 +648,78 @@ public func sessionAddPreservingFormat(rawText: String, label: String, date: Dat
     return lines.joined(separator: "\n")
 }
 
+/// A sitting that began at `date`, put where it belongs in time rather than at the top: above the
+/// first sitting that began before it, below every one that began after. Sittings are newest first.
+/// A sitting with no time is taken to be its day's earliest, as the views draw it ("Earlier").
+///
+/// What counting an away as a sitting writes, and `session.start` given `at`: a sitting can begin in
+/// the past, and the top of the list is the wrong place for one that began before this morning's.
+/// `body` is written under the heading. Returns the document and the new sitting's index, or nil when
+/// there's no `## Sessions`.
+public func sessionInsertPreservingFormat(rawText: String, label: String, date: Date,
+                                          body: String = "") throws -> (rawText: String, sessionIndex: Int)? {
+    var lines = rawText.components(separatedBy: "\n")
+    guard let sectionLine = lines.firstIndex(where: { matches(rawSessionsSectionPattern, $0) }) else {
+        return nil
+    }
+    let headings = rawSessionHeadingLineNumbers(lines)
+    let sessions = try parseNotes(markdown: rawText).sessions
+    guard sessions.count == headings.count else { return nil }
+
+    let day = formatSessionDate(date)
+    let heading = label.isEmpty ? "### \(day)" : "### \(day) \(label)"
+    let bodyLines = body.isEmpty ? [] : body.components(separatedBy: "\n")
+    let key = SittingOrder(day: sessionISODate(heading: day) ?? "", minutes: SittingOrder.minutes(sessionTimeLabel(date)))
+
+    if let older = sessions.firstIndex(where: { SittingOrder(of: $0) < key }) {
+        lines.insert(contentsOf: [heading] + bodyLines + [""], at: headings[older])
+        return (lines.joined(separator: "\n"), older)
+    }
+    if let last = headings.last {
+        // After the oldest sitting, ahead of any blank lines it trails.
+        var end = rawSessionEnd(lines, headingLine: last)
+        while end > last + 1, lines[end - 1].trimmingCharacters(in: .whitespaces).isEmpty { end -= 1 }
+        lines.insert(contentsOf: [""] + [heading] + bodyLines, at: end)
+        return (lines.joined(separator: "\n"), sessions.count)
+    }
+    var block = ["", heading] + bodyLines
+    let next = sectionLine + 1
+    if next < lines.count, !lines[next].isEmpty { block.append("") }
+    lines.insert(contentsOf: block, at: next)
+    return (lines.joined(separator: "\n"), 0)
+}
+
+/// Where a sitting falls in time: its day, then the minute its heading says it began, or -1 for one
+/// that doesn't say.
+private struct SittingOrder: Comparable {
+    var day: String
+    var minutes: Int
+
+    init(day: String, minutes: Int?) {
+        self.day = day
+        self.minutes = minutes ?? -1
+    }
+
+    init(of session: Session) {
+        self.init(day: sessionISODate(heading: session.date) ?? "", minutes: session.startTime.flatMap(Self.minutes))
+    }
+
+    /// `2:13 PM` as minutes past midnight.
+    static func minutes(_ clock: String) -> Int? {
+        let parts = clock.uppercased().replacingOccurrences(of: " ", with: "")
+        guard parts.count >= 6, let colon = parts.firstIndex(of: ":") else { return nil }
+        let pm = parts.hasSuffix("PM")
+        guard pm || parts.hasSuffix("AM"), let hour = Int(parts[..<colon]),
+              let minute = Int(parts[parts.index(after: colon)..<parts.index(parts.endIndex, offsetBy: -2)]),
+              (1...12).contains(hour), (0..<60).contains(minute) else { return nil }
+        return (hour % 12 + (pm ? 12 : 0)) * 60 + minute
+    }
+
+    static func < (a: SittingOrder, b: SittingOrder) -> Bool {
+        a.day != b.day ? a.day < b.day : a.minutes < b.minutes
+    }
+}
+
 // MARK: - Session-level edits (format-preserving)
 //
 // The panel surfaces sessions (the dated "### ..." entries under "## Sessions") as first-class

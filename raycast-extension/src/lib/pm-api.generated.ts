@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.23.0";
+export const API_CONTRACT_VERSION = "1.24.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -248,6 +248,8 @@ export interface SessionRenameInput {
 
 /** Start a session, unless the current one is still open. */
 export interface SessionStartInput {
+  /** When the session began, ISO 8601 with a zone, not in the future. Always starts a new session, placed among the others by time. */
+  at?: string;
   /** Optional label for the session. */
   label?: string;
   /** Start a new session even if the current one is still open. An empty one is still reused. */
@@ -530,6 +532,8 @@ export interface TimeCountInput {
   notWork?: boolean;
   /** The project the time was. Give this or `notWork`, not both. */
   project?: string;
+  /** Also write it into the project's notes as a session that began at `from`, saying how long was counted and which agent folders were busy. Needs `project`. */
+  sitting?: boolean;
   /** Where it ends, exclusive, ISO 8601 with a zone. Not in the future. */
   to: string;
 }
