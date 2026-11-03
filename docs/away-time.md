@@ -93,6 +93,24 @@ Added 2026-11-02 (untracked activity, steps 1–2). Real log, Oct 2026: Claude C
   - A meeting at ≥ 20% is the suggestion, ahead of any agent.
   - Never counted without asking. Another project's meeting at ≥ 20% stops an agent's automatic count.
 
+### Browser signals
+
+Decided 2026-11-03 (mock round 1), built the same day. `BrowserWatch.swift`, `PmLib/BrowserLinks.swift`.
+
+- Front tab read every 30 s, and when an app comes to the front, while a browser is in front and the Mac had input in the last 2 min.
+  - Over Apple Events, as Go to Project reads it. Only browsers already allowed: asked with `AEDeterminePermissionToAutomateTarget`, no prompt.
+- Not-work sites: Settings › Time › Not-Work Sites, by domain, subdomains included (`PMNotWorkSites`).
+  - In front ≥ 60 s → the span ends `elsewhere` from when it came up, as a not-work app. Silent. A not-work app and site in a row are one stretch.
+- Another project's link: the tab is on a page in another project's `## Links` (host + link path a prefix of the tab's; a bare-host link names no page), or a Slack channel it links (by channel ID; message links count).
+  - Deepest match wins; a tie between projects is nobody's. Archived projects aren't read.
+  - In front 5 min while tracked on another project → the titlebar chip: "<P>? · 12m", in the away chip's place, ahead of it.
+  - Menu: Switch to <P> (counts from when the tab came to the front, focuses <P>, opens its window); Stay on <focused> (until the tab changes); Don't Ask About This Link While on <focused> (`PMBrowserQuietLinks`).
+  - Time card: a span of another project with ≥ 5 min of <P>'s link in front is marked "<link> · <P>?"; <P> is suggested for it. Kept in memory for 36 h; gone on quit.
+- A Slack channel no project links: minutes per day in `PMSlackChannelSightings` (channel ID → day → minutes, 14 days).
+  - 5 min on 2 different days → chip "Link #channel?": Link #channel to <focused> (`notes.addLink`, label `#name`); Link to Other Project ▸; Not a Project Channel (`PMSlackIgnoredChannels`).
+- Menubar: nothing for browser signals.
+- DMs are never a project's channel.
+
 ### Where aways appear
 
 - Menubar menu: top item, today's newest unanswered away (`todaysAways`). Absent when there's none.
@@ -227,6 +245,7 @@ Contract 1.22.0. Details in [api-contract.md](api-contract.md).
 - Log holds only: project, time, reason, source, focused task text.
 - No app names, window titles, keystrokes, or screen content.
 - Reads Claude Code transcripts for timestamps and working folders only; stores none of it.
+- Reads the browser's front tab address and title; compares and drops them. Stored: Slack channel IDs with minutes per day, ignored channels, and quiet link pairs, in `UserDefaults`.
 
 ## Build order
 

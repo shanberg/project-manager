@@ -231,7 +231,8 @@ final class CanvasViewNodeView: CanvasNodeView {
                 },
                 onAnswer: { [weak self] stretches, project, sitting in
                     self?.count(stretches.map { ($0.from, $0.to) }, for: project, sitting: sitting)
-                }))
+                },
+                spanHint: { span in BrowserWatch.shared.sighting(for: span).map { ($0.label, $0.project) } }))
         }
         let view = NSHostingView(rootView: root.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top))
         view.setAccessibilityLabel(accessibilityFallback)

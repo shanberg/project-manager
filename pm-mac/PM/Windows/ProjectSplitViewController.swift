@@ -578,6 +578,10 @@ final class ProjectSplitViewController: NSSplitViewController {
             guard let self else { return }
             AwayAnswers.menu(for: away, store: self.store, switching: true).popUpBelow(view)
         }
+        pane.header.showBrowserMenu = { [weak self] view in
+            guard let self else { return }
+            BrowserWatch.shared.menu(store: self.store)?.popUpBelow(view)
+        }
         return pane
     }
 

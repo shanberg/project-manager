@@ -1,4 +1,5 @@
 import AppKit
+import PmLib
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -10,6 +11,9 @@ struct TimeSettingsView: View {
     @AppStorage(AttentionKeeper.showsDurationsKey) private var showsSittingDuration = false
     @State private var apps: [String] = AttentionKeeper.notWorkApps
     @State private var selection: Set<String> = []
+    @State private var sites: [String] = AttentionKeeper.notWorkSites
+    @State private var siteSelection: Set<String> = []
+    @State private var newSite = ""
 
     var body: some View {
         Form {
@@ -17,6 +21,12 @@ struct TimeSettingsView: View {
                 notWorkList
             } header: {
                 Text("Not-Work Apps")
+            }
+
+            Section {
+                notWorkSites
+            } header: {
+                Text("Not-Work Sites")
             }
 
             Section {
@@ -31,6 +41,56 @@ struct TimeSettingsView: View {
         }
         .formStyle(.grouped)
         .scenePadding()
+    }
+
+    // MARK: Sites
+
+    /// Domains, by the same rules as the apps: select and −, or type one and Return. A browser's front
+    /// tab on one of these for a minute ends the span (docs/away-time.md, Browser signals).
+    @ViewBuilder
+    private var notWorkSites: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            List(selection: $siteSelection) {
+                ForEach(sites, id: \.self) { site in
+                    Text(site).tag(site)
+                }
+            }
+            .frame(minHeight: 90)
+            .contextMenu(forSelectionType: String.self) { chosen in
+                Button(chosen.count > 1 ? "Remove \(chosen.count) Sites" : "Remove") { removeSites(chosen) }
+            }
+            .onDeleteCommand { removeSites(siteSelection) }
+
+            Divider()
+            HStack(spacing: 6) {
+                TextField("youtube.com", text: $newSite)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(addSite)
+                Button("Add", action: addSite)
+                    .disabled(NotWorkSites.normalized(newSite).isEmpty)
+                Button { removeSites(siteSelection) } label: {
+                    Image(systemName: "minus").frame(width: 24, height: 20)
+                }
+                .buttonStyle(.borderless)
+                .disabled(siteSelection.isEmpty)
+                .help(siteSelection.count > 1 ? "Remove \(siteSelection.count) sites" : "Remove the site")
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func addSite() {
+        let domain = NotWorkSites.normalized(newSite)
+        guard !domain.isEmpty else { return }
+        if !sites.contains(domain) { sites.append(domain) }
+        newSite = ""
+        AttentionKeeper.notWorkSites = sites
+    }
+
+    private func removeSites(_ chosen: Set<String>) {
+        sites.removeAll { chosen.contains($0) }
+        siteSelection.subtract(chosen)
+        AttentionKeeper.notWorkSites = sites
     }
 
     // MARK: The list

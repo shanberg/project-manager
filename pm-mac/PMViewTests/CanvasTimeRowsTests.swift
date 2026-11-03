@@ -193,6 +193,17 @@ final class CanvasTimeRowsTests: XCTestCase {
         XCTAssertEqual(CanvasTimeAnswers.undoName(notWork: false, sitting: true), "Count as a Sitting")
     }
 
+    /// Another project's link in front during the spans: that project is suggested for them.
+    func testABrowserHintIsSuggestedForSpans() {
+        let answers = CanvasTimeAnswers.offered(for: [span("W-1", 0), span("W-1", 120)], candidates: ["W-1"],
+                                                hinted: "W-4")
+        XCTAssertEqual(answers.suggested, "W-4")
+        XCTAssertEqual(answers.projects, ["W-4"], "offered though the card doesn't list it")
+        XCTAssertFalse(answers.canBeSitting)
+        XCTAssertEqual(CanvasTimeAnswers.offered(for: [away("W-1", 0)], candidates: [], hinted: "W-4").suggested, "W-1",
+                       "a hint is about spans, not aways")
+    }
+
     func testStretchKeysAreDistinctAndStable() {
         let keys = [away("W-1", 0), away("W-1", 60), span("W-1", 0), span("W-2", 0)].map(\.key)
         XCTAssertEqual(Set(keys).count, 4)

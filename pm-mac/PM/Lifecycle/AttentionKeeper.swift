@@ -42,8 +42,12 @@ final class AttentionKeeper {
     /// When the paused span ended — its back-dated last input. A resumption needs input after it.
     private var pausedAt: Date?
     private var timer: Timer?
-    /// When an app on the not-work list came to the front, while one still is.
+    /// When an app on the not-work list came to the front, while one still is — or a site on the
+    /// not-work list, while that's the browser's front tab (`BrowserWatch`).
     private var elsewhereSince: Date?
+    /// Which of the two it is, so one ending doesn't end the other.
+    private var appIsElsewhere = false
+    private var siteIsElsewhere = false
     /// Whether the log already says so for this stretch in the app — as the pause itself, or as a
     /// marker inside a pause that was already going.
     private var markedElsewhere = false
@@ -55,6 +59,14 @@ final class AttentionKeeper {
     static var notWorkApps: [String] {
         get { UserDefaults.standard.stringArray(forKey: notWorkAppsKey) ?? [] }
         set { UserDefaults.standard.set(newValue, forKey: notWorkAppsKey) }
+    }
+
+    /// Sites that mean you've stopped working, by domain (`NotWorkSites`), beside the apps.
+    static let notWorkSitesKey = "PMNotWorkSites"
+
+    static var notWorkSites: [String] {
+        get { UserDefaults.standard.stringArray(forKey: notWorkSitesKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: notWorkSitesKey) }
     }
 
     /// How long a not-work app has to stay in front before it ends the span. A glance — checking a
@@ -129,9 +141,21 @@ final class AttentionKeeper {
     /// Whether the app in front is one you've said isn't work. Only the answer is kept — never which
     /// app it was, here or in the log.
     func frontmostChanged(to bundle: String?) {
-        if let bundle, notWork().contains(bundle) {
-            // One not-work app to another is the same stretch, so the first one's moment stands.
-            if elsewhereSince == nil { elsewhereSince = clock() }
+        appIsElsewhere = bundle.map { notWork().contains($0) } ?? false
+        updateElsewhere(since: clock())
+    }
+
+    /// The browser's front tab is a site on the not-work list, since `since` — or isn't any more. Only
+    /// the answer is kept, never the site (docs/away-time.md, Browser signals).
+    func notWorkSite(_ isFront: Bool, since: Date) {
+        siteIsElsewhere = isFront
+        updateElsewhere(since: since)
+    }
+
+    private func updateElsewhere(since: Date) {
+        if appIsElsewhere || siteIsElsewhere {
+            // One not-work app or site to another is the same stretch, so the first one's moment stands.
+            if elsewhereSince == nil { elsewhereSince = since }
         } else {
             elsewhereSince = nil
             markedElsewhere = false

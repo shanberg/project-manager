@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AttentionKeeper.shared.focusedTask = { [weak self] in self?.store.focusedTodo?.text }
         AttentionKeeper.shared.start()
         CalendarEvents.supplyAwayEvidence()
+        BrowserWatch.shared.start()
 
         // Local notifications for stale focused tasks and due dates (asks permission on first launch).
         notifier = NotificationManager(store: store)

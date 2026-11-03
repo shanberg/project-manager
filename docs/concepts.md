@@ -250,7 +250,8 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Spans are measured, estimated or counted. A span belongs to the day it began and is split at midnight.
 - A gap of 15 minutes or less, opened by a pause and ended on the same project, counts as work.
 - Away time: gaps of 10 minutes to 4 hours are asked about — the newest in the menubar, all of them in the Time card. Answered with Count for… or Not Work (`time.count`).
-- Apps marked not work (`PMNotWorkApps`) end a span after 60 seconds in front.
+- Apps marked not work (`PMNotWorkApps`) end a span after 60 seconds in front; so do sites marked not work (`PMNotWorkSites`), as the browser's front tab.
+- In Folio, another project's link (a page in its `## Links`, or a Slack channel it links) in front for 5 minutes puts "Switch to …?" in the titlebar chip, and marks the span on the Time card. A Slack channel no project links, seen 5 minutes on two days, is offered for linking.
 - Aways carry agent evidence: the minutes Claude Code transcripts (`~/.claude/projects`) were busy, per folder. Read on demand, never stored.
 - A folder belongs to a project by `pm-folders` in its frontmatter, else by a folder name spelling its title. Counting an away for a project claims the busy folders nobody has.
 - In Folio, aways also carry calendar evidence: timed events of projects with `pm-events`. A meeting is the suggestion ahead of an agent.

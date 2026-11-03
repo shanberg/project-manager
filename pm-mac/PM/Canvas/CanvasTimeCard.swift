@@ -122,6 +122,9 @@ struct CanvasTimeCard: View {
     /// Answer for some stretches: they were this project's (a folder), or weren't work (nil); and
     /// whether to write the one away as a sitting too.
     var onAnswer: ([CanvasTimeStretch], String?, Bool) -> Void = { _, _, _ in }
+    /// Another project's link that was in front during a span, and whose it is (`BrowserWatch`). Nil:
+    /// no marks.
+    var spanHint: ((AttentionSpan) -> (label: String, project: String)?)?
 
     /// The stretches picked, by `CanvasTimeStretch.key` — the aways, and the spans of any project
     /// that's open. Answers act on all of them at once (docs/away-time.md).
@@ -392,6 +395,18 @@ struct CanvasTimeCard: View {
                 }
             }
             Spacer(minLength: 4)
+            if case .span(let span) = stretch, let hint = spanHint?(span) {
+                // Five minutes or more of another project's page while this was counted here.
+                HStack(spacing: 3) {
+                    Image(systemName: "safari").font(.system(size: 8.5 * zoom))
+                    Text("\(hint.label) · \(title(of: hint.project))?").lineLimit(1)
+                }
+                .font(.system(size: 10 * zoom))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 0.5)
+                .background(Capsule().fill(Color.accentColor.opacity(0.12)))
+            }
             if case .span(let span) = stretch {
                 if span.basis == .inferred { mark("estimated") }
                 if span.basis == .counted { mark("counted") }
@@ -438,7 +453,8 @@ struct CanvasTimeCard: View {
 
     @ViewBuilder private func answers(for picked: [CanvasTimeStretch]) -> some View {
         let offered = CanvasTimeAnswers.offered(for: picked,
-                                                candidates: model.report?.projects.map(\.projectFolder) ?? [])
+                                                candidates: model.report?.projects.map(\.projectFolder) ?? [],
+                                                hinted: sharedHint(of: picked))
         if let suggested = offered.suggested {
             Button(offered.countTitle(for: title(of: suggested))) { answer(picked, suggested) }
             if offered.canBeSitting {
@@ -454,6 +470,15 @@ struct CanvasTimeCard: View {
         }
         Divider()
         Button(offered.notWorkTitle) { answer(picked, nil) }
+    }
+
+    /// The project every picked span's hint names, when they agree.
+    private func sharedHint(of picked: [CanvasTimeStretch]) -> String? {
+        let hints = picked.map { stretch -> String? in
+            if case .span(let span) = stretch { return spanHint?(span)?.project } else { return nil }
+        }
+        guard let first = hints.first ?? nil, hints.allSatisfy({ $0 == first }) else { return nil }
+        return first
     }
 
     private func answer(_ picked: [CanvasTimeStretch], _ project: String?, sitting: Bool = false) {

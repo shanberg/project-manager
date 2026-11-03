@@ -98,6 +98,38 @@ final class AttentionKeeperTests: XCTestCase {
         XCTAssertEqual(at(last), now)
     }
 
+    // MARK: Not-work sites (docs/away-time.md, Browser signals)
+
+    /// A site that isn't work ends the span from when it came to the front, as an app does.
+    func testANotWorkSiteEndsTheSpanWhenItCameUp() {
+        working()
+        wait(minutes(5)); touch()
+        let opened = now
+        keeper.notWorkSite(true, since: opened)
+        wait(minutes(1.5)); touch()
+        keeper.check()
+        XCTAssertEqual(last?.why, "elsewhere")
+        XCTAssertEqual(at(last), opened)
+    }
+
+    /// Leaving the site for the editor is a return, but leaving it for a not-work app isn't.
+    func testASiteAndAnAppAreOneStretch() {
+        working()
+        keeper.notWorkSite(true, since: now)
+        wait(minutes(2)); touch()
+        keeper.check()
+        keeper.frontmostChanged(to: news)
+        keeper.notWorkSite(false, since: now)
+        wait(minutes(3)); touch()
+        keeper.check()
+        XCTAssertEqual(log.map(\.event), [.began, .ended], "still elsewhere: the app is")
+        keeper.frontmostChanged(to: "com.example.editor")
+        touch()
+        wait(3)
+        keeper.check()
+        XCTAssertEqual(last?.why, "resumed")
+    }
+
     // MARK: Not-work apps
 
     /// A glance counts as the work it interrupted: nothing is written.

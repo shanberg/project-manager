@@ -275,6 +275,9 @@ final class CanvasHeaderModel {
     /// they need. Nil, and there's no chip: a satellite or a workspace window doesn't ask.
     @ObservationIgnored
     var showAwayMenu: ((AttentionAway, NSView) -> Void)?
+    /// The browser hint's menu (`BrowserWatch`), set beside `showAwayMenu`.
+    @ObservationIgnored
+    var showBrowserMenu: ((NSView) -> Void)?
     @ObservationIgnored
     var pageBack: () -> Void = {}
     @ObservationIgnored
@@ -521,6 +524,46 @@ struct CanvasAwayCapsule: View {
                            help: "\(AwayAnswers.heading(away)) — count it, or not", tint: Color(nsColor: .systemOrange)) { view in
                 model.showAwayMenu?(away, view)
             }
+        }
+    }
+}
+
+/// What the browser's front tab says, as a chip in the away chip's place: another project's link in
+/// front — "Design Editor? · 12m" — or a Slack channel worth linking (docs/away-time.md, Browser signals).
+struct CanvasBrowserCapsule: View {
+    var model: CanvasHeaderModel
+    let hint: BrowserWatch.Hint
+    @Environment(\.controlActiveState) private var controlActiveState
+
+    var body: some View {
+        HeaderCapsule(chrome: HeaderChrome(active: controlActiveState), glass: "away") {
+            HeaderMenuChip(symbol: symbol, title: title, help: help, tint: .accentColor) { view in
+                model.showBrowserMenu?(view)
+            }
+        }
+    }
+
+    private var symbol: String {
+        if case .linkChannel = hint { return "number" }
+        return "safari"
+    }
+
+    private var title: String {
+        switch hint {
+        case .otherProject(let project, _, let since):
+            let minutes = max(1, Int(Date().timeIntervalSince(since) / 60))
+            return "\(AwayAnswers.title(project, limit: 24))? · \(minutes)m"
+        case .linkChannel(_, let name, _):
+            return "Link \(name)?"
+        }
+    }
+
+    private var help: String {
+        switch hint {
+        case .otherProject(let project, let label, _):
+            return "\(label) is \(AwayAnswers.title(project))'s — switch to it, or stay"
+        case .linkChannel(_, let name, _):
+            return "\(name) isn't linked to a project yet"
         }
     }
 }

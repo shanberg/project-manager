@@ -367,7 +367,11 @@ struct CanvasTimeAnswers: Equatable {
     let count: Int
 
     /// `candidates` is the card's own projects, in its order; the aways' projects are added to them.
-    static func offered(for stretches: [CanvasTimeStretch], candidates: [String]) -> CanvasTimeAnswers {
+    ///
+    /// `hinted` is another project whose link was in front during every picked span (`BrowserWatch`):
+    /// suggested for them, as an away's evidence is for it.
+    static func offered(for stretches: [CanvasTimeStretch], candidates: [String],
+                        hinted: String? = nil) -> CanvasTimeAnswers {
         var projects: [String] = []
         for folder in candidates + stretches.filter(\.isAway).map(\.project) where !projects.contains(folder) {
             projects.append(folder)
@@ -382,11 +386,14 @@ struct CanvasTimeAnswers: Equatable {
         let allAways = !stretches.isEmpty && aways.count == stretches.count
         let evidence = Set(aways.compactMap(\.suggested))
         let interrupted = Set(stretches.map(\.project))
-        let suggested = !allAways ? nil
+        let allSpans = !stretches.isEmpty && aways.isEmpty
+        let suggested = allSpans ? hinted
+            : !allAways ? nil
             : evidence.count == 1 && aways.allSatisfy({ $0.suggested != nil }) ? evidence.first
             : interrupted.count == 1 ? interrupted.first : nil
         // The evidence's project may be one the card doesn't list; it's still the answer to offer.
-        for folder in aways.compactMap(\.suggested) where !projects.contains(folder) { projects.append(folder) }
+        for folder in aways.compactMap(\.suggested) + (allSpans ? [hinted].compactMap { $0 } : [])
+        where !projects.contains(folder) { projects.append(folder) }
         return CanvasTimeAnswers(suggested: suggested.flatMap { projects.contains($0) ? $0 : nil },
                                  canBeSitting: allAways && aways.count == 1,
                                  projects: projects, count: stretches.count)
