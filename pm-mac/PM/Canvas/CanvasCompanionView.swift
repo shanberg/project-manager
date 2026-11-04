@@ -169,6 +169,9 @@ struct CanvasCompanionView: View {
             }
             .contentShape(Rectangle())
             .gesture(moving)
+            // First to the width, before the spacer: both flex, so without this they halved what the
+            // buttons left, and the name truncated with half the header empty beside it.
+            .layoutPriority(1)
             Spacer(minLength: 4)
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
