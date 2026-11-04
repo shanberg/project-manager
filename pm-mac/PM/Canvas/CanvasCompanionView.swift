@@ -25,6 +25,10 @@ final class CanvasCompanionState {
     /// The header's way to the project's window: Show Window in the dock, as its other surfaces say it.
     var openTitle = "Show Project"
     var openHelp = "Show the project's window"
+    /// Drawn as the window you are working in, whatever AppKit says: the dock flyout's. A panel there is
+    /// never main, so the card always read as a window in the background — its accent grey, its
+    /// heading dimmed — though it is only ever up because you are looking at it.
+    var appearsActive = false
 
     var showsPill: Bool { asPill && !pillOpen }
 
@@ -62,6 +66,7 @@ struct CanvasCompanionView: View {
     var onOpenProject: () -> Void = {}
 
     @State private var closing: Task<Void, Never>?
+    @Environment(\.controlActiveState) private var controlActiveState
 
     var body: some View {
         Group {
@@ -140,6 +145,7 @@ struct CanvasCompanionView: View {
                 .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(width: CanvasCompanionPlacement.width, height: state.fixedHeight)
+        .environment(\.controlActiveState, state.appearsActive ? .key : controlActiveState)
         .background { if state.drawsGlass { CompanionGlass(tint: state.tint, cornerRadius: 14) } }
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }

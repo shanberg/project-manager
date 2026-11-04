@@ -73,6 +73,8 @@ final class CanvasSatelliteDock: NSObject {
     private let card = CanvasDockCard()
     private var flyoutKey: String?
     private var hideFlyout: DispatchWorkItem?
+    /// Menus open while the flyout is up (`flyoutHolds`).
+    private var menusOpen = 0
     private var refreshQueued = false
 
     static let margin: CGFloat = 6
@@ -266,6 +268,9 @@ final class CanvasSatelliteDock: NSObject {
     private func openFlyout(for key: String, beside mark: NSView) {
         hideFlyout?.cancel()
         guard let anchor = mark.window, group(key) != nil else { return }
+        // Working in the card, it stays where it is: another mark under the pointer on the way
+        // somewhere is not a request for that project's card.
+        if card.isEngaged, let flyout, flyout.isVisible, flyoutKey != nil { return }
         let flyout = self.flyout ?? makeFlyout()
         if flyoutKey != key {
             flyoutKey = key
@@ -286,12 +291,31 @@ final class CanvasSatelliteDock: NSObject {
 
     /// The pointer has left. Not while the card has the keyboard: you are working in it, wherever the
     /// pointer goes, and it goes when the keyboard does (`windowDidResignKey`).
+    ///
+    /// Nor while a menu is open: a session's menu is drawn over and beyond the flyout, so the pointer
+    /// leaves the flyout to choose from it, and the flyout went before Edit Note could open the note.
+    /// Asked again when the hide comes due, since the card may have taken the keyboard in between.
     private func scheduleFlyoutHide() {
         hideFlyout?.cancel()
-        guard flyout?.isKeyWindow != true else { return }
-        let work = DispatchWorkItem { [weak self] in self?.closeFlyout() }
+        guard !flyoutHolds else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.flyoutHolds else { return }
+            self.closeFlyout()
+        }
         hideFlyout = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    /// The flyout stays though the pointer has left it: the card has the keyboard, or a menu is open.
+    private var flyoutHolds: Bool {
+        flyout?.isKeyWindow == true || menusOpen > 0
+    }
+
+    /// A menu has closed: the flyout goes if nothing else holds it and the pointer is not on it.
+    private func menuClosed() {
+        menusOpen = max(0, menusOpen - 1)
+        guard let flyout, flyout.isVisible, !flyout.frame.contains(NSEvent.mouseLocation) else { return }
+        scheduleFlyoutHide()
     }
 
     private func closeFlyout() {
@@ -301,6 +325,7 @@ final class CanvasSatelliteDock: NSObject {
         CanvasDockTip.shared.hide()
         flyout?.orderOut(nil)
         flyoutKey = nil
+        menusOpen = 0
         card.release()
     }
 
@@ -316,6 +341,23 @@ final class CanvasSatelliteDock: NSObject {
         panel.contentView = hover
         card.panel = panel
         card.onDismiss = { [weak self] in self?.closeFlyout() }
+        // Any menu of the app's, since a SwiftUI menu's NSMenu can't be told from another's; counted
+        // only while the flyout is up, so the menu bar's menus at other times leave it alone.
+        NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil,
+                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.flyout?.isVisible == true else { return }
+                self.menusOpen += 1
+                self.hideFlyout?.cancel()
+            }
+        }
+        NotificationCenter.default.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil,
+                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.menusOpen > 0 else { return }
+                self.menuClosed()
+            }
+        }
         flyout = panel
         return panel
     }

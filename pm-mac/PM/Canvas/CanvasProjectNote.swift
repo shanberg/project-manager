@@ -2104,7 +2104,7 @@ struct ProgressPie: View {
     }
 }
 
-/// A sitting's heading on a card: which day it was, in the accent, its name after it, and the date and
+/// A sitting's heading on a card: which day it was, in the text colour, its name after it, and the date and
 /// time it began at the far end — with a hairline under it, so a card of sittings reads as sections of one
 /// document rather than as one list with dates scattered through it. Things' heading, Craft's rule.
 struct SessionHeading: View {
@@ -2116,7 +2116,7 @@ struct SessionHeading: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 // The name, not the label: the label on disk carries the time too, which is said at
                 // the far end with the date rather than run into the name.
-                (Text(heading.day).foregroundStyle(Color.accentColor)
+                (Text(heading.day).foregroundStyle(.primary)
                  + Text(session.name.isEmpty ? "" : " · \(session.name)").foregroundStyle(.secondary)
                     .fontWeight(.regular))
                     .font(FolioType.bodyEmphasis)

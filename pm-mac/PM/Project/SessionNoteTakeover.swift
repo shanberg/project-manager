@@ -17,37 +17,36 @@ private struct BarHeightKey: PreferenceKey {
     }
 }
 
-/// A soft top edge for a scroll area that AppKit, not SwiftUI, owns.
+/// A soft top edge for a scroll area that AppKit, not SwiftUI, owns: a mask on the editor, clear under
+/// the header and fading in down to its edge, so prose scrolled up under the heading goes rather than
+/// being painted over.
 ///
 /// The task column gets this from the system — `scrollEdgeEffectStyle(.soft, for: .top)` on a SwiftUI
 /// `ScrollView` (see `SoftScrollEdges`). The note takeover can't: its content is an `NSTextView` in an
 /// `NSScrollView`, and AppKit's form of the effect (`NSScrollEdgeEffectStyle`) is offered only to
 /// titlebar and split-view accessories, never to a scroll view you hold yourself.
 ///
-/// So: the window's own background, faded out down the strip. Nothing more. This started as
-/// `TitlebarMaterial` under the same fade, which was wrong twice over — the material is *lighter* than
-/// the window background, so instead of disappearing it painted a pale band across the top of the
-/// takeover, and the pills standing on it put a second material inside the first. Window background is
-/// exactly what's behind the prose (the text view draws none of its own), so this is invisible at rest
-/// and does its only job — hiding text that scrolls up into the header — without announcing itself.
+/// **A mask, not a scrim.** This was the window's background faded out over the strip, which is
+/// invisible only on the window background. On the dock flyout's glass, and on any tinted card, it was
+/// a dark bar across the top. Taking the text away instead leaves whatever is behind it showing.
 ///
-/// The far stop is the same colour at zero alpha rather than `.clear`, which in a gradient interpolates
-/// through transparent *black* and leaves a dark bloom halfway down.
-///
-/// Sized by the header, and so measured by it: the strip this fills is exactly `barHeight`, which is
-/// what the editor takes as its text-container inset. The fade happens inside that height rather than
-/// hanging below it, or the prose would start further down than the chrome actually reaches.
-private struct SoftHeaderScrim: View {
-    private var ground: Color { Color(nsColor: .windowBackgroundColor) }
+/// Sized by the header: the strip is exactly `barHeight`, the editor's text-container inset, so the
+/// fade happens inside the height the chrome covers and the prose starts where it always did.
+private struct SoftHeaderMask: View {
+    var height: CGFloat
 
     var body: some View {
-        LinearGradient(
-            stops: [
-                .init(color: ground, location: 0),
-                .init(color: ground, location: 0.55),
-                .init(color: ground.opacity(0), location: 1),
-            ],
-            startPoint: .top, endPoint: .bottom)
+        VStack(spacing: 0) {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .clear, location: 0.55),
+                    .init(color: .black, location: 1),
+                ],
+                startPoint: .top, endPoint: .bottom)
+                .frame(height: height)
+            Color.black
+        }
     }
 }
 
@@ -186,13 +185,12 @@ struct SessionNoteTakeover: View {
                 // stated as one. See `MarkdownTextEditor.measureWidth`.
                 .modifier(ReadableWidth(cap: measure ?? .infinity))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // Prose scrolled up under the heading fades out (`SoftHeaderMask`).
+                .mask(SoftHeaderMask(height: barHeight))
 
-            // The sitting's heading, over a scrim that fades out, so prose scrolled up under it goes
-            // quietly. Cap inside the scrim: the heading stays at the width of the prose it heads, the
-            // scrim spans the pane.
+            // The sitting's heading, at the width of the prose it heads.
             header
                 .modifier(ReadableWidth(cap: measure ?? .infinity))
-                .background(SoftHeaderScrim())
                 .background(GeometryReader { geo in
                     Color.clear.preference(key: BarHeightKey.self, value: geo.size.height)
                 })
@@ -253,7 +251,7 @@ struct SessionNoteTakeover: View {
     /// it's where the two-line "name over detail" pill finally earns its second line: out in the task
     /// column the project's name stands alone, but here the note needs saying *which* session it is,
     /// and the date is the only thing that answers that.
-    /// The sitting's heading, as the card draws it over the sitting — the day in the accent, the name
+    /// The sitting's heading, as the card draws it over the sitting — the day in the text colour, the name
     /// beside it — at the size of a page's title, with the way back above it and a hairline under it.
     /// Opening a note reads as going *into* the heading you double-clicked, the way a Craft page opens
     /// from its block, rather than as a second window's chrome arriving over the card.
@@ -265,7 +263,7 @@ struct SessionNoteTakeover: View {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(heading.day)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                         .fixedSize()
                     labelField

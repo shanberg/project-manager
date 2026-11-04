@@ -123,6 +123,7 @@ final class CanvasDockCard {
 
     private func makeHosting() -> CanvasCompanionHostingView {
         state.drawsGlass = false
+        state.appearsActive = true
         state.openTitle = "Show Window"
         state.openHelp = "Show Window"
         let hosting = CanvasCompanionHostingView(rootView: makeView())
