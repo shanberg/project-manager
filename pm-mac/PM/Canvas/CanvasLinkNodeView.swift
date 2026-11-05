@@ -2113,6 +2113,9 @@ extension CanvasLinkNodeView: WKUIDelegate {
             || (value("isContentEditable") as? Bool ?? false)
             || value("absoluteImageURL") as? URL != nil
             || value("absoluteMediaURL") as? URL != nil
+        if let page = web as? CanvasPageView, let window = page.window {
+            page.hoverMoved(at: page.convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        }
         guard let text = CanvasLinkStatus.text(for: link, flags: flags,
                                                inSpace: currentBoard.opensNewTab != nil) else {
             linkStatus?.show(nil)

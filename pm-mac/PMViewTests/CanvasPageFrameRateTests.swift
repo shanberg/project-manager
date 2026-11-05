@@ -81,6 +81,95 @@ final class CanvasPageDeadSpaceTests: XCTestCase {
     }
 }
 
+/// What the page itself says is under a press in the band: Figma's arrow-cursored buttons, its
+/// canvas, and the header of a panel floating over it are the page's, not dead space.
+@MainActor
+final class CanvasPageUsesTests: XCTestCase {
+    private var window: NSWindow!
+    private var page: CanvasPageView!
+
+    /// 600×300. Top 40pt: a full-width header with a `<button>` at 300–340 and a `role=button` div at
+    /// 360–400. Below it at y 50–90: a floating panel (absolute, inset, Figma's Variables) at 100–300
+    /// whose header is plain, a dialog at 320–420, a canvas at 440–540. A fixed bar touching the right
+    /// edge (Apple Music's header beside its sidebar) is the header's own right 100pt, y 0–40 — under it
+    /// at 560 is blank. The app root is `tabindex=-1`, as an SPA's is.
+    private static let html = """
+        <style>body{margin:0} div,button,canvas{position:absolute;box-sizing:border-box}</style>
+        <div id=root tabindex=-1 style="left:0;top:0;width:600px;height:300px">
+          <div style="left:0;top:0;width:600px;height:40px;position:fixed">
+            <button style="left:300px;top:5px;width:40px;height:30px"></button>
+            <div role=button style="left:360px;top:5px;width:40px;height:30px"></div>
+          </div>
+          <div style="left:500px;top:0;width:100px;height:40px;position:fixed"></div>
+          <div style="left:100px;top:50px;width:200px;height:100px"><div style="left:0;top:0;width:200px;height:40px"></div></div>
+          <div role=dialog style="position:static"><div style="left:320px;top:50px;width:100px;height:40px;position:fixed;right:auto"></div></div>
+          <canvas style="left:440px;top:50px;width:100px;height:40px"></canvas>
+        </div>
+        """
+
+    override func setUpWithError() throws {
+        window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: 600, height: 300),
+                          styleMask: [.borderless], backing: .buffered, defer: false)
+        window.backgroundColor = .windowBackgroundColor
+        page = CanvasPageView(frame: NSRect(x: 0, y: 0, width: 600, height: 300), configuration: WKWebViewConfiguration())
+        window.contentView?.addSubview(page)
+        window.orderBack(nil)
+        page.loadHTMLString(Self.html, baseURL: nil)
+        let end = Date().addingTimeInterval(5)
+        while Date() < end, page.isLoading { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    }
+
+    override func tearDownWithError() throws { window.orderOut(nil) }
+
+    /// `down` from the page's top, in points.
+    private func at(_ x: CGFloat, _ down: CGFloat) -> NSPoint {
+        NSPoint(x: x, y: page.isFlipped ? down : 300 - down)
+    }
+
+    func testControlsCanvasAndFloatingBoxesAreThePages() async {
+        let header = await page.pageUses(at: at(150, 20))
+        XCTAssertFalse(header, "the blank of a full-width header is dead space, under an app's tabindex=-1 root")
+        let besideSidebar = await page.pageUses(at: at(560, 20))
+        XCTAssertFalse(besideSidebar, "a fixed bar touching the right edge is a header")
+        let button = await page.pageUses(at: at(320, 20))
+        XCTAssertTrue(button, "a <button> with the arrow cursor (Figma's toolbar)")
+        let roleButton = await page.pageUses(at: at(380, 20))
+        XCTAssertTrue(roleButton, "role=button")
+        let panel = await page.pageUses(at: at(200, 60))
+        XCTAssertTrue(panel, "the plain header of a panel floating over the page (Figma's Variables)")
+        let dialog = await page.pageUses(at: at(370, 60))
+        XCTAssertTrue(dialog, "inside role=dialog")
+        let canvas = await page.pageUses(at: at(490, 60))
+        XCTAssertTrue(canvas, "a canvas draws its own UI")
+    }
+
+    func testAPressIsDeadSpaceOnlyOnceThePageHasAnsweredForTheLatestHover() {
+        page.dragsWindowFromDeadSpace = { true }
+        XCTAssertFalse(page.pageLeavesDeadSpace(), "no answer yet: the press is the page's")
+        page.hoverMoved(at: at(150, 20))
+        XCTAssertTrue(wait { self.page.pageLeavesDeadSpace() }, "answered: dead space")
+        page.hoverMoved(at: at(320, 20))
+        XCTAssertFalse(page.pageLeavesDeadSpace(), "a new hover: the old answer is for something else")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertFalse(page.pageLeavesDeadSpace(), "a button is the page's")
+        page.hoverMoved(at: at(150, 20))
+        XCTAssertTrue(wait { self.page.pageLeavesDeadSpace() }, "back on the blank: dead space again")
+    }
+
+    func testOutsideALayoutNothingIsAsked() {
+        page.hoverMoved(at: at(150, 20))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertFalse(page.pageLeavesDeadSpace())
+    }
+
+    private func wait(_ done: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(3)
+        while Date() < end, !done() { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        return done()
+    }
+}
+
 /// The speaker: WebKit's own "playing audio" flag, told as it changes (docs/spaces.md).
 @MainActor
 final class CanvasPageAudioTests: XCTestCase {

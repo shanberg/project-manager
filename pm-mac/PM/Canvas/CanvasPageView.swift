@@ -143,13 +143,61 @@ final class CanvasPageView: WKWebView {
         return fromTop >= 0 && fromTop <= Self.deadSpaceBand && bounds.contains(point)
     }
 
+    /// What the page said about the element under the pointer: whether it is the page's to press
+    /// (`pageUses(at:)`), and for which hover report. Asked on each of WebKit's hover reports, because
+    /// the answer comes from the page's process and a press has to be decided the moment it lands.
+    ///
+    /// **Driven by the hover report, not by `mouseMoved`.** WebKit takes the window's moves before an
+    /// override here, or a tracking area of this view's own, hears them: built on those, no point was
+    /// ever asked about and no header moved the window. The hover report is what `hoverIsInteractive`
+    /// already rode on. The answer depends only on the element and its ancestors, so it holds until
+    /// the next report, wherever the pointer is within that element.
+    private var pageAnswer: (hover: Int, uses: Bool)?
+    private var pageQuestion: (hover: Int, point: NSPoint)?
+    private var askingPage = false
+    private var hoverReports = 0
+
+    /// WebKit reported the pointer over something new, at `point` in this view. Called by the card.
+    func hoverMoved(at point: NSPoint) {
+        hoverReports += 1
+        // Anywhere on the page, not only in the band: one element can reach into the band from below
+        // (an app's root), and moving up within it brings no new report to ask on.
+        guard dragsWindowFromDeadSpace() else { return }
+        pageQuestion = (hoverReports, point)
+        guard !askingPage else { return }
+        askingPage = true
+        Task { @MainActor [weak self] in
+            while let self, let next = self.pageQuestion {
+                self.pageQuestion = nil
+                let uses = await self.pageUses(at: next.point)
+                self.pageAnswer = (next.hover, uses)
+            }
+            self?.askingPage = false
+        }
+    }
+
+    /// Whether the page's answer, for the latest hover report, leaves a press dead space. **No answer
+    /// for it is the page's**: a press that came before the page could say goes to the page, because a
+    /// window that moves when you meant a button is worse than a header that didn't grab.
+    func pageLeavesDeadSpace() -> Bool {
+        guard let answer = pageAnswer, answer.hover == hoverReports else { return false }
+        return !answer.uses
+    }
+
     override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
         if dragsWindowFromDeadSpace(), let window,
-           isInDeadSpaceBand(convert(event.locationInWindow, from: nil)),
-           Self.isDeadSpace(cursor: NSCursor.current, interactive: hoverIsInteractive) {
+           isInDeadSpaceBand(point),
+           Self.isDeadSpace(cursor: NSCursor.current, interactive: hoverIsInteractive),
+           pageLeavesDeadSpace() {
             if event.clickCount == 2 { return WindowDragView.titleBarDoubleClick(window) }
             Log.write("window drag from page dead space: \(url?.host() ?? "?")")
             return window.performDrag(with: event)
+        }
+        if dragsWindowFromDeadSpace(), isInDeadSpaceBand(point),
+           Self.isDeadSpace(cursor: NSCursor.current, interactive: hoverIsInteractive) {
+            Log.write("page kept a press in the band: \(url?.host() ?? "?"), "
+                + (pageAnswer?.hover == hoverReports ? "it uses it" : "no answer yet"))
         }
         super.mouseDown(with: event)
     }
@@ -584,6 +632,61 @@ final class CanvasPageView: WKWebView {
         let name = (found["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return PageLink(url: url, name: name?.isEmpty == false ? name : nil)
     }
+
+    /// Whether the press at `point`, in this view's coordinates, is the page's — so not dead space,
+    /// whatever the cursor. What WebKit's cursor and hover report miss:
+    ///
+    /// - **Controls that keep the arrow.** Figma's toolbar buttons don't set `cursor: pointer`, and the
+    ///   hover report only knows links, images, media and fields. So: a `button`, form control,
+    ///   `summary`, `label`, an ARIA widget role, a `tabindex` of 0 or more (-1 is what apps put on
+    ///   whole layout containers), `draggable`, `contenteditable`, or an inline `onclick`, on the
+    ///   element or any ancestor.
+    /// - **Surfaces the page draws its own UI on**: `canvas` (Figma's board), `iframe`, `video`,
+    ///   `embed`, `object`.
+    /// - **A box floating over the page.** Figma's Variables panel is dragged by a header that is
+    ///   blank, arrow-cursored and near the top: a `dialog`, `role=dialog`/`alertdialog`, `aria-modal`,
+    ///   or a fixed or absolute box with a gap to the viewport on its left, its right and its top. A
+    ///   site's header touches at least one of those, as Apple Music's does beside its sidebar.
+    ///
+    /// The same world and shadow-root walk as `link(at:)`. A page that can't answer (no document yet)
+    /// says it uses the press.
+    func pageUses(at point: NSPoint) async -> Bool {
+        let scale = pageZoom * magnification
+        guard scale > 0 else { return true }
+        let y = isFlipped ? point.y : bounds.height - point.y
+        let answer = try? await callAsyncJavaScript(Self.usesScript,
+                                                    arguments: ["x": point.x / scale, "y": y / scale],
+                                                    in: nil, contentWorld: .defaultClient)
+        return answer as? Bool ?? true
+    }
+
+    private static let usesScript = """
+        let el = document.elementFromPoint(x, y);
+        if (!el) return true;
+        while (el.shadowRoot) {
+            const inner = el.shadowRoot.elementFromPoint(x, y);
+            if (!inner || inner === el) break;
+            el = inner;
+        }
+        const used = 'button, input, select, textarea, summary, label, a[href], canvas, iframe, video, '
+            + 'embed, object, [tabindex]:not([tabindex^="-"]), [draggable="true"], [contenteditable=""], '
+            + '[contenteditable="true"], [onclick], [role="button"], [role="link"], [role="menuitem"], '
+            + '[role="menuitemcheckbox"], [role="menuitemradio"], [role="tab"], [role="checkbox"], '
+            + '[role="radio"], [role="switch"], [role="option"], [role="slider"], [role="combobox"], '
+            + '[role="textbox"], [role="spinbutton"], [role="treeitem"], [role="gridcell"]';
+        const floating = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
+        const width = document.documentElement.clientWidth;
+        for (let n = el; n; n = n.parentElement || (n.getRootNode().host ?? null)) {
+            if (n === document.documentElement || n === document.body) break;
+            if (n.matches(used) || n.matches(floating)) return true;
+            const position = getComputedStyle(n).position;
+            if (position === 'fixed' || position === 'absolute') {
+                const r = n.getBoundingClientRect();
+                if (r.left > 1 && r.right < width - 1 && r.top > 1) return true;
+            }
+        }
+        return false;
+        """
 
     private static let linkScript = """
         let el = document.elementFromPoint(x, y);
