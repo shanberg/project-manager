@@ -907,7 +907,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// whichever card holds the page when the lists arrive.
     private func refilterWhenReady(_ view: WKWebView) {
         guard !CanvasContentBlocker.isReady else { return }
-        CanvasContentBlocker.onReady { [weak self, weak view] in
+        CanvasContentBlocker.onReady(first: { [weak self] in self?.boardInSight ?? false }) { [weak self, weak view] in
             guard let self, let view, web === view else { return }
             reapplyFiltering()
         }

@@ -49,7 +49,7 @@ enum CanvasContentBlocker {
     private(set) static var lists: [WKContentRuleList] = []
     private static var names: [String] = []
     private(set) static var isReady = false
-    private static var whenReady: [() -> Void] = []
+    private static var whenReady: [CanvasStaggeredRun.Item] = []
 
     /// The compiled form, which *is* a cache: it is derived from files in the bundle and rebuilt in
     /// about thirteen seconds. Keeping ~80 MB of machine-generated state out of Application Support
@@ -82,8 +82,10 @@ enum CanvasContentBlocker {
     /// seconds to compile and a canvas restored at startup can open well inside that window. A card
     /// built before they were ready has no filtering and would keep none until something else made it
     /// reload; this is how it gets a second chance.
-    static func onReady(_ block: @escaping () -> Void) {
-        if isReady { block() } else { whenReady.append(block) }
+    ///
+    /// Queued blocks run one at a time, `first` ones ahead — see `CanvasStaggeredRun` for why.
+    static func onReady(first: @escaping () -> Bool = { false }, _ block: @escaping () -> Void) {
+        if isReady { block() } else { whenReady.append(.init(first: first, work: block)) }
     }
 
     // MARK: The per-site exception
@@ -109,8 +111,10 @@ enum CanvasContentBlocker {
         CanvasAdvancedRules.prepare()
         await compileWhatWeHave()
         isReady = true
-        for block in whenReady { block() }
+        let queued = whenReady
         whenReady.removeAll()
+        // Its own task, so the canary below isn't held up behind a board of rebuilds.
+        Task { await CanvasStaggeredRun.run(queued) }
         await verify()
         reportIfNothingLoaded()
     }

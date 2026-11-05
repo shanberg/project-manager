@@ -220,6 +220,7 @@ targets:
       - path: PM/Canvas/CanvasTileAlert.swift
       - path: PM/Canvas/CanvasColors.swift
       - path: PM/Canvas/CanvasBlockPolicy.swift
+      - path: PM/Canvas/CanvasStaggeredRun.swift
       - path: PM/Canvas/CanvasSiteSettings.swift
       - path: PM/Canvas/CanvasAddress.swift
       - path: PM/Canvas/CanvasLinkStatus.swift
