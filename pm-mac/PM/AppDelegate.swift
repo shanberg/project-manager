@@ -329,6 +329,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AttentionKeeper.shared.stop()
         Spaces.shared.flush()
         CanvasHistory.flush()
+        CanvasDocSession.finishAll()
     }
 
     /// File ▸ New Space…. docs/spaces.md.

@@ -17,12 +17,16 @@ final class CanvasFileWatch {
     struct Stamp: Equatable {
         let modified: Date
         let size: Int
+        /// A download finishing changes neither the date nor the size — a placeholder already reports
+        /// both — so whether the file is only in the cloud is part of the stamp. See `CloudFile`.
+        let cloudOnly: Bool
 
         init?(_ url: URL) {
             guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
                   let modified = attributes[.modificationDate] as? Date else { return nil }
             self.modified = modified
             size = (attributes[.size] as? NSNumber)?.intValue ?? 0
+            cloudOnly = CloudFile.isCloudOnly(url)
         }
     }
 

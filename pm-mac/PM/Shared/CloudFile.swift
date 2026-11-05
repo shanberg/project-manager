@@ -27,9 +27,12 @@ enum BackgroundFileRead {
     nonisolated static let queue = DispatchQueue(label: "Folio.file-reads", qos: .userInitiated,
                                                  attributes: .concurrent)
 
-    static func read(_ url: URL,
-                     with reader: @escaping @Sendable (URL) -> Data? = { try? Data(contentsOf: $0) },
+    /// How a file is read when the caller doesn't say. A test stands in a slow or stuck one.
+    nonisolated(unsafe) static var reader: @Sendable (URL) -> Data? = { try? Data(contentsOf: $0) }
+
+    static func read(_ url: URL, with reader: (@Sendable (URL) -> Data?)? = nil,
                      then answer: @escaping @MainActor (Data?) -> Void) {
+        let reader = reader ?? Self.reader
         queue.async {
             let data = reader(url)
             DispatchQueue.main.async {

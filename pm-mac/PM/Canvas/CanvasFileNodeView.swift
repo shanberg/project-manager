@@ -166,15 +166,21 @@ final class CanvasFileNodeView: CanvasNodeView {
             }
             return contentChanged()
         }
-        guard let disk = try? String(contentsOf: session.url, encoding: .utf8),
-              disk != session.synced else { return }
-        guard !session.hasUnsavedEdits else {
-            Log.write("\(session.url.lastPathComponent) changed on disk while it had unsaved typing; keeping the typing")
-            return
+        // A write of this session's own still out: the change is probably it, and its landing
+        // acknowledges the new stamp.
+        guard !session.isWriting else { return }
+        BackgroundFileRead.read(session.url) { [weak self, weak session] data in
+            guard let self, let session, document === session, !session.isWriting,
+                  let disk = data.flatMap({ String(data: $0, encoding: .utf8) }),
+                  disk != session.synced else { return }
+            guard !session.hasUnsavedEdits else {
+                Log.write("\(session.url.lastPathComponent) changed on disk while it had unsaved typing; keeping the typing")
+                return
+            }
+            session.adopt(disk)
+            // Into the editor as an edit it knows about, so ⌘Z still lines up — see `replaceFromOutside`.
+            (firstTextView as? ShortcutTextView)?.replaceFromOutside(disk)
         }
-        session.adopt(disk)
-        // Into the editor as an edit it knows about, so ⌘Z still lines up — see `replaceFromOutside`.
-        (firstTextView as? ShortcutTextView)?.replaceFromOutside(disk)
     }
 
     /// What the card says about itself when asked: which file, which heading, and whether PM had to go
@@ -648,8 +654,10 @@ final class CanvasFileNodeView: CanvasNodeView {
             }
             // Only a file that is still nothing — one this card made, with nothing in it to keep, which
             // is also why it isn't sent to the Trash: a Trash full of empty Untitleds is its own litter.
-            if (try? Data(contentsOf: session.url))?.isEmpty == true {
-                try? FileManager.default.removeItem(at: session.url)
+            // On the file's write queue, after the writes, and off main.
+            let url = session.url
+            session.afterWrites {
+                if (try? Data(contentsOf: url))?.isEmpty == true { try FileManager.default.removeItem(at: url) }
             }
             return
         }
@@ -657,20 +665,21 @@ final class CanvasFileNodeView: CanvasNodeView {
               let title = CanvasDocCards.title(from: session.text) else { return }
         let folder = session.url.deletingLastPathComponent()
         let named = CanvasDocCards.available(title, in: folder, except: session.url)
-        do {
-            if named.standardizedFileURL != session.url.standardizedFileURL {
-                try FileManager.default.moveItem(at: session.url, to: named)
-                board.createdFileMoved(from: session.url, to: named)
+        let url = session.url
+        let moves = named.standardizedFileURL != url.standardizedFileURL
+        // The rename waits for the writes, on the file's queue, so it never overtakes the last one.
+        session.afterWrites({
+            if moves { try FileManager.default.moveItem(at: url, to: named) }
+        }) { [weak self] failure in
+            guard let self else { return }
+            if let failure { return Log.write("naming a card's file failed: \(failure)") }
+            if moves { board.createdFileMoved(from: url, to: named) }
+            let path = board.store.resolver.storablePath(for: named) ?? named.path
+            board.store.changeQuietly { doc in
+                guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
+                doc.nodes[index].content = .file(path: path, subpath: nil)
+                doc.nodes[index].extra[CanvasDocCards.untitledKey] = nil
             }
-        } catch {
-            Log.write("naming a card's file failed: \(error)")
-            return
-        }
-        let path = board.store.resolver.storablePath(for: named) ?? named.path
-        board.store.changeQuietly { doc in
-            guard let index = doc.nodes.firstIndex(where: { $0.id == id }) else { return }
-            doc.nodes[index].content = .file(path: path, subpath: nil)
-            doc.nodes[index].extra[CanvasDocCards.untitledKey] = nil
         }
     }
 
@@ -770,72 +779,6 @@ private extension URL {
         var parts = URLComponents(url: self, resolvingAgainstBaseURL: false)
         parts?.fragment = nil
         return parts?.url ?? self
-    }
-}
-
-/// One sitting of writing in a file card: what the file said when you started, what it says now, and
-/// the write that puts the second on disk.
-///
-/// **Written shortly after you stop, and always on the way out.** Every keystroke to disk would be a
-/// file event per character for Obsidian, iCloud and anything else watching the vault; a write only on
-/// stepping out would lose a sitting to a crash. Half a second after the last change is neither.
-@MainActor
-final class CanvasDocSession {
-    let url: URL
-    /// What the file held when you stepped in — the half of "was this ever a card?" that
-    /// `CanvasDocCards` needs besides what it holds now.
-    let opening: String
-    private(set) var text: String
-    /// What the file holds as far as this session knows — what it read, or last wrote. The difference
-    /// between this and `text` is typing not yet on disk.
-    private(set) var synced: String
-    private var pending: DispatchWorkItem?
-    /// Called after each write, so the card's watch can take the write as its own. See
-    /// `CanvasFileWatch.acknowledge`.
-    var onWrite: (() -> Void)?
-
-    /// `text` is the file as just read — off main, by the card. See `CanvasFileNodeView.opening`.
-    init(url: URL, text read: String) {
-        self.url = url
-        opening = read
-        text = read
-        synced = read
-    }
-
-    var hasUnsavedEdits: Bool { text != synced }
-
-    /// Take the file's version as this session's — something else changed it, and nothing here was
-    /// waiting to be written.
-    func adopt(_ disk: String) {
-        pending?.cancel()
-        pending = nil
-        text = disk
-        synced = disk
-    }
-
-    func changed(_ edited: String) {
-        text = edited
-        pending?.cancel()
-        // The editor reporting back text that is already the file — an adopted change arriving through
-        // the binding — is nothing to write.
-        guard edited != synced else { pending = nil; return }
-        let write = DispatchWorkItem { [weak self] in self?.flush() }
-        pending = write
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: write)
-    }
-
-    /// Write now, if anything is waiting.
-    func flush() {
-        guard let write = pending else { return }
-        write.cancel()
-        pending = nil
-        do {
-            try text.write(to: url, atomically: true, encoding: .utf8)
-            synced = text
-            onWrite?()
-        } catch {
-            Log.write("writing a card's file failed: \(error)")
-        }
     }
 }
 
