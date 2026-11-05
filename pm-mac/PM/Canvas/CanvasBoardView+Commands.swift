@@ -1351,7 +1351,8 @@ extension CanvasBoardView {
     }
 
     /// How a folder card lays itself out: the Finder's View menu, cut to what fits a card — as List or
-    /// as Icons, then what it sorts by. Ticked only where every selected folder card agrees, as Shows is.
+    /// as Icons, its groups and its order, its path bar and status bar, and View Options for the rest.
+    /// Ticked only where every selected folder card agrees, as Shows is.
     private func addFolderViewMenu(_ menu: NSMenu) {
         let cards = selectedFolderCards
         guard !cards.isEmpty else { return }
@@ -1363,11 +1364,32 @@ extension CanvasBoardView {
             entry.state = options.allSatisfy { $0.view == layout } ? .on : .off
         }
         view.addItem(.separator())
+        let grouped = options.allSatisfy { $0.group != .none }
+        add(view, "Use Groups", #selector(toggleFolderGroups(_:))).state = grouped ? .on : .off
+        if grouped {
+            view.addItem(.sectionHeader(title: "Group By"))
+            for group in CanvasFolderGroup.allCases where group != .none {
+                let entry = add(view, group.title, #selector(setFolderGroup(_:)))
+                entry.representedObject = group.rawValue
+                entry.state = options.allSatisfy { $0.group == group } ? .on : .off
+            }
+        }
         view.addItem(.sectionHeader(title: "Sort By"))
         for sort in CanvasFolderSort.allCases {
             let entry = add(view, sort.title, #selector(setFolderSort(_:)))
             entry.representedObject = sort.rawValue
             entry.state = options.allSatisfy { $0.sort == sort } ? .on : .off
+        }
+        view.addItem(.separator())
+        let paths = options.allSatisfy(\.pathBar)
+        add(view, paths ? "Hide Path Bar" : "Show Path Bar", #selector(toggleFolderPathBar(_:)))
+        let status = options.allSatisfy(\.statusBar)
+        add(view, status ? "Hide Status Bar" : "Show Status Bar", #selector(toggleFolderStatusBar(_:)))
+        if cards.count == 1 {
+            view.addItem(.separator())
+            let entry = add(view, "Show View Options", #selector(showFolderViewOptions(_:)))
+            entry.keyEquivalent = "j"
+            entry.keyEquivalentModifierMask = [.command]
         }
         menu.addItem(withTitle: "Show As", action: nil, keyEquivalent: "").submenu = view
     }
@@ -2276,13 +2298,64 @@ extension CanvasBoardView {
     @objc func setFolderSort(_ sender: Any?) {
         guard let raw = (sender as? NSMenuItem)?.representedObject as? String,
               let sort = CanvasFolderSort(rawValue: raw) else { return }
-        setFolderOptions("Sort by \(sort.title)") { $0.sort = sort }
+        setFolderOptions("Sort by \(sort.title)") { $0.sortBy(sort, flipping: false) }
     }
 
-    /// Change one of a folder card's view settings on every selected folder card, leaving the other as
-    /// each card had it — one undoable edit, like `setShows`.
+    @objc func setFolderGroup(_ sender: Any?) {
+        guard let raw = (sender as? NSMenuItem)?.representedObject as? String,
+              let group = CanvasFolderGroup(rawValue: raw) else { return }
+        setFolderOptions("Group by \(group.title)") { $0.group = group }
+    }
+
+    @objc func toggleFolderGroups(_ sender: Any?) {
+        let grouped = selectedFolderCards.allSatisfy { CanvasFolderOptions.of($0.node).group != .none }
+        setFolderOptions(grouped ? "Don’t Use Groups" : "Use Groups") { $0.group = grouped ? .none : .kind }
+    }
+
+    @objc func toggleFolderPathBar(_ sender: Any?) {
+        let shown = selectedFolderCards.allSatisfy { CanvasFolderOptions.of($0.node).pathBar }
+        setFolderOptions(shown ? "Hide Path Bar" : "Show Path Bar") { $0.pathBar = !shown }
+    }
+
+    @objc func toggleFolderStatusBar(_ sender: Any?) {
+        let shown = selectedFolderCards.allSatisfy { CanvasFolderOptions.of($0.node).statusBar }
+        setFolderOptions(shown ? "Hide Status Bar" : "Show Status Bar") { $0.statusBar = !shown }
+    }
+
+    /// The Finder's View Options, for the one folder card selected.
+    @objc func showFolderViewOptions(_ sender: Any?) {
+        guard let browser = selectedFolderCards.first?.folderBrowser else { return NSSound.beep() }
+        CanvasFolderViewOptions.shared.show(for: browser)
+    }
+
+    /// A card for each of `urls`, in a column to the right of the card `id` — a folder card's Add Cards
+    /// to Board, which is what dragging them out one at a time would have made. One undoable edit.
+    func addFileCards(_ urls: [URL], beside id: String) {
+        guard !urls.isEmpty, let anchor = document.node(id: id)?.frame else { return }
+        let width = 320.0, height = 240.0, gap = 24.0
+        var nodes: [CanvasNode] = []
+        for (index, url) in urls.enumerated() {
+            let path = store.resolver.storablePath(for: url) ?? url.path
+            let folder = CanvasFolderListing.isFolder(url)
+            nodes.append(CanvasNode(content: .file(path: path, subpath: nil),
+                                    frame: CanvasRect(x: anchor.x + anchor.width + gap,
+                                                      y: anchor.y + Double(index) * (height + gap),
+                                                      width: folder ? 400 : width, height: folder ? 400 : height)))
+        }
+        store.change(urls.count == 1 ? "Add Card" : "Add Cards") { $0.nodes.append(contentsOf: nodes) }
+        nodes.forEach { addToTiling($0.id) }
+        select(Set(nodes.map(\.id)))
+    }
+
+    /// Change one of a folder card's view settings on every selected folder card, leaving the others as
+    /// each card had them — one undoable edit, like `setShows`.
     private func setFolderOptions(_ actionName: String, _ change: @escaping (inout CanvasFolderOptions) -> Void) {
-        let ids = Set(selectedFolderCards.map(\.node.id))
+        setFolderOptions(of: Set(selectedFolderCards.map(\.node.id)), actionName, change)
+    }
+
+    /// The same, for the folder cards named — a card's own list, View Options, a column header.
+    func setFolderOptions(of ids: Set<String>, _ actionName: String,
+                          _ change: @escaping (inout CanvasFolderOptions) -> Void) {
         guard !ids.isEmpty else { return }
         store.change(actionName) { doc in
             for index in doc.nodes.indices where ids.contains(doc.nodes[index].id) {

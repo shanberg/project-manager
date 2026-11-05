@@ -185,7 +185,7 @@ extension CanvasBoardView {
         let point = convert(sender.draggingLocation, from: nil)
         guard case .node(let id) = hitTester.hit(canvasPoint(point)), let model = folderModel(id) else { return nil }
         // Over one of its folders: that folder. Anywhere else on the card: the folder it is showing.
-        if let row = nodeViews[id]?.link(at: point), row.hasDirectoryPath || CanvasFolderListing.isFolder(row),
+        if let row = (nodeViews[id] as? CanvasFileNodeView)?.folderRow(at: point),
            CanvasFolderModel.contains(model.url, row) {
             return (id, row)
         }

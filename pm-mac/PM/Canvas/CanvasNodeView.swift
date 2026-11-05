@@ -241,9 +241,16 @@ class CanvasNodeView: NSView {
     /// engages the tile they landed in. One tile at a time, because the keyboard is one thing.
     var takesItsOwnClicks: Bool { isEngaged || board.showsTiles }
 
+    /// Whether a press at `local`, in this view's coordinates, belongs to the card even though it is not
+    /// stepped into — a folder card's list, which is a Finder window's and has nothing to step into.
+    /// Never while the board is choosing or wiring cards, or too far out to read.
+    func takesClick(at local: NSPoint) -> Bool { false }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard takesItsOwnClicks else { return nil }
         let local = convert(point, from: superview)
+        let ownsClick = !takesItsOwnClicks && board.mode == .view && !board.isPicking && !isSimplified
+            && takesClick(at: local)
+        guard takesItsOwnClicks || ownsClick else { return nil }
         guard !canvasBoardKeeps(local, in: bounds, scale: board.liveScale) else { return nil }
         // A link is the board's to follow or carry off, stepped in or not — see `CanvasLinkZones`.
         guard link(at: point) == nil else { return nil }

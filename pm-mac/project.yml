@@ -155,8 +155,9 @@ targets:
         # Read-only, for a project's Show Events From… (views.md, Calendars C1). Asked for from that sheet,
         # never at launch.
         NSCalendarsFullAccessUsageDescription: Shows events from the calendars you choose beside their projects. Read only.
-        # Asked per browser, the first time the quick bar's Go to Project comes up over it (BrowserTab).
-        NSAppleEventsUsageDescription: Reads the page in your browser's front tab, so Go to Project can open it in a project. Nothing else is read.
+        # Asked per browser, the first time the quick bar's Go to Project comes up over it (BrowserTab),
+        # and of the Finder the first time a folder card's Get Info is used (CanvasFolderActions).
+        NSAppleEventsUsageDescription: Reads the page in your browser's front tab, so Go to Project can open it in a project, and asks the Finder to show Get Info for files you choose on a folder card. Nothing else is read.
     scheme:
       testTargets:
         - PMViewTests
@@ -283,6 +284,11 @@ targets:
       - path: PM/Canvas/CanvasAddCommand.swift
       - path: PM/Canvas/CanvasDrop.swift
       - path: PM/Canvas/CanvasFolderCard.swift
+      - path: PM/Canvas/CanvasFolderOptions.swift
+      - path: PM/Canvas/CanvasFolderBrowser.swift
+      - path: PM/Canvas/CanvasFolderIconGrid.swift
+      - path: PM/Canvas/CanvasFolderActions.swift
+      - path: PM/Canvas/CanvasFolderViewOptions.swift
       - path: PM/Canvas/CanvasCardActions.swift
       - path: PM/Canvas/CanvasViewSpec.swift
       - path: PM/Canvas/CanvasViewCalendar.swift

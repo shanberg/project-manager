@@ -1154,6 +1154,13 @@ extension CanvasBoardView {
         // A project card you are standing in is a list, and a list answers three of these keys. See
         // `projectCardTakes`.
         if projectCardTakes(event) { return }
+        // ⌘J with a folder card selected is its View Options, as it is in the Finder — the same key
+        // the card's own list answers while it has the keyboard.
+        if event.modifierFlags.intersection([.command, .control, .option, .shift]) == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "j", selection.count == 1,
+           let only = selection.first, (nodeViews[only] as? CanvasFileNodeView)?.folderBrowser != nil {
+            return showFolderViewOptions(nil)
+        }
         if holdForPanning(event) { return }
         // ⇧1 and ⇧2 — see `CanvasBoardKeys.fit`.
         if let fit = CanvasBoardKeys.fit(.init(event)) {

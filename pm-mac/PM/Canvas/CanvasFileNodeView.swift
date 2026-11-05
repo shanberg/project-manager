@@ -59,6 +59,9 @@ final class CanvasFileNodeView: CanvasNodeView {
     private var folder: CanvasFolderModel?
     /// The folder this card lists, when it is a folder card — what a file drop is filed into.
     var folderModel: CanvasFolderModel? { folder }
+    /// What draws the folder: the Finder's list or icons, kept across rebuilds of the card's content so
+    /// the selection and what is opened survive a zoom past reading and back.
+    private(set) var folderBrowser: CanvasFolderBrowser?
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
@@ -99,7 +102,9 @@ final class CanvasFileNodeView: CanvasNodeView {
         let width = textStyle.lineWidth
         if projectDisplay.lineWidth != width { projectDisplay.lineWidth = width }
         let options = CanvasFolderOptions.of(node)
-        if let folder, folder.options != options { folder.options = options }
+        if let folder, folder.options != options {
+            if let folderBrowser { folderBrowser.apply(options) } else { folder.options = options }
+        }
     }
 
     override func contentChanged() {
@@ -240,7 +245,11 @@ final class CanvasFileNodeView: CanvasNodeView {
         if CanvasFolderListing.isFolder(url) {
             let model = folder ?? CanvasFolderModel(url: url, options: CanvasFolderOptions.of(node))
             folder = model
-            return NSHostingView(rootView: CanvasFolderCard(folder: model).canvasLinkZones(linkZones))
+            if let folderBrowser, folderBrowser.model === model { return folderBrowser }
+            let browser = CanvasFolderBrowser(model: model, linkZones: linkZones)
+            browser.host = self
+            folderBrowser = browser
+            return browser
         }
 
         switch url.pathExtension.lowercased() {
@@ -360,7 +369,9 @@ final class CanvasFileNodeView: CanvasNodeView {
     override func engagementChanged() {
         if document != nil || (isEngaged && writesInPlace) { return documentEngagementChanged() }
         engagement.isEngaged = isEngaged
-        if isEngaged {
+        if isEngaged, let folderBrowser {
+            folderBrowser.focus()
+        } else if isEngaged {
             // The keyboard has to reach the text fields inside. A hosting view takes it on behalf of
             // whatever SwiftUI has focused.
             if let content = cardContent { contentWindow?.makeFirstResponder(content) }
@@ -386,8 +397,23 @@ final class CanvasFileNodeView: CanvasNodeView {
     }
 
     private func releaseFolder() {
+        folderBrowser?.teardown()
+        folderBrowser = nil
         folder?.stop()
         folder = nil
+    }
+
+    /// The list and the path bar take their own clicks, stepped in or not — see `CanvasFolderBrowser`.
+    override func takesClick(at local: NSPoint) -> Bool {
+        guard let folderBrowser, folderBrowser.isDescendant(of: self) else { return false }
+        return folderBrowser.takesClick(at: folderBrowser.convert(local, from: self))
+    }
+
+    /// The folder row or icon under `point`, in the superview's coordinates — where files dropped
+    /// there would be filed. See `CanvasBoardView.folderTarget`.
+    func folderRow(at point: NSPoint) -> URL? {
+        guard let folderBrowser, folderBrowser.isDescendant(of: self), !isSimplified else { return nil }
+        return folderBrowser.folderRow(at: folderBrowser.convert(point, from: superview))
     }
 
     private func releaseProject() {
@@ -715,5 +741,25 @@ final class CanvasDocSession {
         } catch {
             Log.write("writing a card's file failed: \(error)")
         }
+    }
+}
+
+extension CanvasFileNodeView: CanvasFolderBrowserHost {
+    func folderBrowser(_ browser: CanvasFolderBrowser, commit options: CanvasFolderOptions, actionName: String) {
+        board.setFolderOptions(of: [node.id], actionName) { $0 = options }
+    }
+
+    /// Working in a folder card's list makes it the card the board is about — its ring, its header,
+    /// what ⌘J and the menus act on — without taking the keyboard back from the list.
+    func folderBrowserTookFocus(_ browser: CanvasFolderBrowser) {
+        if board.selection != [node.id] { board.selection = [node.id] }
+    }
+
+    func folderBrowserStepOut(_ browser: CanvasFolderBrowser) {
+        window?.makeFirstResponder(board)
+    }
+
+    func folderBrowser(_ browser: CanvasFolderBrowser, addCardsFor urls: [URL]) {
+        board.addFileCards(urls, beside: node.id)
     }
 }
