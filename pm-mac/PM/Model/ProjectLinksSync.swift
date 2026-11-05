@@ -47,17 +47,37 @@ enum ProjectLinksSync {
             }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    defer { finished(notesPath, projectPath: projectPath) }
                     guard case .success(let (_, io, links, canvas)) = found, let canvas else {
                         if case .failure(let error) = found { Log.write("links sync: \(notesPath): \(error)") }
+                        finished(notesPath, projectPath: projectPath)
                         return
                     }
-                    guard let synced = syncCanvas(URL(fileURLWithPath: canvas), with: links),
-                          synced.notesChanged else { return }
-                    writeNotes(synced.links, to: notesPath, io: io)
+                    let url = URL(fileURLWithPath: canvas)
+                    // A closed board that is only in the cloud is left until it is on this Mac — opening
+                    // it downloads it, and the next read of the notes syncs it. A sync runs for every
+                    // project whose notes are read, so reading each canvas would pull every board down.
+                    guard CanvasStoreRegistry.isOpen(url) || !isCloudOnly(url) else {
+                        Log.write("links sync: \(canvas) is only in the cloud, left until it's downloaded")
+                        finished(notesPath, projectPath: projectPath)
+                        return
+                    }
+                    edit(canvasAt: url, named: nil, { ProjectLinksFrame.sync(notes: links, canvas: &$0) }) { synced in
+                        defer { finished(notesPath, projectPath: projectPath) }
+                        guard let synced, synced.notesChanged else { return }
+                        writeNotes(synced.links, to: notesPath, io: io)
+                    }
                 }
             }
         }
+    }
+
+    /// Whether `url` is a placeholder for a file that is in the cloud and not on this Mac — what iCloud
+    /// and Google Drive both leave when they free space. Asked of the file's flags, which says so
+    /// without downloading it; reading it is what downloads it.
+    nonisolated static func isCloudOnly(_ url: URL) -> Bool {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return false }
+        return info.st_flags & UInt32(SF_DATALESS) != 0
     }
 
     // MARK: Pieces
@@ -72,28 +92,39 @@ enum ProjectLinksSync {
         if rerun.remove(notesPath) != nil { sync(notesPath: notesPath, projectPath: projectPath) }
     }
 
-    private static func syncCanvas(_ url: URL, with links: [LinkEntry]) -> ProjectLinksFrame.Synced? {
-        var synced: ProjectLinksFrame.Synced?
-        edit(canvasAt: url, named: nil) { synced = ProjectLinksFrame.sync(notes: links, canvas: &$0) }
-        return synced
-    }
+    /// Where closed canvases are read and written — one at a time, so two edits to one file can't race.
+    private static let fileQueue = DispatchQueue(label: "com.stuarthanberg.pm.canvas-edit", qos: .utility)
 
     /// Change a canvas from outside any board: through its store if a board has it open, so the change
     /// is the board's — shown at once, saved by it, and undoable under `named` when there is a name —
     /// and in the file otherwise.
-    static func edit(canvasAt url: URL, named: String?, _ mutate: (inout CanvasDocument) -> Void) {
+    ///
+    /// **A closed canvas is read and written off the main thread.** A read can take as long as the disk
+    /// does to answer, and a synced folder whose provider has stalled never answers: read here, that was
+    /// the app frozen at launch. `then` gets what `mutate` returned — nil if the file couldn't be read —
+    /// back on the main thread.
+    static func edit<Output>(canvasAt url: URL, named: String?,
+                             _ mutate: @escaping (inout CanvasDocument) -> Output,
+                             then: @escaping @MainActor (Output?) -> Void = { _ in }) {
         if CanvasStoreRegistry.isOpen(url), let store = try? CanvasStoreRegistry.store(for: url) {
             defer { CanvasStoreRegistry.release(store) }
-            if let named { store.change(named, mutate) } else { store.changeQuietly(mutate) }
+            var result: Output?
+            let change: (inout CanvasDocument) -> Void = { result = mutate(&$0) }
+            if let named { store.change(named, change) } else { store.changeQuietly(change) }
+            then(result)
             return
         }
-        do {
-            var document = try CanvasDocument.read(contentsOf: url)
-            let before = document
-            mutate(&document)
-            if document != before { try document.write(to: url) }
-        } catch {
-            Log.write("canvas edit: \(url.path): \(error)")
+        fileQueue.async {
+            var result: Output?
+            do {
+                var document = try CanvasDocument.read(contentsOf: url)
+                let before = document
+                result = mutate(&document)
+                if document != before { try document.write(to: url) }
+            } catch {
+                Log.write("canvas edit: \(url.path): \(error)")
+            }
+            DispatchQueue.main.async { MainActor.assumeIsolated { then(result) } }
         }
     }
 
