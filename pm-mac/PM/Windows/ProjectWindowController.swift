@@ -169,7 +169,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         split.replaceCanvas = { [weak self] in self?.replaceUnreadableProjectCanvas() }
         watchCanvasPath()
         watchColor()
-        if let space = Spaces.shared.space(forCanvas: canvas) { split.useSpaceFrame(space.id) }
+        split.syncFrame()
         split.onRendererChanged = { [weak self] in
             guard let self else { return }
             renderer = split.renderer
@@ -653,6 +653,21 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         split.selectTab(at: slot == 8 ? .max : slot)
     }
 
+    /// ⇧⌘T for a tile closed in a project's layout: its window in front, the card back in the layout
+    /// that's up. False with no window on that canvas.
+    static func reopen(_ closed: CanvasHistory.Closed) -> Bool {
+        let target = closed.canvas.standardizedFileURL
+        let controllers = NSApp.orderedWindows.compactMap { $0.windowController as? ProjectWindowController }
+        guard let controller = controllers.first(where: {
+            $0.split.spaceFrame?.isSpace != true && $0.split.canvasSource().url?.standardizedFileURL == target
+        }) else { return false }
+        controller.window?.makeKeyAndOrderFront(nil)
+        guard let board = controller.split.canvasPane?.board, board.store.url.standardizedFileURL == target
+        else { return false }
+        board.reopenClosed(closed)
+        return true
+    }
+
     /// ⇧⌘W. The window, when ⌘W has come to mean the tab in it — see `TextFocusWindow.performClose`.
     /// Not `window?.performClose`, which is the override this exists to get past.
     @objc func closeProjectWindow(_ sender: Any?) {
@@ -675,6 +690,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func closeSelectedProjectTab() -> Bool {
         // ⌘W in a space: the card in front (unpinned, or off the board); the window when there's none.
         if let frame = split.spaceFrame { return frame.closeFront() }
+        // In a layout, a space's or a project's: the focused tile out of it, as the grip's ✕. ⌘Z or
+        // ⇧⌘T puts it back. A layout of one tile still steps out to the canvas, below.
+        if let board = split.canvasPane?.board, board.isTiled, (board.tiling?.ids.count ?? 0) > 1,
+           let id = board.focusedTile ?? board.tiling?.ids.first {
+            board.closeTileRemembering(id, inSpace: nil)
+            return true
+        }
         let selected = split.tabs.selected
         if split.tabs.closable(selected) {
             split.tabModel.close(selected.id)
@@ -691,6 +713,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// Show the project list and put the keyboard in it — File ▸ All Projects…, which is "browse
     /// everything" rather than "toggle a pane", so it only ever opens the sidebar.
     func revealProjectList() {
+        // In a project's frame the list is under the project's name.
+        if let frame = split.spaceFrame, !frame.isSpace { return frame.askForProjects() }
         if isSidebarCollapsedNow { split.toggleSidebar(nil) }
         state.requestFocusProjectList()
     }
@@ -708,7 +732,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func windowDidBecomeMain(_ notification: Notification) {
         Log.write("window \(WindowManager.name(self)) became main: \(projectKey ?? "no project")")
         pushFocusToDisk()
-        if let frame = spaceFrame { Spaces.shared.lastUsed = frame.spaceID }
+        if let spaceID = spaceFrame?.spaceID { Spaces.shared.lastUsed = spaceID }
         // Joining or leaving a tab group moves the content area without resizing the window, and there
         // is no delegate callback for it. Becoming main is the moment that always follows.
         measureTitlebarButtons()

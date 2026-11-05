@@ -833,7 +833,8 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         view.fullFrameRate = isEngaged
         // A link dropped on the page makes a card, unless there is a field under it to type into.
         view.dropFallback = board
-        // A tile in a space's layout: dead space at the page's top moves the window, as Arc's does.
+        // A tile in a layout, a space's or a project's, or the one card filling the window (⌥⌘.): dead
+        // space at the page's top moves the window, as Arc's does.
         // Asked of whichever board the page is in at the press, not this card's: a running page is
         // handed between panes (`CanvasPageHandover`), so the card that built it may be on a board that
         // isn't the one showing it — which is how Apple Music's tile never qualified (2026-11-05).
@@ -841,7 +842,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
             var ancestor = view?.superview
             while let current = ancestor, !(current is CanvasBoardView) { ancestor = current.superview }
             guard let board = ancestor as? CanvasBoardView else { return false }
-            return board.dragsWindowFromGround && board.isTiled
+            return board.dragsWindowFromGround && (board.isTiled || board.maximizedCard != nil)
         }
         // And a link right-clicked or middle-clicked can make one too.
         view.linkHost = self
@@ -1825,11 +1826,14 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
             return decisionHandler(.cancel)
         }
 
-        // ⇧-click in a space: the link in a preview over the page (`CanvasLinkPreview`), Arc's Peek.
+        // ⇧-click: the link in a preview over the page (`CanvasLinkPreview`), Arc's Peek — in a space
+        // or a project. Open as Card makes it what ⌘-click would have.
         if clicked, navigationAction.modifierFlags.intersection([.shift, .command, .option, .control]) == .shift,
-           let target = navigationAction.request.url, isWeb(target),
-           let open = currentBoard.opensNewTab {
-            CanvasLinkPreview.show(target, from: webView) { open($0, true) }
+           let target = navigationAction.request.url, isWeb(target) {
+            CanvasLinkPreview.show(target, from: webView) { [weak self] address in
+                guard let url = URL(string: address) else { return }
+                self?.openAsNewCard(url, behind: false)
+            }
             return decisionHandler(.cancel)
         }
 
@@ -2076,12 +2080,11 @@ extension CanvasLinkNodeView: WKUIDelegate {
         } else if CanvasWebPopup.wanted(by: navigationAction, features: windowFeatures) {
             return CanvasWebPopup.present(with: configuration, features: windowFeatures,
                                           userAgent: webView.customUserAgent, over: self, opener: self)
-        } else if let open = currentBoard.opensNewTab {
-            // In a space a new window is a new tab, as in any browser: a card in Today, in front.
-            open(url.absoluteString, true)
         } else {
-            capturingTitle = false
-            webView.load(URLRequest(url: url))
+            // A new window is a new tab, as in any browser: what ⌘-click makes, in front — a card in
+            // Today in a space, a tab in this tile in a project's layout, a card beside on its board.
+            // It used to load over this card on a project's board, losing the page you were on.
+            openAsNewCard(url, behind: false)
         }
         return nil
     }

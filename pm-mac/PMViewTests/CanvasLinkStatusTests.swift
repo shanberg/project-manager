@@ -15,6 +15,14 @@ final class CanvasLinkStatusTests: XCTestCase {
                        "Open as a new card: example.com/")
     }
 
+    func testShiftSaysPreviewOnEveryBoard() {
+        let link = URL(string: "https://example.com/")
+        XCTAssertEqual(CanvasLinkStatus.text(for: link, flags: .shift), "Preview: example.com/")
+        XCTAssertEqual(CanvasLinkStatus.text(for: link, flags: .shift, inSpace: true), "Preview: example.com/")
+        XCTAssertEqual(CanvasLinkStatus.text(for: link, flags: .command, inSpace: true),
+                       "Open in a new tab: example.com/")
+    }
+
     func testOtherSchemesKeepTheirScheme() {
         XCTAssertEqual(CanvasLinkStatus.text(for: URL(string: "mailto:a@example.com"), flags: []),
                        "mailto:a@example.com")

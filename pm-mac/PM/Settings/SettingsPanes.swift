@@ -113,7 +113,7 @@ struct BoardsSettingsView: View {
     @AppStorage(CanvasPageBudget.defaultsKey) private var livePages = CanvasPageBudget.defaultLivePages
     @AppStorage(CanvasPageBudget.graceDefaultsKey)
     private var offScreenGrace = CanvasPageBudget.defaultOffScreenGrace
-    @AppStorage(CanvasSearchEngine.defaultsKey) private var searchEngine: CanvasSearchEngine = .none
+    @AppStorage(CanvasSearchEngine.defaultsKey) private var searchEngine: CanvasSearchEngine = CanvasSearchEngine.fallback
 
     var body: some View {
         Form {

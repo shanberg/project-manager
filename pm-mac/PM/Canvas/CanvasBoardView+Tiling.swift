@@ -645,6 +645,31 @@ extension CanvasBoardView {
     ///
     /// Not for the last card, which leaves the tiling (`removeFromTiling`): the workspace is kept, and
     /// its tab brings it back.
+    /// ⌘W and the grip's ✕ on a tile, in a space or a project: out of the layout (⌘Z puts it back),
+    /// and a web card remembered for ⇧⌘T (`CanvasHistory.closed`).
+    func closeTileRemembering(_ id: String, inSpace space: String?) {
+        guard tiling?.cards.contains(id) == true else { return }
+        if let node = document.node(id: id), case .link(let address) = node.content {
+            let live = (nodeViews[id] as? CanvasLinkNodeView)?.liveURL?.absoluteString
+            CanvasHistory.didClose(live ?? address, card: id, canvas: store.url, inSpace: space)
+        }
+        closeInTiling([id])
+    }
+
+    /// ⇧⌘T on this board: the card back as a tile if it's still here, else a new web card on the
+    /// address it was at.
+    func reopenClosed(_ closed: CanvasHistory.Closed) {
+        var id = closed.cardID
+        if document.node(id: id) == nil {
+            let right = document.nodes.map { $0.frame.x + $0.frame.width }.max() ?? 0
+            id = addCard(CanvasNode(content: .link(url: closed.address),
+                                    frame: CanvasRect(x: right + 40, y: 0, width: 400, height: 400)),
+                         actionName: "Reopen Closed Card")
+        }
+        if tiling?.cards.contains(id) == true { return showTab(id) }
+        if isTiled { addExistingCard(withID: id) } else { tile([id]) }
+    }
+
     func closeInTiling(_ ids: [String]) {
         guard let before = tiling else { return }
         let closing = ids.filter(before.cards.contains)

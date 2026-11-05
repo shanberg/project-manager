@@ -152,11 +152,15 @@ page properly" is Open in Browser and always has been.
 **Searching from the field is off until chosen.**
 - Words that aren't an address go to the engine picked in Settings (`CanvasSearchEngine`): DuckDuckGo, Google, Bing, Ecosia, Kagi or Startpage.
 - The default is `none`. With none, the field rejects what isn't an address.
+- One rule for every address field: the header's, a tile capsule's, a space's sidebar. Was (to 2026-11-05): a space searched DuckDuckGo when Settings had None.
 - Why: sending what you typed to a search engine is a network request, and nobody has agreed to it until they pick one.
 
 **What ⌘-click makes — decided 2026-10-24, in a mock.**
-- In a workspace: a tab in the tile it was clicked in, shown and stepped into. ⇧ leaves it behind.
+- In a window with the frame (every space, and every project since 2026-11-05): a new card, shown in the tile you're in; ⇧ leaves it in the sidebar (docs/spaces.md § Browsing).
+- In a workspace without the frame (`PMProjectFrameOff`, or a window on a plain file): a tab in the tile it was clicked in, shown and stepped into. ⇧ leaves it behind.
 - In a satellite: a tab in that satellite (`CanvasSatelliteWindow.adopt`), as well as in its tile. Was: a new tile beside, which split the workspace smaller with every link followed.
+- A link that asks for a new window (`target=_blank`, not a sized pop-up) makes the same as ⌘-click, in front. Was (to 2026-11-05): on a project's board it loaded over the card, losing the page.
+- ⇧-click: a preview over the window (`CanvasLinkPreview`), in a space or a project; Open as Card makes what ⌘-click would. Was: spaces only.
 - On the board: a card beside, with no line. Was: joined by an edge, so every quick look added an edge to the `.canvas` file.
 - ⌘-click, middle-click and Open Link as New Card all go through `CanvasLinkNodeView.openAsNewCard`.
 - Rejected: a loose card saved only on Keep; pages stacked inside one board card.

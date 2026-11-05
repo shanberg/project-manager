@@ -67,12 +67,16 @@ final class CanvasScrollView: NSScrollView {
         // Before anything reads `contentView` below, and before the board goes in: replacing the clip
         // resets the scroll position, so it has to be the first thing that happens.
         wantsLayer = true
-        contentView = CanvasClipView()
+        contentView = NSClipView()
         documentView = board
         hasVerticalScroller = true
         hasHorizontalScroller = true
         autohidesScrollers = true
         allowsMagnification = true
+        // Pan where the fingers go. AppKit locks a gesture to its main axis by default, which suits a
+        // page you read down and made a board feel magnetised to X and Y (2026-11-05); Figma, Freeform
+        // and every canvas pan freely in two dimensions.
+        usesPredominantAxisScrolling = false
         minMagnification = Self.minimumZoom
         maxMagnification = Self.maximumZoom
         // Neither the board nor the clip paints the ground: `groundView`, beneath both, does — edge to
@@ -96,6 +100,9 @@ final class CanvasScrollView: NSScrollView {
         NotificationCenter.default.addObserver(
             self, selector: #selector(zoomChanged),
             name: NSScrollView.didEndLiveMagnifyNotification, object: self)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(zoomStarted),
+            name: NSScrollView.willStartLiveMagnifyNotification, object: self)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -107,8 +114,30 @@ final class CanvasScrollView: NSScrollView {
     /// The window changed size. A tiled view has to be laid out again for the shape it is now filling —
     /// see `CanvasBoardView.retileForWindowSize`.
     @objc private func clipResized() {
-        guard board.isTiled else { return }
+        guard board.isTiled else { return refitPanRoom() }
         board.retileForWindowSize()
+    }
+
+    /// The window covers a different amount of board — resized, or zoomed — so the frame's room past
+    /// the cards (`CanvasPanBounds.room`) is a different size. `recomputeContent` keeps what you are
+    /// looking at where it is while the frame changes round it.
+    ///
+    /// **Never while a zoom is moving.** A zoom sets the clip's size and then its origin, and the
+    /// bounds change between the two used to land here: the frame resized and the origin shifted in
+    /// the middle of AppKit's own arithmetic, which then finished against a board that had moved — the
+    /// point under the pointer drifted by thousands of pixels in a ⌘-wheel zoom (2026-11-05, measured).
+    /// So a zoom grows the room it is about to need first (`growRoom`), and the room is trimmed to fit
+    /// once the zoom settles.
+    private var lastVisible = NSSize.zero
+    private var zooming = 0
+    private var liveMagnifying = false
+    private func refitPanRoom() {
+        let visible = contentView.bounds.size
+        guard zooming == 0, !liveMagnifying, flight == nil, !isFlying, !board.showsTiles,
+              abs(visible.width - lastVisible.width) > 0.5
+                || abs(visible.height - lastVisible.height) > 0.5 else { return }
+        lastVisible = visible
+        board.recomputeContent()
     }
 
     /// A tiled view is a fixed view of a fixed set of cards, so the board underneath it does not move.
@@ -124,6 +153,44 @@ final class CanvasScrollView: NSScrollView {
         guard !board.showsTiles else { return }
         guard !event.modifierFlags.contains(.command) else { return zoom(with: event) }
         super.scrollWheel(with: event)
+    }
+
+    /// Make room for the zoom you are going to, before going: zooming out, the window will cover more
+    /// board than the frame has room for, and the clip would be pinned to the frame's corner.
+    private func growRoom(forZoom zoom: CGFloat) {
+        guard !board.showsTiles, zoom > 0, zoom < magnification else { return }
+        let upcoming = NSSize(width: contentView.frame.width / zoom, height: contentView.frame.height / zoom)
+        board.recomputeContent(roomFor: upcoming)
+    }
+
+    /// A zoom, with the room made first and the frame left alone while it happens.
+    private func zooming(to zoom: CGFloat, _ change: () -> Void) {
+        zooming += 1
+        defer { zooming -= 1 }
+        growRoom(forZoom: zoom)
+        change()
+    }
+
+    /// Every zoom comes through one of these two — a pinch, a double-tap, the wheel, a menu item, a
+    /// flight — so this is where the frame is held still and the room grown, whoever asked.
+    /// `centeredAt` is in the board's points, which growing the room moves: it is carried across as a
+    /// canvas point.
+    override func setMagnification(_ zoom: CGFloat, centeredAt point: NSPoint) {
+        zooming += 1
+        defer { zooming -= 1 }
+        let anchor = board.canvasPoint(point)
+        growRoom(forZoom: zoom)
+        super.setMagnification(zoom, centeredAt: board.viewPoint(anchor))
+    }
+
+    override var magnification: CGFloat {
+        get { super.magnification }
+        set {
+            zooming += 1
+            defer { zooming -= 1 }
+            growRoom(forZoom: newValue)
+            super.magnification = newValue
+        }
     }
 
     /// ⌘ and the wheel zooms, about the pointer.
@@ -161,6 +228,7 @@ final class CanvasScrollView: NSScrollView {
         zoomSettle?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            refitPanRoom()
             board.magnificationChanged()
             board.settlePageBudget()
         }
@@ -170,7 +238,9 @@ final class CanvasScrollView: NSScrollView {
 
     override func magnify(with event: NSEvent) {
         guard !board.showsTiles else { return }
-        super.magnify(with: event)
+        // A pinch: room for where this step is going, then AppKit's own magnify. `liveMagnifying`
+        // (from its notifications) keeps the frame still until the fingers lift.
+        zooming(to: magnification * (1 + event.magnification)) { super.magnify(with: event) }
     }
 
     /// Whether the scrollers exist at all — off while tiled.
@@ -191,6 +261,7 @@ final class CanvasScrollView: NSScrollView {
     }
 
     @objc private func visibleRegionChanged() {
+        refitPanRoom()
         // Build what has come into reach; place nothing. Scrolling moves the board, not the cards on
         // it — see `CanvasBoardView.refreshVisibleCards`.
         board.refreshVisibleCards()
@@ -199,7 +270,11 @@ final class CanvasScrollView: NSScrollView {
         board.settlePageBudget()
     }
 
+    @objc private func zoomStarted() { liveMagnifying = true }
+
     @objc private func zoomChanged() {
+        liveMagnifying = false
+        refitPanRoom()
         board.magnificationChanged()
         board.settlePageBudget()
     }
@@ -209,9 +284,9 @@ final class CanvasScrollView: NSScrollView {
     /// Zoom by a step, about the middle of what you can see — which is what a menu item or a keyboard
     /// shortcut means by zoom, as opposed to a pinch, which is about the fingers.
     func zoom(by factor: CGFloat) {
-        let centre = NSPoint(x: documentVisibleRect.midX, y: documentVisibleRect.midY)
-        setMagnification(min(max(magnification * factor, Self.minimumZoom), Self.maximumZoom),
-                         centeredAt: centre)
+        let wanted = min(max(magnification * factor, Self.minimumZoom), Self.maximumZoom)
+        setMagnification(wanted, centeredAt: NSPoint(x: contentView.bounds.midX, y: contentView.bounds.midY))
+        refitPanRoom()
         board.magnificationChanged()
     }
 
@@ -253,8 +328,9 @@ final class CanvasScrollView: NSScrollView {
     /// would fill it with cards whose text is at 40% — a fullscreen card you still cannot read. Entering
     /// a tiling puts the board at 100% and leaving puts it back; see `CanvasBoardView.tile`.
     func setZoom(_ zoom: CGFloat) {
-        let centre = NSPoint(x: documentVisibleRect.midX, y: documentVisibleRect.midY)
-        setMagnification(min(max(zoom, Self.minimumZoom), Self.maximumZoom), centeredAt: centre)
+        let wanted = min(max(zoom, Self.minimumZoom), Self.maximumZoom)
+        setMagnification(wanted, centeredAt: NSPoint(x: contentView.bounds.midX, y: contentView.bounds.midY))
+        refitPanRoom()
         board.magnificationChanged()
     }
 
@@ -292,6 +368,9 @@ final class CanvasScrollView: NSScrollView {
         ticker.stop()
         flight = nil
         let wanted = min(max(zoom, Self.minimumZoom), Self.maximumZoom)
+        zooming += 1
+        growRoom(forZoom: wanted)
+        zooming -= 1
         let seconds = animated ? Motion.duration(fly) : 0
         let from = magnification
         let at = board.canvasPoint(NSPoint(x: documentVisibleRect.midX, y: documentVisibleRect.midY))
@@ -346,6 +425,7 @@ final class CanvasScrollView: NSScrollView {
         guard fraction >= 1 else { return }
         ticker.stop()
         self.flight = nil
+        refitPanRoom()
         // Once, at the end. Deciding which cards are worth building and how much detail each draws is
         // a question about the zoom you arrived at — the same reason `settleZoom` defers it after a
         // wheel.
@@ -449,6 +529,7 @@ final class CanvasScrollView: NSScrollView {
             MainActor.assumeIsolated {
                 guard let self, self.travelling == travelledFrom else { return }
                 self.travelling = nil
+                self.refitPanRoom()
                 self.board.refreshVisibleCards()
                 self.board.settlePageBudget()
             }
@@ -544,37 +625,5 @@ final class CanvasScrollView: NSScrollView {
             board.magnificationChanged()
         }
         centre(on: CanvasPoint(x: node.frame.midX, y: node.frame.midY))
-    }
-}
-
-/// The clip a board scrolls inside, for the one thing `NSClipView` will not do by itself: let you pan
-/// a board that fits.
-///
-/// The rule itself is `CanvasPanBounds`, which is arithmetic on two rectangles and is tested as such.
-/// All this does is decide which two, and take `NSClipView`'s own answer when the rule has no opinion.
-@MainActor
-final class CanvasClipView: NSClipView {
-    override func constrainBoundsRect(_ proposed: NSRect) -> NSRect {
-        guard let held, let constrained = CanvasPanBounds.constrain(proposed, holding: held)
-        else { return super.constrainBoundsRect(proposed) }
-        return constrained
-    }
-
-    /// What has to stay in the window, in the board's own coordinates: **the cards, not the board.**
-    ///
-    /// The two are a long way apart. A board's frame is its cards' extent grown by
-    /// `CanvasBoardView.margin` on every side, so the frame rule was satisfied by a window of blank
-    /// paper 1600pt from anything — you were still "on the board", and there was nothing on screen to
-    /// tell you which way the board was. Holding a card instead means a pan always leaves you
-    /// something to steer by, and costs nothing you wanted: a sliver of card at one edge still leaves
-    /// the rest of the window empty to spread into.
-    ///
-    /// A tiled view is exempt. Its position is not panned, it is *laid out* — the tiles were fitted to
-    /// the window and the wheel is swallowed rather than obeyed (`CanvasScrollView.scrollWheel`), so
-    /// the one thing the rule must not do there is move the clip out from under them.
-    private var held: NSRect? {
-        guard let board = documentView as? CanvasBoardView else { return documentView?.frame }
-        guard !board.showsTiles, let cards = board.document.bounds else { return board.frame }
-        return board.viewRect(cards)
     }
 }

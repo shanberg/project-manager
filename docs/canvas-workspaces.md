@@ -1064,6 +1064,10 @@ so ⌘W means what it means everywhere else on this Mac. There is no Close Tab i
 The menus' one way to the canvas is View ▸ Show Canvas (⌥⌘C), which leaves a workspace too
 (2026-09-24).
 
+- 2026-11-05, as a space: in a layout of two or more tiles, ⌘W takes the focused tile out of it (the grip's ✕); ⌘Z or ⇧⌘T puts it back. A layout of one tile still steps out to the canvas.
+- ⇧⌘T (History ▸ Reopen Closed Card) covers web tiles closed in a project's layout too: the project's window in front, the card back in the layout that's up, or a new card on its address if it's gone (`CanvasBoardView.reopenClosed`).
+- Window drag, as a space: the ground round a layout's tiles, and dead space in the top 96pt of a tile's page, move the window, in every window (`dragsWindowFromGround`). Dead space counts for the one card filling the window (⌥⌘.) too.
+
 ### Close is not a verb on a workspace
 
 A workspace's chip *is* the workspace, so closing one would leave a named thing in the store with

@@ -447,16 +447,39 @@ final class ProjectSplitViewController: NSSplitViewController {
         openTab(.notes)
     }
 
-    // MARK: A space's frame
+    // MARK: The frame
 
-    /// Put the space's frame in the sidebar slot, in place of the project list, and the tab row away:
-    /// the sidebar is the list of what's open. Shown, so the window opens as the frame.
-    func useSpaceFrame(_ spaceID: String) {
+    /// Off with `defaults write <bundle> PMProjectFrameOff -bool YES`: project windows keep the project
+    /// list and the tab row. Spaces always have their frame.
+    static var projectFramesOn: Bool { !UserDefaults.standard.bool(forKey: "PMProjectFrameOff") }
+
+    /// The frame this window's board should have now: a space's, the project's, or none (a window on a
+    /// file that's neither, or a project whose board isn't there yet). Asked at open, on retarget and
+    /// when the board's path changes; a frame already over this board stays.
+    func syncFrame() {
+        let url = canvasSource().url?.standardizedFileURL
+        if let frame = spaceFrame, frame.canvasURL.standardizedFileURL == url { return }
+        if spaceFrame != nil {
+            endSpaceFrame()
+            sidebarHosting.rootView = AnyView(ProjectSidebar(store: store, state: state))
+        }
+        guard let url else { return }
+        if let space = Spaces.shared.space(forCanvas: url) {
+            useFrame(spaceID: space.id, project: nil)
+        } else if Self.projectFramesOn, store.projectKey != nil {
+            useFrame(spaceID: nil, project: store)
+        }
+    }
+
+    /// Put the frame in the sidebar slot, in place of the project list, and the tab row away: the
+    /// sidebar is the list of what's open. Shown, so the window opens as the frame.
+    private func useFrame(spaceID: String?, project: PMStore?) {
         guard spaceFrame == nil, let url = canvasSource().url,
               let store = try? CanvasStoreRegistry.store(for: url) else { return }
         spaceFrameStore = store
-        let frame = SpaceFrame(spaceID: spaceID, canvas: url, store: store, split: self)
+        let frame = SpaceFrame(spaceID: spaceID, project: project, canvas: url, store: store, split: self)
         spaceFrame = frame
+        frame.windowState = state
         sidebarHosting.rootView = AnyView(SpaceFrameSidebar(frame: frame))
         frame.presentAddress = { [weak self] in
             guard let self else { return }
@@ -469,7 +492,7 @@ final class ProjectSplitViewController: NSSplitViewController {
             if !(peek?.isPointerInside ?? false) { hidePeek() }
         }
         bottomBarView?.isHidden = true
-        useBareSidebar()
+        if !sidebarIsBare { useBareSidebar() }
         tabModel.hidesBar = true
         if sidebarItem.isCollapsed { sidebarItem.isCollapsed = false }
         for case let pane as CanvasPaneController in contentPane.allContent { pane.hidesHeader = true }
@@ -478,7 +501,10 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// Arc's sidebar is the window's own ground, not a plate over it: in a space the sidebar is a
     /// plain pane (no glass) and paints the content's wash itself (`SpaceFrameSidebar`). The same
     /// controller, width and collapse rules; only the item's kind changes.
+    private var sidebarIsBare = false
+
     private func useBareSidebar() {
+        sidebarIsBare = true
         let old = sidebarItem!
         let wasCollapsed = old.isCollapsed
         collapseObservation?.invalidate()
@@ -1082,6 +1108,7 @@ final class ProjectSplitViewController: NSSplitViewController {
     }
 
     func canvasPathChanged() {
+        syncFrame()
         canvasUnavailable = false
         triedReplacingCanvas = false
         // A board that has just appeared is the first chance to put the notes in their workspace —
@@ -1115,9 +1142,10 @@ final class ProjectSplitViewController: NSSplitViewController {
     func retarget(to newStore: PMStore, projectKey: String?) {
         guard newStore !== store else { return }
         store = newStore
-        // A window taking a project is a project's window, whatever file it was opened on.
-        endSpaceFrame()
-        sidebarHosting.rootView = AnyView(ProjectSidebar(store: newStore, state: state))
+        // A window taking a project is a project's window, whatever file it was opened on: the frame
+        // over the new project's board, or the project list while that board is still being found.
+        syncFrame()
+        if spaceFrame == nil { sidebarHosting.rootView = AnyView(ProjectSidebar(store: newStore, state: state)) }
         // A switch is a change of place, and a short fade says so: cut straight across, one project's
         // card replacing another's in the same frame read as the card flickering, not as going
         // somewhere. Short enough that walking the sidebar with the arrow keys never waits on it.

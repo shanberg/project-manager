@@ -84,8 +84,10 @@ final class CanvasBoardView: NSView {
     /// fact about where this board is mounted and nothing else here knows that.
     var topClearance: Double = CanvasBoardView.headerClearance
 
-    /// A press on the ground around the tiles moves the window. Set in a space's window.
-    var dragsWindowFromGround = false
+    /// A press on the ground around the tiles moves the window, and so does dead space at the top of a
+    /// tile's page. Every window's layouts, space or project (2026-11-05: was spaces only); off only
+    /// where the board isn't its window's to move.
+    var dragsWindowFromGround = true
 
     /// Where a page's new tab goes (a link that asks for a new window, ⌘-click): set in a space, where
     /// it's a card in Today. The flag is whether it comes to the front. Nil elsewhere: a tab in the tile.
@@ -100,10 +102,14 @@ final class CanvasBoardView: NSView {
     /// Read by `CanvasSoftEdge` too, as the band its fade is measured from.
     static let headerClearance: Double = 40
 
-    /// The board's extent in canvas coordinates: everything on it, plus room to drag things outside it.
-    /// The view's own size, and the origin every conversion subtracts.
+    /// The board's extent in canvas coordinates: the cards, plus `panRoom` on every side — the travel
+    /// that leaves `CanvasPanBounds.keep` of them in the window, so the frame's edge is where panning
+    /// stops and AppKit bounces there. The view's own size, and the origin every conversion subtracts.
     private(set) var content: CanvasRect = CanvasRect(x: 0, y: 0, width: 1, height: 1)
-    private static let margin: Double = 1600
+    /// Before there is a window to measure (and held through a tiling, whose tiles are laid over the
+    /// region you were at): the old fixed margin.
+    private var panRoom = CGSize(width: 1600, height: 1600)
+    private var recomputingContent = false
 
     var mode: CanvasMode = .view {
         didSet {
@@ -516,6 +522,11 @@ final class CanvasBoardView: NSView {
     /// drifted over. Weak, because a card can be thrown away mid-flick — a board that scrolls past it,
     /// a tiling that hides it — and a dangling target would go on being scrolled.
     weak var scrollLatch: NSView?
+    /// When and where the last wheel event landed, and whether it was moving the board — so the next
+    /// gesture can carry on panning when nothing but the board has moved (`CanvasBoardView.scrollWheel`).
+    var lastScrollAt: TimeInterval = 0
+    var lastScrollPointer = NSPoint(x: -1, y: -1)
+    var lastScrollWasBoard = false
     /// Whether the wheel gesture under way began over a side strip of tabs, and so scrolls it.
     var tabScrollLatch = false
     /// Set while an event is being handed to a card, so the one it hands back doesn't come straight
@@ -670,26 +681,39 @@ final class CanvasBoardView: NSView {
     /// `constrainBoundsRect`, only a scroll does, so a wish written straight in is written in
     /// unchecked, and the next pan is the first event to notice. That noticing is the jump in
     /// canvas-backlog item 1.
-    func recomputeContent() {
+    /// `roomFor` sizes the room for a window that covers that much board — a zoom about to happen —
+    /// rather than for the one now (see `CanvasScrollView.growRoom`).
+    func recomputeContent(roomFor upcoming: CGSize? = nil) {
+        // Resizing the frame moves the clip, whose bounds change can ask for this again: one at a time.
+        guard !recomputingContent else { return }
+        recomputingContent = true
+        defer { recomputingContent = false }
         let bounds = document.bounds ?? CanvasRect(x: 0, y: 0, width: 800, height: 600)
-        let next = bounds.inset(by: Self.margin)
+        if !showsTiles, let clip = scrollView?.contentView, clip.frame.width > 0, clip.frame.height > 0 {
+            let visible = upcoming ?? clip.bounds.size
+            panRoom = CanvasPanBounds.room(visible: visible, scale: visible.width / clip.frame.width,
+                                           cards: CGSize(width: bounds.width, height: bounds.height))
+        }
+        let next = CanvasRect(x: bounds.minX - Double(panRoom.width), y: bounds.minY - Double(panRoom.height),
+                              width: bounds.width + 2 * Double(panRoom.width),
+                              height: bounds.height + 2 * Double(panRoom.height))
         guard next != content else { return }
 
         let shift = NSPoint(x: content.minX - next.minX, y: content.minY - next.minY)
+        // Read before the resize: a frame that shrinks pulls the clip inside it at once, and adding the
+        // shift to that clamped origin moved the board by however far it had been pulled — the jump
+        // when a zoom in settled and the room was trimmed (2026-11-05).
+        let before = scrollView?.contentView.bounds.origin
         content = next
         setFrameSize(NSSize(width: next.width, height: next.height))
         overlay.frame = NSRect(origin: .zero, size: frame.size)
         tileHandleView.frame = overlay.frame
         tileGripView.frame = overlay.frame
 
-        if let clip = scrollView?.contentView, shift != .zero {
-            var wanted = NSRect(origin: NSPoint(x: clip.bounds.origin.x + shift.x,
-                                                y: clip.bounds.origin.y + shift.y),
+        if let clip = scrollView?.contentView, let before, shift != .zero {
+            var wanted = NSRect(origin: NSPoint(x: before.x + shift.x, y: before.y + shift.y),
                                 size: clip.bounds.size)
-            if !showsTiles, let cards = document.bounds,
-               let settled = CanvasPanBounds.constrain(wanted, holding: viewRect(cards)) {
-                wanted = settled
-            }
+            if !showsTiles { wanted = clip.constrainBoundsRect(wanted) }
             clip.setBoundsOrigin(wanted.origin)
             // The scrollers don't follow a bounds origin written directly — the same reason
             // `otherMouseDragged` says this after a `scroll(_:)`.

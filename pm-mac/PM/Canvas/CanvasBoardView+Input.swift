@@ -184,7 +184,7 @@ extension CanvasBoardView {
             gesture = .swap(from: id, over: nil)
         case .edge, .board:
             selection = []
-            // A space's frame, as Arc's: the ground around the tiles is the window's to drag, and a
+            // As Arc's frame, in any window's layout: the ground around the tiles is the window's to drag, and a
             // double-click there zooms it, as a title bar's does (docs/spaces.md § The frame).
             if dragsWindowFromGround, let event = NSApp.currentEvent {
                 // The press is the window's now, and its mouse-up never comes here: end it first, or
@@ -847,14 +847,32 @@ extension CanvasBoardView {
         // A new gesture picks a card; the rest of that gesture — its `.changed` events and the
         // momentum after them — stays with the one it picked. A wheel on a mouse has no phases at all
         // and so is a fresh aim every tick, which is right: there is no gesture to stay inside of.
+        //
+        // **A pan carries on across gestures while only the board has moved** — browsers' scroll
+        // latching. Panning slides cards under a pointer that hasn't moved, so the next swipe "starts
+        // on" one of them; it used to take the swipe, and the pan stopped dead on whatever card the
+        // board had carried there (2026-11-05). Moving the pointer, or pausing, aims afresh: a swipe
+        // that starts on a card you went to is that card's.
         if event.phase.contains(.began) || (event.phase.isEmpty && event.momentumPhase.isEmpty) {
-            scrollLatch = scrollTarget(for: event)
+            let pointer = event.locationInWindow
+            let stillPanning = lastScrollWasBoard
+                && event.timestamp - lastScrollAt < Self.panCarriesFor
+                && hypot(pointer.x - lastScrollPointer.x, pointer.y - lastScrollPointer.y) < 3
+            scrollLatch = stillPanning ? nil : scrollTarget(for: event)
         }
+        lastScrollAt = event.timestamp
+        lastScrollPointer = event.locationInWindow
+        lastScrollWasBoard = scrollLatch == nil
         guard let target = scrollLatch else { return super.scrollWheel(with: event) }
         forwardingScroll = true
         target.scrollWheel(with: event)
         forwardingScroll = false
     }
+
+    /// How long after its last event a pan still owns the next gesture at the same pointer. Long
+    /// enough to cover lifting the fingers between swipes; short enough that resting the pointer on a
+    /// card and then scrolling it works without a wiggle.
+    static let panCarriesFor: TimeInterval = 0.8
 
     /// What a wheel at this point should scroll, or nil for the board itself.
     private func scrollTarget(for event: NSEvent) -> NSView? {

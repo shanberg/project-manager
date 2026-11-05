@@ -2,15 +2,17 @@ import AppKit
 import PmLib
 import SwiftUI
 
-/// The Arc-style frame over a space's board: the sidebar lists the board, the window's content is the
-/// workspace. docs/spaces.md § The frame.
+/// The Arc-style frame over a board, a space's or a project's: the sidebar lists the board, the
+/// window's content is the workspace. docs/spaces.md § The frame.
 ///
 /// - Rows are the board's cards: favourites as icons, then Pinned (named workspaces first, then pinned
 ///   cards), then Today. Frames on the board are folders.
 /// - Clicking a card already showing brings it forward; one in a named workspace jumps there; any other
 ///   replaces the tile you're in (alone, if you were in a named workspace).
 /// - ⌥-click: a tile beside. ⌘-click picks; ⌘↩ tiles the picked as a new workspace.
-/// - Lives in the project window's sidebar slot, in place of the project list, for a space's window.
+/// - Lives in the project window's sidebar slot, in place of the project list.
+/// - A project's frame has Notes above Board, Cards where a space has Today (nothing archives), the
+///   project's name as a menu of the other projects at its top, and the focused task at its foot.
 @MainActor
 @Observable
 final class SpaceFrame {
@@ -47,7 +49,17 @@ final class SpaceFrame {
         var showing: Bool
     }
 
-    let spaceID: String
+    /// The space this frames; nil for a project's board.
+    let spaceID: String?
+    /// The project this frames; nil for a space. Its name, colour, focused task and session are read
+    /// from it live by the sidebar.
+    @ObservationIgnored private(set) weak var project: PMStore?
+    var isSpace: Bool { spaceID != nil }
+    /// The board's canvas file, to tell whether a window still frames the board it's showing.
+    var canvasURL: URL { canvas }
+    /// The project's Notes workspace (the notes card alone), and whether it's up.
+    private(set) var notesWorkspace: String?
+    private(set) var notesShowing = false
     private(set) var favorites: [Row] = []
     private(set) var pinned = Group()
     private(set) var today = Group()
@@ -77,8 +89,10 @@ final class SpaceFrame {
     @ObservationIgnored private let store: CanvasDocumentStore
     @ObservationIgnored private let canvas: URL
 
-    init(spaceID: String, canvas: URL, store: CanvasDocumentStore, split: ProjectSplitViewController) {
+    init(spaceID: String?, project: PMStore? = nil, canvas: URL, store: CanvasDocumentStore,
+         split: ProjectSplitViewController) {
         self.spaceID = spaceID
+        self.project = project
         self.canvas = canvas
         self.store = store
         self.split = split
@@ -114,8 +128,21 @@ final class SpaceFrame {
         let lookups = CanvasExistingCards.lookups(isFolder: { board?.isFolderPath($0) ?? false })
         let sounding = CanvasLinkNodeView.playingCards(onCanvas: canvas)
         let sections = CanvasItems.sections(of: document, showing: [], lookups: lookups)
+        // A project's notes card is its Notes row, not one of its cards.
+        var notesCard: String?
+        if !isSpace, let notes = CanvasProjectNoteCard.notes(forCanvasAt: canvas) {
+            notesCard = CanvasProjectNoteCard.id(on: document, notes: notes, resolver: store.resolver)
+        }
+        // The workspace holding the notes card alone (`CanvasProjectNoteCard.notesWorkspace`), read
+        // the way the workspace rows are, so the two agree on which one it is.
+        let names = CanvasWorkspaces.names(of: canvas)
+        notesWorkspace = notesCard.flatMap { card in
+            names.first { CanvasWorkspaces.tiling(named: $0, of: canvas)?.ids == [card] }
+                ?? names.first { $0 == CanvasProjectNoteCard.notesWorkspaceName
+                    && CanvasWorkspaces.tiling(named: $0, of: canvas)?.ids.contains(card) == true }
+        }
         func row(_ item: CanvasItem) -> Row? {
-            guard let node = document.node(id: item.id) else { return nil }
+            guard item.id != notesCard, let node = document.node(id: item.id) else { return nil }
             var host: String?, symbol: String?
             switch item.kind {
             case .page(let h): host = h
@@ -147,7 +174,10 @@ final class SpaceFrame {
         self.today = today
         cardCount = sections.reduce(0) { $0 + $1.items.count }
         let current = board?.workspaceName
-        workspaces = CanvasWorkspaces.names(of: canvas).map { name in
+        let selectedTab = split?.tabs.selected.view
+        notesShowing = !isSpace && (selectedTab?.isNotesTab == true
+            || (current != nil && current == notesWorkspace && (board?.isTiled ?? false)))
+        workspaces = CanvasWorkspaces.names(of: canvas).filter { $0 != notesWorkspace }.map { name in
             let ids = CanvasWorkspaces.tiling(named: name, of: canvas)?.ids ?? []
             let hosts = ids.prefix(3).map { id -> String? in
                 if case .link(let url)? = document.node(id: id)?.content { return URL(string: url)?.host() }
@@ -155,7 +185,7 @@ final class SpaceFrame {
             }
             return Workspace(name: name, hosts: hosts, showing: current == name && (board?.isTiled ?? false))
         }
-        boardShowing = !(board?.isTiled ?? false)
+        boardShowing = !(board?.isTiled ?? false) && !notesShowing
         // The page the focused tile is on now, not the address the card was saved with.
         let frontURL: URL? = front.flatMap { id in
             if let live = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL { return live }
@@ -168,6 +198,15 @@ final class SpaceFrame {
         // The mini player: a card making sound that isn't on screen, and one it paused, until shown.
         heldInPlayer = heldInPlayer.filter { id in everyRow.contains { $0.id == id && !$0.showing } }
         player = everyRow.first { $0.playing && !$0.showing } ?? everyRow.first { heldInPlayer.contains($0.id) }
+        guard let spaceID else {
+            // A project's board: nothing archives, and its colour is the project's.
+            archiveAfter = nil
+            otherSpaces = []
+            spaceTitle = ""
+            washColor = project?.color
+            spaceColor = Color(nsColor: washColor?.nsColor ?? .systemGray)
+            return
+        }
         noteSeen(everyRow.filter(\.showing).map(\.id), all: everyRow.map(\.id))
         let space = Spaces.shared.space(spaceID)
         archiveAfter = space?.archiveAfter
@@ -202,6 +241,7 @@ final class SpaceFrame {
     ]
 
     func setArchiveAfter(_ seconds: Double?) {
+        guard let spaceID else { return }
         Spaces.shared.change(spaceID) { $0.archiveAfter = seconds }
         archiveIfDue(force: true)
     }
@@ -228,6 +268,7 @@ final class SpaceFrame {
 
     private func noteSeen(_ showing: [String], all: [String]) {
         var seen = UserDefaults.standard.dictionary(forKey: Self.seenKey) as? [String: Double] ?? [:]
+        guard let spaceID else { return }
         let now = Date().timeIntervalSince1970
         var changed = false
         for id in all {
@@ -245,7 +286,7 @@ final class SpaceFrame {
     private func archiveIfDue(force: Bool) {
         guard force || Date().timeIntervalSince(lastSweep) > 60 else { return }
         lastSweep = Date()
-        guard let after = Spaces.shared.space(spaceID)?.archiveAfter else { return }
+        guard let spaceID, let after = Spaces.shared.space(spaceID)?.archiveAfter else { return }
         let seen = UserDefaults.standard.dictionary(forKey: Self.seenKey) as? [String: Double] ?? [:]
         let cutoff = Date().timeIntervalSince1970 - after
         let due = (today.loose + today.folders.flatMap(\.rows))
@@ -287,6 +328,7 @@ final class SpaceFrame {
     }
 
     func moveToSpace(_ id: String, _ target: String) {
+        guard let spaceID else { return }
         Spaces.shared.move(id, from: spaceID, to: target)
         refresh()
     }
@@ -402,6 +444,18 @@ final class SpaceFrame {
         refresh()
     }
 
+    /// A project's Notes row: its Notes workspace, made if it isn't yet (`ProjectSplitViewController.openTab`).
+    func showNotes() {
+        split?.openTab(.notes)
+        refresh()
+    }
+
+    /// The window's state, which the project list in the name's popover shares with the window.
+    @ObservationIgnored weak var windowState: ProjectWindowState?
+    /// Bumped to open the project list under the name (File ▸ All Projects…).
+    private(set) var projectsRequests = 0
+    func askForProjects() { projectsRequests += 1 }
+
     func showWorkspace(_ name: String) {
         split?.openTab(.board(.workspace(name)))
         refresh()
@@ -441,9 +495,10 @@ final class SpaceFrame {
     /// ⌘W: the focused tile out of the layout — the card stays in the sidebar, and ⌘Z puts it back.
     /// False with no tile focused, so the window closes instead.
     func closeFront() -> Bool {
+        // In a project's notes, ⌘W goes to the board: the notes don't close.
+        if notesShowing { showBoard(); return true }
         guard let board, board.isTiled, let id = board.focusedTile ?? board.tiling?.ids.first else { return false }
-        noteClosed(id)
-        board.closeInTiling([id])
+        board.closeTileRemembering(id, inSpace: spaceID)
         refresh()
         return true
     }
@@ -464,13 +519,6 @@ final class SpaceFrame {
         return true
     }
 
-    /// For ⇧⌘T: a web card's address and where it was.
-    private func noteClosed(_ id: String) {
-        guard let node = store.document.node(id: id), case .link(let address) = node.content else { return }
-        let live = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL?.absoluteString
-        CanvasHistory.didClose(live ?? address, card: id, inSpace: spaceID)
-    }
-
     /// ⇧⌘T: the card if it's still on the board (⌘W leaves it there), else a new card on its address.
     func reopen(_ closed: CanvasHistory.Closed) {
         if store.document.node(id: closed.cardID) != nil { return show(closed.cardID) }
@@ -480,9 +528,16 @@ final class SpaceFrame {
     /// The grip's ✕: this tile out of the layout, as ⌘W on it.
     func closeTile(_ id: String) {
         guard let board, board.isTiled, board.tiling?.ids.contains(id) == true else { return }
-        noteClosed(id)
-        board.closeInTiling([id])
+        board.closeTileRemembering(id, inSpace: spaceID)
         refresh()
+    }
+
+    /// For ⇧⌘T, a card coming off the board (a row's Close, Clear): its address and where it was.
+    /// Tiles taken out of the layout are remembered by `closeTileRemembering`.
+    private func noteClosed(_ id: String) {
+        guard let node = store.document.node(id: id), case .link(let address) = node.content else { return }
+        let live = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL?.absoluteString
+        CanvasHistory.didClose(live ?? address, card: id, canvas: canvas, inSpace: spaceID)
     }
 
     /// ⌃⇥ and ⇧⌘]: the card after the one in front, round to the first.
@@ -523,10 +578,8 @@ final class SpaceFrame {
         CanvasHistory.candidates(board: store.document.nodes, back: frontPage?.backSteps ?? [])
     }
 
-    /// The engine a space searches with: Settings', or DuckDuckGo when that's None (a browser has one).
-    static var engine: CanvasSearchEngine {
-        CanvasSearchEngine.current == .none ? .duckDuckGo : CanvasSearchEngine.current
-    }
+    /// The engine a space searches with: Settings', as every address field (`CanvasSearchEngine.current`).
+    static var engine: CanvasSearchEngine { CanvasSearchEngine.current }
 
     /// The address field gave up the keyboard without a line.
     func addressCancelled() {
@@ -562,13 +615,16 @@ final class SpaceFrame {
     /// `showing` (⌘T, a link that wants a new window) or left in the sidebar (⇧⌘-click).
     @discardableResult
     func openNewCard(_ address: String, showing: Bool) -> String? {
-        guard let board else { return nil }
+        guard board != nil else { return nil }
         let right = store.document.nodes.map { $0.frame.x + $0.frame.width }.max() ?? 0
         let node = CanvasNode(content: .link(url: address),
                               frame: CanvasRect(x: right + 40, y: 0, width: 400, height: 400))
-        let id = board.addCard(node, actionName: "New Tab")
-        if showing { show(id) } else { refresh() }
-        return id
+        // Onto the board only, not `addCard`, which also tiles it into the layout up: in a named
+        // workspace that grew the workspace (a project's Notes became two cards) instead of showing
+        // the card in the tile you're in (2026-11-05).
+        store.change("New Tab") { $0.nodes.append(node) }
+        if showing { show(node.id) } else { refresh() }
+        return node.id
     }
 }
 
@@ -600,6 +656,9 @@ struct SpaceFrameSidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let project = frame.project {
+                ProjectFrameHeader(store: project, state: frame.windowState, requests: frame.projectsRequests)
+            }
             addressField
             if !frame.favorites.isEmpty { favorites }
             // The list fills the scroll area at least, so the empty sidebar under the last row is the
@@ -607,6 +666,9 @@ struct SpaceFrameSidebar: View {
             GeometryReader { area in
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
+                    if !frame.isSpace {
+                        SpaceSidebarRow(title: "Notes", symbol: "doc.text", on: frame.notesShowing) { frame.showNotes() }
+                    }
                     SpaceSidebarRow(title: "Board", symbol: "rectangle.on.rectangle.angled",
                                     trailing: "\(frame.cardCount)", on: frame.boardShowing, dim: true) { frame.showBoard() }
                     ForEach(frame.workspaces) { workspace in
@@ -616,7 +678,7 @@ struct SpaceFrameSidebar: View {
                         .contextMenu { Button("Delete Workspace") { frame.deleteWorkspace(workspace.name) } }
                     }
                     group(frame.pinned)
-                    todayRule
+                    if frame.isSpace { todayRule } else { cardsRule }
                     SpaceSidebarRow(title: "New Tab", symbol: "plus", dim: true) { frame.askForAddress() }
                     group(frame.today)
                 }
@@ -725,6 +787,16 @@ struct SpaceFrameSidebar: View {
         .contextMenu { archiveMenu }
     }
 
+    /// A project's: the rule over its unpinned cards, which stay until you close them (nothing archives).
+    private var cardsRule: some View {
+        HStack(spacing: 6) {
+            Text("Cards").font(.system(size: 11, weight: .semibold)).foregroundStyle(.tertiary)
+            Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1)
+        }
+        .frame(height: 18)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+    }
+
     @ViewBuilder
     private var archiveMenu: some View {
         Button("Clear Today") { frame.clearToday() }.disabled(frame.today.isEmpty)
@@ -737,7 +809,12 @@ struct SpaceFrameSidebar: View {
         }
     }
 
+    @ViewBuilder
     private var footer: some View {
+        if let project = frame.project { ProjectFrameFoot(store: project) } else { spaceFooter }
+    }
+
+    private var spaceFooter: some View {
         HStack(spacing: 7) {
             Circle().fill(frame.spaceColor).frame(width: 8, height: 8)
             Text(frame.spaceTitle).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).lineLimit(1)
@@ -788,6 +865,123 @@ struct SpaceFrameSidebar: View {
         }
         Divider()
         Button(row.pinned ? "Unpin" : "Close") { frame.close(row.id) }
+    }
+}
+
+/// A project's frame, at the top: the project's mark and name, a menu of the other projects — Up Next,
+/// then the project list as the window's sidebar had it, under its filters (docs/spaces.md § The frame).
+struct ProjectFrameHeader: View {
+    var store: PMStore
+    var state: ProjectWindowState?
+    /// A change opens the list (File ▸ All Projects…).
+    var requests: Int
+    @State private var showing = false
+    @State private var hovering = false
+
+    private var name: String {
+        let title = store.notes?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let title, !title.isEmpty { return title }
+        return store.projectName.map { ProjectCodes.display($0) } ?? "Folio"
+    }
+
+    var body: some View {
+        Button { showing.toggle() } label: {
+            HStack(spacing: 8) {
+                if let icon = store.icon {
+                    ProjectIconMark(icon: icon, size: 15, tint: store.color.map { Color(nsColor: $0.nsColor) })
+                        .frame(width: 18, height: 18)
+                } else {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color(nsColor: store.color?.nsColor ?? .systemGray))
+                        .frame(width: 16, height: 16)
+                }
+                Text(name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(hovering || showing ? 0.06 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Other projects")
+        .onChange(of: requests) { showing = true }
+        .popover(isPresented: $showing, arrowEdge: .bottom) {
+            if let state { ProjectListPopover(store: store, state: state) }
+        }
+    }
+}
+
+/// The project list in the name's popover: filters as chips over it, then the list the window's
+/// sidebar used to be (Up Next first). Picking a project switches the window to it.
+struct ProjectListPopover: View {
+    var store: PMStore
+    var state: ProjectWindowState
+    @AppStorage("PMSidebarStatus") private var status: ProjectStatusFilter = .active
+    @AppStorage("PMSidebarGroup") private var grouping: ProjectGrouping = .domain
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                chip("Active", status == .active) { status = .active }
+                chip("Archived", status == .archived) { status = .archived }
+                chip("All", status == .all) { status = .all }
+                Spacer(minLength: 8)
+                chip("By Due", grouping == .due) { grouping = .due }
+                chip("By Domain", grouping == .domain) { grouping = .domain }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
+            ProjectSidebar(store: store, state: state)
+        }
+        .frame(width: 320, height: 540)
+    }
+
+    private func chip(_ title: String, _ on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 11, weight: on ? .semibold : .regular))
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(on ? 0.12 : 0.05)))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(on ? .primary : .secondary)
+    }
+}
+
+/// A project's frame, at the foot: the task you're on (tick to finish it) and the session.
+struct ProjectFrameFoot: View {
+    var store: PMStore
+
+    private var sessionLine: String {
+        guard let session = store.notes?.sessions.first else { return "No session yet" }
+        let label = SessionLabel(parsing: session.label)
+        let day = session.date == formatSessionDate() ? "Today" : session.date
+        return [day, label.name.isEmpty ? label.time : label.name].compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let todo = store.focusedTodo {
+                HStack(spacing: 7) {
+                    Button { store.complete(todo) } label: {
+                        Image(systemName: "circle").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Complete")
+                    Text(todo.text).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                }
+            }
+            HStack(spacing: 7) {
+                Text(sessionLine).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                Spacer()
+                if !CanvasDownloads.shared.items.isEmpty { SpaceDownloadsButton() }
+            }
+        }
+        .padding(.horizontal, 8)
     }
 }
 

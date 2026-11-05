@@ -118,7 +118,7 @@ final class CanvasPageView: WKWebView {
 
     /// Arc's dead space (docs/spaces.md § The frame): in a space's layout, a press near the top of the
     /// page on nothing you can use — a header's blank background — moves the window, as a title bar
-    /// does. Asked of the card, which knows whether it is a tile in a space.
+    /// does. Asked of the card, which knows whether it is a tile (or the card filling the window).
     var dragsWindowFromDeadSpace: () -> Bool = { false }
 
     /// How far down from the page's top a press can be and still count: where a site's header sits.

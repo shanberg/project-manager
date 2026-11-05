@@ -70,13 +70,10 @@ final class CanvasLinkStatus: NSView {
             ? link.absoluteString.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
             : link.absoluteString
         guard !address.isEmpty else { return nil }
-        if inSpace {
-            // A space is a browser: ⌘ is a new tab, ⇧ a preview over the page.
-            if flags.contains(.command) { return "Open in a new tab: " + address }
-            if flags.contains(.shift) { return "Preview: " + address }
-            return address
-        }
-        return flags.contains(.command) ? "Open as a new card: " + address : address
+        // ⇧ is a preview over the page everywhere; ⌘ a new tab in a space, a new card elsewhere.
+        if flags.contains(.command) { return (inSpace ? "Open in a new tab: " : "Open as a new card: ") + address }
+        if flags.contains(.shift) { return "Preview: " + address }
+        return address
     }
 
     func show(_ text: String?) {

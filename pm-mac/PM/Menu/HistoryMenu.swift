@@ -63,7 +63,8 @@ final class HistoryMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
 
     @objc func reopenClosed(_ sender: Any?) {
         guard let closed = CanvasHistory.takeLastClosed() else { return NSSound.beep() }
-        Spaces.shared.reopen(closed)
+        if closed.spaceID != nil { return Spaces.shared.reopen(closed) }
+        guard ProjectWindowController.reopen(closed) else { return NSSound.beep() }
     }
 
     @objc func showAll(_ sender: Any?) { HistoryWindow.shared.show() }

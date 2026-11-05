@@ -144,8 +144,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         guard pill != nil else { return }
         layoutGutters()
         for piece in [pill, tabBar, capsule] as [NSView] { piece.isHidden = hidesHeader }
+        if hidesHeader && presentation == .list { presentation = .board }
         scroll.board.topClearance = headerClearance
-        scroll.board.dragsWindowFromGround = hidesHeader
         if bandBlocker.superview == nil { container.addSubview(bandBlocker) }
         let band = CGFloat(Self.titlebarBand)
         // Over the tiles' tops only: the gutters round them are left to the band's own drag.
@@ -173,6 +173,13 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// a second way out of a workspace with no way back.
     var presentation: CanvasPresentation = .board {
         didSet {
+            // Under the frame the List lens is the sidebar again, rows beside rows: the board instead.
+            // (A set inside didSet doesn't call it again, so this applies the change itself.)
+            if presentation == .list && hidesHeader {
+                presentation = .board
+                if oldValue != .board { applyPresentation(); rememberViewState() }
+                return
+            }
             guard presentation != oldValue else { return }
             applyPresentation()
             rememberViewState()
@@ -1620,6 +1627,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         if item.action == #selector(showCanvasAs(_:)) {
             guard let lens = item.representedObject as? CanvasPresentation else { return false }
             item.state = presentation == lens ? .on : .off
+            // No List under the frame: its rows are the sidebar's (docs/spaces.md § The frame).
+            if lens == .list && hidesHeader { return false }
             // **Dim in a workspace, and in the note view**, which are tilings: a lens is the canvas
             // tab's (docs/items.md D5), and switching one on from inside a workspace would be a second
             // way out of it with nothing to say how you get back.

@@ -83,9 +83,11 @@ enum CanvasSearchEngine: String, CaseIterable, Identifiable {
     static let defaultsKey = "PMCanvasSearchEngine"
 
     /// What Settings has, read at the moment it is needed rather than cached — the field is opened far
-    /// less often than the setting could change.
+    /// less often than the setting could change. None until something is picked, in every address
+    /// field, a space's or a project's (2026-11-05: spaces used to search DuckDuckGo over None).
+    static let fallback: CanvasSearchEngine = .none
     static var current: CanvasSearchEngine {
-        UserDefaults.standard.string(forKey: defaultsKey).flatMap(CanvasSearchEngine.init) ?? .none
+        UserDefaults.standard.string(forKey: defaultsKey).flatMap(CanvasSearchEngine.init) ?? fallback
     }
 
     var id: String { rawValue }

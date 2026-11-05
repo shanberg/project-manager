@@ -1,95 +1,56 @@
 import XCTest
 
-/// How far a board may be pushed around inside its window — `CanvasPanBounds`.
+/// How far a board may be pushed around inside its window — `CanvasPanBounds`. The frame is the cards
+/// plus `room` a side, and the scroll view's own edge is the limit, so these are about the frame.
 @MainActor
 final class CanvasPanBoundsTests: XCTestCase {
+    private let window = CGSize(width: 1200, height: 800)
+    private let cards = CGRect(x: 1600, y: 1600, width: 900, height: 700)
 
-    /// A 1200×800 window over a board four screens wide, and a board that has not been sized yet.
-    private let window = CGRect(x: 0, y: 0, width: 1200, height: 800)
-    private let board = CGRect(x: 0, y: 0, width: 4800, height: 3200)
-
-    private func settled(at origin: CGPoint, on held: CGRect) -> CGRect? {
-        CanvasPanBounds.constrain(CGRect(origin: origin, size: window.size), holding: held)
+    /// The frame `CanvasBoardView.recomputeContent` makes, and the furthest the window's origin goes
+    /// each way inside it.
+    private func frame(visible: CGSize, scale: CGFloat = 1) -> CGRect {
+        let room = CanvasPanBounds.room(visible: visible, scale: scale, cards: cards.size)
+        return cards.insetBy(dx: -room.width, dy: -room.height)
     }
 
-    // MARK: What panning is for
-
-    func testAPositionInsideTheBoardIsLeftAlone() {
-        XCTAssertEqual(settled(at: CGPoint(x: 300, y: 200), on: board)?.origin,
-                       CGPoint(x: 300, y: 200))
+    func testAtTheLeadingEdgeKeepIsStillShowing() {
+        let frame = frame(visible: window)
+        // The window as far left as the frame allows: its right edge is `keep` into the cards.
+        XCTAssertEqual(frame.minX + window.width - cards.minX, CanvasPanBounds.keep)
+        XCTAssertEqual(frame.minY + window.height - cards.minY, CanvasPanBounds.keep)
     }
 
-    /// The whole point of the override: a board smaller than the window can still be pushed aside.
-    func testABoardThatFitsCanStillBePannedAway() {
-        let small = CGRect(x: 0, y: 0, width: 600, height: 400)
-        XCTAssertEqual(settled(at: CGPoint(x: 200, y: 0), on: small)?.origin.x, 200)
+    func testAtTheTrailingEdgeKeepIsStillShowing() {
+        let frame = frame(visible: window)
+        // As far right: the window's left edge is `keep` short of the cards' right edge.
+        XCTAssertEqual(cards.maxX - (frame.maxX - window.width), CanvasPanBounds.keep)
+        XCTAssertEqual(cards.maxY - (frame.maxY - window.height), CanvasPanBounds.keep)
     }
 
-    func testYouCannotPushTheBoardCompletelyOutOfTheWindow() {
-        // Far enough right that the board would be off the left edge entirely.
-        let settled = settled(at: CGPoint(x: 9000, y: 0), on: board)
-        // `keep` of the board is still in the window: the window's left edge stops that far in from
-        // the board's right edge.
-        XCTAssertEqual(settled?.minX, board.maxX - CanvasPanBounds.keep)
+    /// The whole point of the room: a board smaller than the window can still be pushed aside.
+    func testABoardThatFitsCanStillBePanned() {
+        let frame = frame(visible: CGSize(width: 4000, height: 3000))
+        XCTAssertGreaterThan(frame.width, 4000)
+        XCTAssertGreaterThan(frame.height, 3000)
     }
 
-    func testNorTheOtherWay() {
-        let settled = settled(at: CGPoint(x: -9000, y: 0), on: board)
-        XCTAssertEqual(settled?.maxX, board.minX + CanvasPanBounds.keep)
+    /// `keep` is screen points: zoomed out to 10%, a board point is a tenth of a pixel, so 120pt on
+    /// screen is 1200 of the board's. Held in board points it was 12 pixels — gone, in practice.
+    func testKeepIsOnScreenAtAnyZoom() {
+        let zoomedOut = CGSize(width: window.width * 10, height: window.height * 10)
+        let room = CanvasPanBounds.room(visible: zoomedOut, scale: 10, cards: CGSize(width: 9000, height: 9000))
+        XCTAssertEqual(zoomedOut.width - room.width, 1200)
     }
 
-    // MARK: The board that isn't there yet
-
-    /// The bug this was extracted for. A canvas is installed before its document is read, so the
-    /// document view is briefly a point at the origin — and the old rule, asked then, permitted only
-    /// origins around −`keep`: the window pinned above and left of the board, every card off the
-    /// bottom-right, and a jump on the first pan when the real board arrived.
-    func testAnUnsizedBoardHasNoOpinion() {
-        XCTAssertNil(settled(at: .zero, on: .zero))
-        XCTAssertNil(settled(at: CGPoint(x: 40, y: 40), on: CGRect(x: 0, y: 0, width: 0, height: 900)))
+    /// A board narrower than the sliver cannot spare it: all of it stays.
+    func testABoardSmallerThanTheSliverIsHeldWhole() {
+        let room = CanvasPanBounds.room(visible: window, scale: 1, cards: CGSize(width: 40, height: 40))
+        XCTAssertEqual(room.width, window.width - 40)
     }
 
-    /// The old arithmetic, stated so the regression is named rather than implied: with a zero-sized
-    /// board it answers a position outside every one the board can be seen at.
-    func testTheOldRuleWouldHavePinnedAnUnsizedBoardOffScreen() {
-        let empty = CGRect.zero
-        let x = min(max(0, empty.minX - window.width + CanvasPanBounds.keep),
-                    empty.maxX - CanvasPanBounds.keep)
-        XCTAssertEqual(x, -CanvasPanBounds.keep)
-    }
-
-    /// And the near miss it shades into: a board narrower than `keep` cannot spare `keep`.
-    func testABoardSmallerThanTheSliverIsStillReachable() {
-        let sliver = CGRect(x: 0, y: 0, width: 40, height: 40)
-        let settled = settled(at: .zero, on: sliver)
-        XCTAssertEqual(settled?.origin, .zero, "The board is at the window's origin and visible there.")
-    }
-
-    // MARK: Which rectangle is held
-
-    /// The board's frame is its cards grown by `CanvasBoardView.margin` — 1600pt a side — and the two
-    /// rules that follow are not close to each other. Held against the frame you may sit a whole
-    /// window away from the last card and still be "on the board"; held against the cards you may not.
-    /// `CanvasClipView.held` is the one line that chooses, and this is the difference it makes.
-    func testHoldingTheFrameLetsYouLoseEveryCard() {
-        let cards = CGRect(x: 1600, y: 1600, width: 900, height: 700)
-        let frame = cards.insetBy(dx: -1600, dy: -1600)
-        // As far up and left as each rule permits — the board pushed as far the other way as it goes.
-        let onFrame = settled(at: CGPoint(x: -9000, y: -9000), on: frame)!
-        let onCards = settled(at: CGPoint(x: -9000, y: -9000), on: cards)!
-
-        XCTAssertLessThan(onFrame.minX, onCards.minX,
-                          "The frame rule permits the further travel — that is the bug.")
-        XCTAssertFalse(onFrame.intersects(cards),
-                       "Held by the frame, every card is off screen and nothing says which way back.")
-        XCTAssertTrue(onCards.intersects(cards), "Held by the cards, a card is always on screen.")
-    }
-
-    /// And it costs none of the room it was protecting: a sliver of card at one edge leaves the rest
-    /// of the window — most of a screenful — empty to spread into.
-    func testHoldingTheCardsStillLeavesRoomToThink() {
-        let cards = CGRect(x: 1600, y: 1600, width: 900, height: 700)
-        let onCards = settled(at: CGPoint(x: -9000, y: 0), on: cards)!.origin.x
-        XCTAssertEqual(cards.minX - onCards, window.width - CanvasPanBounds.keep)
+    /// No window yet (a board installed before its pane is laid out): no room is no room, never less.
+    func testNoWindowIsNoRoom() {
+        XCTAssertEqual(CanvasPanBounds.room(visible: .zero, scale: 1, cards: cards.size), .zero)
     }
 }

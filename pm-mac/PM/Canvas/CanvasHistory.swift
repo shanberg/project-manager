@@ -132,18 +132,22 @@ enum CanvasHistory {
 
     // MARK: Closed cards
 
-    /// A card closed in a space: where it was, so ⇧⌘T can show it again or make it anew.
+    /// A web tile taken out of a layout, in a space or a project: where it was, so ⇧⌘T can show it
+    /// again or make it anew.
     struct Closed {
         var address: String
-        var spaceID: String
+        /// The space it was in; nil for a project's board.
+        var spaceID: String?
+        /// The board's canvas file, which finds a project's window again.
+        var canvas: URL
         var cardID: String
     }
 
     private(set) static var closed: [Closed] = []
 
-    static func didClose(_ address: String, card: String, inSpace space: String) {
+    static func didClose(_ address: String, card: String, canvas: URL, inSpace space: String?) {
         closed.removeAll { $0.cardID == card }
-        closed.append(Closed(address: address, spaceID: space, cardID: card))
+        closed.append(Closed(address: address, spaceID: space, canvas: canvas, cardID: card))
         if closed.count > 50 { closed.removeFirst(closed.count - 50) }
     }
 

@@ -234,13 +234,13 @@ final class CanvasTileControls {
         later()
     }
 
-    /// Out of the layout, as ⌘W: the card stays on the board (and a space's sidebar); ⌘Z puts it back,
-    /// and in a space ⇧⌘T too.
+    /// Out of the layout, as ⌘W: the card stays on the board (and a space's sidebar); ⌘Z or ⇧⌘T puts
+    /// it back.
     func outOfLayout() {
         guard let board, let tile else { return }
         let frame = self.frame
         close()
-        if let frame { frame.closeTile(tile) } else { board.closeInTiling([tile]) }
+        if let frame { frame.closeTile(tile) } else { board.closeTileRemembering(tile, inSpace: nil) }
     }
 
     func more(from view: NSView) {
@@ -399,9 +399,9 @@ struct CanvasTileControlsView: View {
         if model.editing {
             CanvasAddressTextField(
                 text: $model.draft, focusToken: model.focusToken,
-                engine: model.inSpace ? SpaceFrame.engine : CanvasSearchEngine.current,
+                engine: CanvasSearchEngine.current,
                 candidates: model.candidates, originalAddress: model.address, boxWidth: 260,
-                placeholder: model.inSpace || CanvasSearchEngine.current != .none ? "Search or enter address"
+                placeholder: CanvasSearchEngine.current != .none ? "Search or enter address"
                                                                                   : "Enter an address"
             ) { destination in
                 controls.go(destination)

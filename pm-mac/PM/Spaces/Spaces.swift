@@ -114,7 +114,7 @@ final class Spaces {
     /// furthest forward, else the one used last, else the first. Nil with no spaces at all.
     var forIncomingLinks: String? {
         let open = NSApp.orderedWindows.lazy.compactMap { $0.windowController as? ProjectWindowController }
-            .compactMap(\.spaceFrame).first?.spaceID
+            .compactMap { $0.spaceFrame?.spaceID }.first
         if let open { return open }
         if let last = lastUsed, space(last) != nil { return last }
         return file.spaces.first?.id
@@ -122,10 +122,10 @@ final class Spaces {
 
     /// ⇧⌘T: a card closed in a space, back in that space.
     func reopen(_ closed: CanvasHistory.Closed) {
-        guard space(closed.spaceID) != nil else { return }
-        show(closed.spaceID)
+        guard let spaceID = closed.spaceID, space(spaceID) != nil else { return }
+        show(spaceID)
         DispatchQueue.main.async { [weak self] in
-            guard let window = self?.window(of: closed.spaceID) else { return }
+            guard let window = self?.window(of: spaceID) else { return }
             window.window?.makeKeyAndOrderFront(nil)
             window.spaceFrame?.reopen(closed)
         }
