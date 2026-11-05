@@ -173,6 +173,18 @@ page properly" is Open in Browser and always has been.
 - The card is stepped into, so the page is live and the keyboard goes to it.
 - These are three of Apple's criteria for the browser passkey entitlement (S-008).
 
+**Copy Sign-In From — added 2026-11-04.**
+- Site ▸ Copy Sign-In From ▸ a browser: copies that browser's cookies for the card's site into the card's session, then reloads every card on that site and session ([CanvasCookieImport](../pm-mac/PM/Canvas/CanvasCookieImport.swift)).
+- For sign-ins that can't finish in a card: Apple's (`idmsa.apple.com` inside another apple.com page), passkey-only sites.
+- Scope: the registrable domain (`music.apple.com` → `apple.com`), as Sign Out. A short two-part-suffix list, not the public suffix list.
+- Sources: Safari; Chrome, Arc, Brave, Edge, Vivaldi, Chromium (one item per profile, named from `Local State`); Firefox (per profile in `profiles.ini`). Listed when the browser's files exist.
+- Safari needs Full Disk Access; refused → an alert with Open Full Disk Access….
+- Chromium: the key is in the Keychain (`<Browser> Safe Storage`); one prompt per browser per launch. AES-128-CBC, PBKDF2 `saltysalt`/1003; database version 24+ drops a 32-byte host hash.
+- Reads a copy of the file (with `-wal`/`-shm`), so the browser can stay open.
+- Cookies only; local storage doesn't come across. Expired cookies are skipped; session cookies last until Folio quits.
+- Nothing came across → "<Browser> has no sign-in for <site>."
+- Verified 2026-11-04: music.apple.com signed in and played after a copy, in the installed app.
+
 **Go to Project over a browser carries its front tab — added 2026-10-28.**
 - Summoned over Safari or a Chromium browser (Chrome, Brave, Edge, Arc, Vivaldi), go-to-project shows the front tab as a page chip beside the field ([BrowserTab](../pm-mac/PM/QuickBar/BrowserTab.swift)).
 - A browser not on the list is recognised by its scripting dictionary: `active tab` means Chromium (Helium, Thorium), `current tab` means Safari.

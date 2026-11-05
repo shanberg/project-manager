@@ -862,6 +862,15 @@ extension CanvasBoardView {
         let sites = selectedSites()
         let site = NSMenu(title: sites.count == 1 ? sites[0] : "\(sites.count) Sites")
         add(site, "Sign In\u{2026}", #selector(signInToLink))
+        // For sites whose sign-in can't finish in a card (Apple's, passkey-only ones).
+        let sources = CanvasCookieImport.sources()
+        if !sources.isEmpty {
+            let copy = NSMenu(title: "Copy Sign-In From")
+            for source in sources {
+                add(copy, source.title, #selector(copySignInToLink(_:))).representedObject = source.title
+            }
+            site.addItem(withTitle: "Copy Sign-In From", action: nil, keyEquivalent: "").submenu = copy
+        }
         add(site, "Sign Out", #selector(signOutOfLink))
         site.addItem(.separator())
         // When a card comes up empty the question is always "is it this site?".
@@ -2390,6 +2399,58 @@ extension CanvasBoardView {
 
     @objc private func signInToLink() {
         for id in selection { (nodeViews[id] as? CanvasLinkNodeView)?.signIn() }
+    }
+
+    /// Site ▸ Copy Sign-In From ▸ a browser. One copy per site and session among the selected cards.
+    /// Says so only when nothing came across; otherwise the cards reloading signed in is the answer.
+    @objc private func copySignInToLink(_ sender: NSMenuItem) {
+        guard let title = sender.representedObject as? String,
+              let source = CanvasCookieImport.sources().first(where: { $0.title == title }) else { return }
+        var seen: Set<String> = []
+        let cards = selectedLinkCards.filter {
+            let site = CanvasCookieImport.registrableDomain(of: $0.url?.host() ?? $0.siteName)
+            return seen.insert(site + "\u{0}" + ($0.profile ?? "")).inserted
+        }
+        Task { @MainActor in
+            for card in cards {
+                let site = CanvasCookieImport.registrableDomain(of: card.url?.host() ?? card.siteName)
+                do {
+                    if try await card.copySignIn(from: source) == 0 {
+                        Self.reportCopySignIn("\(source.title) has no sign-in for \(site).",
+                            "Sign in to \(site) in \(source.title), then try again.")
+                    }
+                } catch CanvasCookieImport.Failure.needsFullDiskAccess {
+                    Self.reportCopySignIn("Folio can\u{2019}t read \(source.title)\u{2019}s cookies.",
+                        "Give Folio Full Disk Access in System Settings, then quit and reopen Folio.",
+                        openFullDiskAccess: true)
+                    return
+                } catch CanvasCookieImport.Failure.keychainRefused {
+                    Self.reportCopySignIn("Folio wasn\u{2019}t allowed to unlock \(source.title)\u{2019}s cookies.",
+                        "Choose Copy Sign-In From again and allow the Keychain prompt.")
+                    return
+                } catch {
+                    Log.write("canvas cookie import failed: \(error)")
+                    Self.reportCopySignIn("Couldn\u{2019}t copy the sign-in from \(source.title).",
+                        "\(error)")
+                    return
+                }
+            }
+        }
+    }
+
+    private static func reportCopySignIn(_ message: String, _ detail: String, openFullDiskAccess: Bool = false) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = detail
+        if openFullDiskAccess {
+            alert.addButton(withTitle: "Open Full Disk Access\u{2026}")
+            alert.addButton(withTitle: "Cancel")
+        }
+        let response = alert.runModal()
+        if openFullDiskAccess, response == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func signOutOfLink() {

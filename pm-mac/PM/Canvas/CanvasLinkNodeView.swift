@@ -1574,6 +1574,22 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         }
     }
 
+    /// Copy this card's site's sign-in from another browser into its jar, then reload every card on the
+    /// site so the result shows. See `CanvasCookieImport`.
+    /// - Returns the number of cookies copied.
+    func copySignIn(from source: CanvasCookieImport.Source) async throws -> Int {
+        let site = url?.host() ?? host
+        let copied = try await CanvasCookieImport.copy(
+            from: source, host: site, into: CanvasWebSession.store(named: profile))
+        guard copied > 0 else { return 0 }
+        let domain = CanvasCookieImport.registrableDomain(of: site)
+        for card in Self.cards.allObjects where card.profile == profile
+            && CanvasCookieImport.matches(card.url?.host() ?? card.host, domain) {
+            card.reload()
+        }
+        return copied
+    }
+
     /// Sign in to this card's site in a window you can actually use — see `CanvasSignInWindow`.
     func signIn() {
         guard let url else { return }
