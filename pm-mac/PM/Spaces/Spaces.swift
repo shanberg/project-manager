@@ -158,7 +158,14 @@ final class Spaces {
 
     /// A card off one space's board and onto another's, right of everything there, as Today.
     func move(_ cardID: String, from id: String, to target: String) {
-        guard id != target, let from = canvas(of: id), let to = canvas(of: target) else { return }
+        guard id != target, let from = canvas(of: id) else { return }
+        move(cardID, fromCanvas: from, to: target)
+    }
+
+    /// The same from any board, a project's included: a row dropped on a space's dock mark.
+    func move(_ cardID: String, fromCanvas from: URL, to target: String) {
+        guard let to = canvas(of: target), from.standardizedFileURL != to.standardizedFileURL else { return }
+        let id = space(forCanvas: from)?.id ?? ""
         if !FileManager.default.fileExists(atPath: to.path) { try? makeCanvas(at: to) }
         guard let source = try? CanvasStoreRegistry.store(for: from) else { return }
         defer { CanvasStoreRegistry.release(source) }
@@ -169,8 +176,9 @@ final class Spaces {
         node.frame = CanvasRect(x: right + 40, y: 0, width: node.frame.width, height: node.frame.height)
         SpaceCardMarks.setPinned(false, on: &node)
         SpaceCardMarks.setFavorite(false, on: &node)
+        node.extra[SpaceCardMarks.orderKey] = nil
         let moved = node
-        destination.change("Move from \(space(id)?.title ?? "Space")") { $0.nodes.append(moved) }
+        destination.change("Move from \(space(id)?.title ?? "Project")") { $0.nodes.append(moved) }
         destination.save()
         source.change("Move to \(space(target)?.title ?? "Space")") { doc in
             doc.nodes.removeAll { $0.id == cardID }

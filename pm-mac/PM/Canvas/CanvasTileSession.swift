@@ -579,6 +579,22 @@ struct CanvasTileSession: Equatable {
         return nearest.distance < 0.27 ? .beside(nearest.side) : middle
     }
 
+    /// Where a card dragged in from outside the tiles (a sidebar row) lands with the pointer at `point`:
+    /// the tile under it and what its place there does, or nil for nowhere.
+    ///
+    /// A card already up moves as a pulled tab does: a tile's middle joins its tabs, and its own tile is
+    /// no place for it. Any other card takes a tile's place in its middle (`replace`).
+    func drop(ofCard id: String, at point: CanvasPoint) -> (target: String, drop: Drop)? {
+        guard let under = tileFrames.first(where: { $0.value.contains(x: point.x, y: point.y) }) else { return nil }
+        let up = cards.contains(id)
+        let drop = Self.drop(at: point, on: under.value, middle: up ? .beside(.tab) : .swap,
+                             tabsOnSide: tabsOnSide(under.key))
+        if up, let own = position(of: id), own == position(of: under.key) {
+            if columns[own.column].tiles[own.tile].cards.count == 1 || drop == .beside(.tab) { return nil }
+        }
+        return (under.key, drop)
+    }
+
     /// Drop `id`'s tile on `target`'s: change places with it, or come out of its place and go beside
     /// it. The handlebar's whole vocabulary, and what `dropMark` marks before you let go.
     mutating func drop(_ id: String, on target: String, _ drop: Drop) {

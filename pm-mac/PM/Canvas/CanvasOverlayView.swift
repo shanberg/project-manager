@@ -319,8 +319,9 @@ final class CanvasOverlayView: NSView {
 
         // A drag says what it will do under its proxy instead (`drawCarried`), which is the one thing
         // on screen always in sight and always on top — a label in the mark could sit under the proxy,
-        // or off the part of a tile you are looking at.
-        guard board.dropMark == nil else { return }
+        // or off the part of a tile you are looking at. A sidebar row's drag has no proxy, so its mark
+        // carries the words itself.
+        guard board.dropMark == nil || board.rowMarked else { return }
         let text = NSAttributedString(string: mark.title, attributes: [
             .font: NSFont.systemFont(ofSize: 12 / scale, weight: .semibold),
             .foregroundColor: NSColor.controlAccentColor,

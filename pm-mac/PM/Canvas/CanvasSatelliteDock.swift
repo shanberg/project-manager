@@ -185,6 +185,7 @@ final class CanvasSatelliteDock: NSObject {
                 guard let self, let found = self.group(key) else { return }
                 show(found)
             }
+            mark.rowDrop = { [weak self] in self?.group(group.key).flatMap(Self.rowDrop(onto:)) }
             column.addArrangedSubview(mark)
         }
         place(panel)
@@ -195,6 +196,28 @@ final class CanvasSatelliteDock: NSObject {
     }
 
     private func group(_ key: String) -> Group? { groups.first { $0.key == key } }
+
+    // MARK: A sidebar row dropped on a mark
+
+    /// What a frame's sidebar row in flight (`SpaceRowDrag`) does if let go on `group`'s mark, or nil
+    /// when the mark refuses it (docs/spaces.md § The frame).
+    ///
+    /// - A space's mark: the card moves onto that space's board as Today, off the board it came from
+    ///   (`Spaces.move`) — a space's row or a project's.
+    /// - A project's mark: a space's web card goes onto that project's board (`Spaces.send`, `.card`).
+    /// - Its own board's mark: nothing.
+    static func rowDrop(onto group: Group) -> (() -> Void)? {
+        guard let row = SpaceRowDrag.current else { return nil }
+        let from = row.canvas.standardizedFileURL
+        if group.canvas?.standardizedFileURL == from { return nil }
+        if let space = group.space {
+            return { Spaces.shared.move(row.card, fromCanvas: row.canvas, to: space) }
+        }
+        guard let key = group.projectKey, row.address != nil,
+              let source = Spaces.shared.space(forCanvas: row.canvas) else { return nil }
+        let title = group.title
+        return { Spaces.shared.send(row.card, in: source.id, as: .card, to: (key, title)) }
+    }
 
     /// The groups with every space after them, open or not, in the order they were made. A space's
     /// window and pop-outs come off the list above and onto its mark, which says whose they are.
@@ -721,6 +744,8 @@ private final class DockMark: NSView {
     var onHover: (Bool) -> Void = { _ in }
     var onClick: (String) -> Void = { _ in }
     var onMenu: (String, NSEvent, NSView) -> Void = { _, _, _ in }
+    /// What a sidebar row let go here would do, asked as it arrives — see `CanvasSatelliteDock.rowDrop`.
+    var rowDrop: () -> (() -> Void)? = { nil }
     /// Making sound: a dot under the icon, as the Mac's Dock marks a running app.
     private var isPlaying = false
 
@@ -749,6 +774,8 @@ private final class DockMark: NSView {
                                      heightAnchor.constraint(equalToConstant: side)])
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
+        // `.URL` too: a web row always carries it, whatever SwiftUI makes of the row's own type.
+        registerForDraggedTypes([SpaceRowDrag.pasteboardType, .URL])
         let count = group.windowCount
         label = count == 0 ? group.title
             : "\(group.title), \(count) \(count == 1 ? "window" : "windows") out"
@@ -880,6 +907,31 @@ private final class DockMark: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) { onMenu(groupKey, event, self) }
+
+    // MARK: A sidebar row dropped here
+
+    /// Lit while a row it would take is over it; any other drag is refused.
+    private func rowOperation(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard SpaceRowDrag.isRow(sender), rowDrop() != nil else {
+            hovered = false
+            return []
+        }
+        hovered = true
+        let allowed = sender.draggingSourceOperationMask
+        return allowed.contains(.move) ? .move : allowed.contains(.copy) ? .copy : .generic
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { rowOperation(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { rowOperation(sender) }
+    override func draggingExited(_ sender: NSDraggingInfo?) { hovered = false }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        hovered = false
+        guard SpaceRowDrag.isRow(sender), let drop = rowDrop() else { return false }
+        SpaceRowDrag.end()
+        drop()
+        return true
+    }
 }
 
 /// A menu item that runs a closure: the dock's panel has no responder chain worth aiming at.

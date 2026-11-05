@@ -318,6 +318,14 @@ final class CanvasPageView: WKWebView {
     /// is also why the board can be given a drag, lose it and be given it back within a few frames —
     /// each of those is a real crossing, and it is told about all of them.
     private func route(_ sender: NSDraggingInfo) -> NSDragOperation {
+        // A row from a frame's sidebar is about the tiles, never the page: it would otherwise be offered
+        // to the page as the link it carries.
+        if dropFallback != nil, SpaceRowDrag.isRow(sender) {
+            leavePage(sender)
+            let crossing = holder != .fallback
+            holder = .fallback
+            return (crossing ? dropFallback?.draggingEntered(sender) : dropFallback?.draggingUpdated(sender)) ?? []
+        }
         // ⌥ with a file the page can show: the file becomes the page. Decided before the page is asked
         // anything, since the answer is ours whatever the page would have said.
         if linkHost != nil, NSEvent.modifierFlags.contains(.option), Self.loadableFile(in: sender) != nil {

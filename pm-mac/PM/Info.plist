@@ -151,6 +151,16 @@
 			<key>UTTypeIdentifier</key>
 			<string>com.stuarthanberg.pm.tab</string>
 		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Folio Sidebar Card</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.stuarthanberg.pm.sidebar-card</string>
+		</dict>
 	</array>
 	<key>UTImportedTypeDeclarations</key>
 	<array>

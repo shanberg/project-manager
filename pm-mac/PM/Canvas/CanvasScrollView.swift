@@ -67,7 +67,9 @@ final class CanvasScrollView: NSScrollView {
         // Before anything reads `contentView` below, and before the board goes in: replacing the clip
         // resets the scroll position, so it has to be the first thing that happens.
         wantsLayer = true
-        contentView = NSClipView()
+        let clip = CanvasClipView()
+        clip.holdsStill = { [weak self] in self?.board.showsTiles ?? false }
+        contentView = clip
         documentView = board
         hasVerticalScroller = true
         hasHorizontalScroller = true
@@ -627,3 +629,4 @@ final class CanvasScrollView: NSScrollView {
         centre(on: CanvasPoint(x: node.frame.midX, y: node.frame.midY))
     }
 }
+

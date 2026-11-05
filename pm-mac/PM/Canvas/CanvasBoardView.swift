@@ -436,6 +436,8 @@ final class CanvasBoardView: NSView {
     /// Where a tile carried by its handlebar would land if let go now, and what it would do there.
     /// See `previewDrop`.
     var dropMark: (rect: CanvasRect, title: String)?
+    /// Whether `dropMark` is a sidebar row's (`rowDrop`), for the drag leaving to take down.
+    var rowMarked = false
     /// Whether the workspace is zoomed out to the board so you can pick its cards (⌥B). The tiling is
     /// still up — nothing about the workspace is set aside — and only what is drawn, and what a click
     /// means, changes. See `beginPicking` and `showsTiles`.

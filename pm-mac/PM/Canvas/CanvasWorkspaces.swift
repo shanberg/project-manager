@@ -69,6 +69,33 @@ enum CanvasWorkspaces {
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
+    /// The names in a frame's sidebar order: as rows were dragged (`setOrder`), then the rest in menu
+    /// order. Menus keep `names`.
+    static func ordered(of url: URL) -> [String] {
+        let saved = order(of: url)
+        return SpaceCardMarks.sorted(names(of: url)) { saved.firstIndex(of: $0).map(Double.init) }
+    }
+
+    /// Keep the sidebar's order of this board's workspaces.
+    static func setOrder(_ names: [String], for url: URL) {
+        var all = UserDefaults.standard.dictionary(forKey: orderKey) as? [String: [String]] ?? [:]
+        all[key(url)] = names.isEmpty ? nil : names
+        UserDefaults.standard.set(all, forKey: orderKey)
+    }
+
+    /// A renamed workspace keeps its place in the sidebar.
+    static func renameInOrder(_ old: String, to new: String, for url: URL) {
+        let saved = order(of: url)
+        guard saved.contains(old) else { return }
+        setOrder(saved.map { $0 == old ? new : $0 }, for: url)
+    }
+
+    private static func order(of url: URL) -> [String] {
+        (UserDefaults.standard.dictionary(forKey: orderKey) as? [String: [String]])?[key(url)] ?? []
+    }
+
+    private static let orderKey = "PMCanvasWorkspaceOrder"
+
     static func tiling(named name: String, of url: URL) -> CanvasViewState.Tiling? {
         of(url)[name]
     }

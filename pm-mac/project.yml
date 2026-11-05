@@ -138,6 +138,10 @@ targets:
           - UTTypeIdentifier: com.stuarthanberg.pm.tab
             UTTypeDescription: Folio Tab
             UTTypeConformsTo: [public.data]
+          # A card's row dragged out of a frame's sidebar. See Spaces/SpaceCardMarks.swift, `SpaceRowDrag`.
+          - UTTypeIdentifier: com.stuarthanberg.pm.sidebar-card
+            UTTypeDescription: Folio Sidebar Card
+            UTTypeConformsTo: [public.data]
         # Names Siri also accepts in App Shortcut phrases. "Folio" is speakable on its own; these are the
         # names from when the app was PM — a homophone of "p.m." that never worked as a spoken trigger —
         # kept so a phrase like "Complete my Project Manager task" goes on working after the rename.
@@ -230,6 +234,7 @@ targets:
       - path: PM/Canvas/CanvasViewState.swift
       - path: PM/Canvas/CanvasPresentation.swift
       - path: PM/Canvas/CanvasWorkspaces.swift
+      - path: PM/Canvas/CanvasClipView.swift
       - path: PM/Canvas/WorkspaceNamePrompt.swift
       - path: PM/Canvas/CanvasCardZoom.swift
       - path: PM/Canvas/CanvasTextStyle.swift

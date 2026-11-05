@@ -58,10 +58,11 @@ extension CanvasBoardView {
     /// Registering here rather than in the board's initialiser keeps the list beside the code that
     /// interprets it. See `CanvasDrop.read` for what each type becomes.
     func registerForDrops() {
-        registerForDraggedTypes([.fileURL, .string, .URL] + NoteImagePasteboard.imageTypes)
+        registerForDraggedTypes([.fileURL, .string, .URL, SpaceRowDrag.pasteboardType] + NoteImagePasteboard.imageTypes)
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if let row = rowDrop(sender) { return row }
         let drop = CanvasDrop.read(sender.draggingPasteboard, cardsType: Self.pasteboardType)
         dropSession = CanvasDropSession(sequence: sender.draggingSequenceNumber, drop: drop,
                                         pasteboardChange: sender.draggingPasteboard.changeCount)
@@ -75,6 +76,7 @@ extension CanvasBoardView {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if let row = rowDrop(sender) { return row }
         guard let session = dropSession, session.sequence == sender.draggingSequenceNumber else {
             return draggingEntered(sender)
         }
@@ -89,6 +91,62 @@ extension CanvasBoardView {
             if dropSession?.original == nil { carry(sender, as: drop) }
         }
         return .copy
+    }
+
+    // MARK: A row from the sidebar
+
+    /// A card's row dragged from this board's sidebar (`SpaceRowDrag`). Over the tiles it goes where a
+    /// dragged tile would — beside one at its edges, into its tabs at its top band — or, in a tile's
+    /// middle, in that tile's place; marked on the tiles as they stand, and nothing moves until it's
+    /// let go. Anywhere else it's refused: it's a card here already. Nil for any other drag, which
+    /// includes a row of another board's sidebar (that one is its address, and makes a card).
+    private func rowDrop(_ sender: NSDraggingInfo) -> NSDragOperation? {
+        guard let id = SpaceRowDrag.card(in: sender, for: store.url) else { return nil }
+        let target = rowTarget(id, at: canvasPoint(convert(sender.draggingLocation, from: nil)))
+        let mark = target.flatMap { target in
+            tiling?.dropMark(target.drop, on: target.target).map { (rect: $0, title: rowDropTitle(id, target.drop)) }
+        }
+        if dropMark?.rect != mark?.rect || dropMark?.title != mark?.title {
+            dropMark = mark
+            overlay.needsDisplay = true
+        }
+        rowMarked = mark != nil
+        guard target != nil else { return [] }
+        let allowed = sender.draggingSourceOperationMask
+        return allowed.contains(.move) ? .move : allowed.contains(.copy) ? .copy : .generic
+    }
+
+    /// Where a row let go at `point` would land in the tiling, or nil for nowhere (`CanvasTileSession.drop(ofCard:at:)`).
+    func rowTarget(_ id: String, at point: CanvasPoint) -> (target: String, drop: CanvasTileSession.Drop)? {
+        guard !isPicking else { return nil }
+        return tiling?.drop(ofCard: id, at: point)
+    }
+
+    /// What the mark says: a card that isn't up takes a tile's place rather than swapping with it.
+    private func rowDropTitle(_ id: String, _ drop: CanvasTileSession.Drop) -> String {
+        drop == .swap && tiling?.cards.contains(id) != true ? "Replace" : drop.title
+    }
+
+    /// Let go of a row over the tiles: what the mark said, and the card focused.
+    func landRow(_ id: String, _ target: (target: String, drop: CanvasTileSession.Drop)) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Add to Layout", from: undoFrom) }
+        guard var session = tiling, document.node(id: id).map({ !$0.isGroup }) ?? false else { return }
+        if session.cards.contains(id) {
+            session.land(id, on: target.target, target.drop, pulling: true)
+        } else {
+            switch target.drop {
+            case .swap: guard session.replace(target.target, with: id) else { return NSSound.beep() }
+            case .beside(let side): session.add(id, at: .init(target: target.target, side: side))
+            }
+        }
+        _ = session.showTab(id)
+        guard session != tiling else { return }
+        tiling = session
+        select([id])
+        setLayout(session.layout, animated: true)
+        onTilingChanged?()
+        announceTiling()
     }
 
     // MARK: Filing into a folder card
@@ -203,6 +261,11 @@ extension CanvasBoardView {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
+        if rowMarked {
+            rowMarked = false
+            dropMark = nil
+            overlay.needsDisplay = true
+        }
         if let sender { giveBack(sender) }
         endDropPreview()
     }
@@ -211,12 +274,26 @@ extension CanvasBoardView {
     /// see `CanvasPageView` — and a drop the board has already shown you a card for should not then be
     /// refused by a default nobody chose.
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        dropSession?.folder != nil || dropSession?.drop != nil
+        if let id = SpaceRowDrag.card(in: sender, for: store.url) {
+            return rowTarget(id, at: canvasPoint(convert(sender.draggingLocation, from: nil))) != nil
+        }
+        return dropSession?.folder != nil || dropSession?.drop != nil
             || CanvasDrop.read(sender.draggingPasteboard, cardsType: Self.pasteboardType) != nil
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         defer { endDropPreview() }
+        if let id = SpaceRowDrag.card(in: sender, for: store.url) {
+            rowMarked = false
+            dropMark = nil
+            overlay.needsDisplay = true
+            guard let target = rowTarget(id, at: canvasPoint(convert(sender.draggingLocation, from: nil))) else {
+                return false
+            }
+            SpaceRowDrag.end()
+            landRow(id, target)
+            return true
+        }
         if dropSession?.sequence == sender.draggingSequenceNumber, let folder = dropSession?.folder {
             return performFiling(sender, into: folder.url)
         }

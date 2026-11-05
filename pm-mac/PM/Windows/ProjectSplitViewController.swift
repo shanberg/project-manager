@@ -953,6 +953,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         else { return }
         CanvasWorkspaces.save(tiling, as: new, for: url)
         CanvasWorkspaces.remove(old, for: url)
+        CanvasWorkspaces.renameInOrder(old, to: new, for: url)
         for tab in tabs.tabs where tab.view == .board(.workspace(old)) {
             tabs.retarget(tab.id, to: .board(.workspace(new)))
             let pane = contentPane.content(for: tab.id) as? CanvasPaneController
