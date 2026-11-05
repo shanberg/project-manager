@@ -68,6 +68,8 @@ final class CanvasFileNodeView: CanvasNodeView {
     private var loaded: (url: URL, stamp: Date?, data: Data?)?
     /// The file a read is out for, so a rebuild meanwhile doesn't ask again.
     private var loading: URL?
+    /// A picture card's view, kept across rebuilds so an animation doesn't restart on every one.
+    private var pictureView: CanvasPictureView?
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
@@ -269,9 +271,15 @@ final class CanvasFileNodeView: CanvasNodeView {
             // Fitted, or filling the card when the card is nearly the picture's own shape — which is
             // what keeps a board of photographs from being a board of grey margins. See
             // `CanvasPictureView`, which owns that judgement and the reason it is not a setting.
-            if CloudFile.isCloudOnly(url) { return cloudOnlyView(url) }
-            let image = CanvasPictureView()
-            image.image = contents(of: url)?.flatMap(NSImage.init(data:))
+            // Read and decoded off main — see `PictureStore`. The card is built again when it lands.
+            let lookup = PictureStore.shared.picture(at: url, owner: self) { [weak self] in
+                guard let self, location.url == url else { return }
+                contentChanged()
+            }
+            if case .inCloud = lookup { return cloudOnlyView(url) }
+            let image = pictureView ?? CanvasPictureView()
+            pictureView = image
+            image.picture = lookup.picture
             image.setAccessibilityLabel(url.lastPathComponent)
             return image
 

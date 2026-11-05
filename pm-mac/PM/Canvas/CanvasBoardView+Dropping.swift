@@ -28,6 +28,10 @@ struct CanvasDropSession {
     var original: [Int: (components: [NSDraggingImageComponent], offset: NSPoint, size: NSSize)]?
     /// The picture the board gave the drag, drawn once and handed over again when AppKit asks.
     var picture: NSImage?
+    /// A dragged image's bytes, decoded off main: nil until that lands, then the picture or nil for
+    /// bytes that weren't one. `decodingImage` while it's out.
+    var decodedImage: Picture??
+    var decodingImage = false
     /// The folder card, and the folder in it, that files are over — where they'd be filed rather than
     /// made into cards. See `CanvasFolderDrop`.
     var folder: (card: String, url: URL)?
@@ -88,7 +92,8 @@ extension CanvasBoardView {
         if !isTiled {
             place(sender)
             // Back off a folder card: the files turn into the cards they would make again.
-            if dropSession?.original == nil { carry(sender, as: drop) }
+            // And a picture that landed since the drag's was drawn (see `face(forFile:)`) is drawn in.
+            if dropSession?.original == nil || dropSession?.picture == nil { carry(sender, as: drop) }
         }
         return .copy
     }
@@ -476,8 +481,20 @@ extension CanvasBoardView {
     private func protoFaces(_ drop: CanvasDrop) -> [ProtoFace] {
         switch drop {
         case .cards(let document): return document.nodes.map { Self.face(for: $0.content) }
-        case .files(let files): return files.map(Self.face(forFile:))
-        case .image(let data, _): return [NSImage(data: data).map(ProtoFace.picture) ?? .blank(nil)]
+        case .files(let files): return files.map(face(forFile:))
+        case .image(let data, _):
+            // Decoded off main, once per drag, and the picture drawn again when it lands. See `PictureStore`.
+            if let decoded = dropSession?.decodedImage { return [decoded.map { .picture($0.image) } ?? .blank(nil)] }
+            if dropSession?.decodingImage != true {
+                dropSession?.decodingImage = true
+                let sequence = dropSession?.sequence
+                PictureStore.decode(data, maxSide: 1024) { [weak self] picture in
+                    guard let self, dropSession?.sequence == sequence else { return }
+                    dropSession?.decodedImage = .some(picture)
+                    dropSession?.picture = nil
+                }
+            }
+            return [.blank(nil)]
         case .links(let links): return links.map { Self.face(forPage: $0.address) }
         case .text(let text): return [.prose(text)]
         }
@@ -495,8 +512,17 @@ extension CanvasBoardView {
         }
     }
 
-    private static func face(forFile file: URL) -> ProtoFace {
-        if isMarkdownImagePath(file.path), let image = NSImage(contentsOf: file) { return .picture(image) }
+    /// A picture file shows itself once `PictureStore` has it — read and decoded off main — and its
+    /// icon until then; the drag's picture is drawn again when it lands.
+    private func face(forFile file: URL) -> ProtoFace {
+        if isMarkdownImagePath(file.path) {
+            let sequence = dropSession?.sequence
+            let lookup = PictureStore.shared.picture(at: file, maxSide: 1024, owner: self) { [weak self] in
+                guard let self, dropSession?.sequence == sequence else { return }
+                dropSession?.picture = nil
+            }
+            if let picture = lookup.picture { return .picture(picture.image) }
+        }
         return .file(icon: NSWorkspace.shared.icon(forFile: file.path), name: file.lastPathComponent)
     }
 

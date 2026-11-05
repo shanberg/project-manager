@@ -362,7 +362,8 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// The Notes workspace for this window's board, found or made. See
     /// `CanvasProjectNoteCard.notesWorkspace`.
     private func notesWorkspace() -> String? {
-        guard let url = canvasSource().url, let board = try? CanvasStoreRegistry.store(for: url)
+        // Only a board already read: this is asked while the window is coming up. `loadBoard` asks again.
+        guard let url = canvasSource().url, let board = CanvasStoreRegistry.storeIfReady(for: url)
         else { return nil }
         return CanvasProjectNoteCard.notesWorkspace(on: board.document, at: url,
                                                     resolver: board.resolver)
@@ -474,8 +475,9 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// Put the frame in the sidebar slot, in place of the project list, and the tab row away: the
     /// sidebar is the list of what's open. Shown, so the window opens as the frame.
     private func useFrame(spaceID: String?, project: PMStore?) {
+        // Only a board already read; `loadBoard` asks again once it is.
         guard spaceFrame == nil, let url = canvasSource().url,
-              let store = try? CanvasStoreRegistry.store(for: url) else { return }
+              let store = CanvasStoreRegistry.storeIfReady(for: url) else { return }
         spaceFrameStore = store
         let frame = SpaceFrame(spaceID: spaceID, project: project, canvas: url, store: store, split: self)
         spaceFrame = frame
@@ -670,9 +672,35 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// one path here and one fallback, where there used to be two of each.
     private func makeContent(for tab: ProjectTab) -> NSViewController {
         let focus: CanvasFocus = if case .board(let pinned) = tab.view { pinned } else { .note }
+        // A board on disk that isn't open yet is read off main first: the tab holds still meanwhile, and
+        // is built again when it lands. See `CanvasStoreRegistry.load`.
+        if let url = canvasSource().url, !CanvasStoreRegistry.isReady(url),
+           FileManager.default.fileExists(atPath: url.path) {
+            loadBoard(url)
+            return ProjectWaitingPaneController()
+        }
         if let pane = makeBoard(focus) { return pane }
         if replaceUnreadableCanvasOnce(), let pane = makeBoard(focus) { return pane }
         return makeBoardless()
+    }
+
+    /// The board being read for this window, so a rebuild meanwhile doesn't ask again.
+    private var loadingBoard: URL?
+
+    private func loadBoard(_ url: URL) {
+        let key = url.standardizedFileURL
+        guard loadingBoard != key else { return }
+        loadingBoard = key
+        CanvasStoreRegistry.load(key) { [weak self] in
+            guard let self, loadingBoard == key else { return }
+            loadingBoard = nil
+            guard canvasSource().url?.standardizedFileURL == key else { return }
+            // What waited on the board: the notes tab's workspace, the frame, and the placeholder panes.
+            _ = adoptNotesTab()
+            syncFrame()
+            CanvasSatelliteKeeper.keepingSatellitesOut { self.contentPane.dropAll() }
+            applySelectedTab()
+        }
     }
 
     /// The project's canvas is on disk and will not open. Replace it, once.
@@ -1096,7 +1124,8 @@ final class ProjectSplitViewController: NSSplitViewController {
         let spaceColor = Spaces.shared.space(forCanvas: canvasSource().url).flatMap { ProjectColor(value: $0.color) }
         let saved = ProjectAppearancePreview.Appearance(
             color: spaceColor ?? store.color,
-            texture: CanvasTexture.spec(for: store.texture, style: store.textureStyle, notesPath: store.notesPath))
+            texture: CanvasTexture.spec(for: store.texture, style: store.textureStyle, notesPath: store.notesPath,
+                                        owner: self, whenReady: { [weak self] in self?.projectColorChanged() }))
         guard let name = store.projectName, let preview = ProjectAppearancePreview.shared.byProject[name] else {
             return saved
         }

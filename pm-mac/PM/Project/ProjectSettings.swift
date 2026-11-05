@@ -201,13 +201,13 @@ final class ProjectSettingsModel {
         originalTexture = raw.flatMap(projectTexture(rawText:))
         originalTextureStyle = raw.map(projectTextureStyle(rawText:)) ?? .standard
         textureStyle = originalTextureStyle
+        var textureURL: URL?
         switch originalTexture {
         case .named(let name):
             textureMode = .pattern; texturePattern = name
         case .image(let path):
             textureMode = .image; texturePattern = Self.defaultPattern; textureImagePath = path
-            let url = handle.flatMap { ProjectTexture.image(path).imageURL(notesPath: $0.notesPath) }
-            textureImageSource = url.flatMap { NSImage(contentsOf: $0)?.cgImage(forProposedRect: nil, context: nil, hints: nil) }
+            textureURL = handle.flatMap { ProjectTexture.image(path).imageURL(notesPath: $0.notesPath) }
         case nil:
             textureMode = .none; texturePattern = Self.defaultPattern
         }
@@ -220,6 +220,7 @@ final class ProjectSettingsModel {
             iconImagePath = path; iconRecolor = recolor
         case nil: mode = .progress; symbol = Self.defaultSymbol; emoji = Self.defaultEmoji
         }
+        if let textureURL { loadTextureSource(textureURL) }
 
         // Three system plists and ~8,000 names: a first open would otherwise stall the sheet coming up.
         Task.detached(priority: .userInitiated) { [weak self] in
@@ -254,7 +255,7 @@ final class ProjectSettingsModel {
 
     /// An image counts as chosen at once, so the sheet shows it; the copy waits for Save.
     func chooseIconImage(_ url: URL) {
-        guard ProjectIconImages.image(atPath: url.path) != nil else { NSSound.beep(); return }
+        guard ProjectIconImages.isPicture(atPath: url.path) else { NSSound.beep(); return }
         pendingIconImage = url
         iconImagePath = "\(markdownAttachmentsFolder)/\(url.lastPathComponent)"
         mode = .image
@@ -307,14 +308,40 @@ final class ProjectSettingsModel {
     }
 
     /// An image counts as chosen at once, so the panel and preview show it; the copy waits for Save.
+    /// Read and decoded off main (`PictureStore`); a file that turns out not to be a picture beeps then.
     func chooseTextureImage(_ url: URL) {
-        guard let image = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
-        else { NSSound.beep(); return }
+        loadTextureSource(url) { NSSound.beep() }
+        guard textureSourceURL == url else { NSSound.beep(); return }
         pendingTextureImage = url
         textureImagePath = "\(markdownAttachmentsFolder)/\(url.lastPathComponent)"
-        textureImageSource = image
-        ditheredImage = nil
         textureMode = .image
+    }
+
+    /// The file `textureImageSource` is, or is being, decoded from.
+    private var textureSourceURL: URL?
+
+    /// Point the preview at `url`'s picture: at once if it's decoded, when it lands if not. Unchanged
+    /// for a file that isn't a picture; `failed` runs when a decode lands empty.
+    private func loadTextureSource(_ url: URL, failed: (@MainActor () -> Void)? = nil) {
+        let lookup = PictureStore.shared.picture(at: url, maxSide: 512, owner: self) { [weak self] in
+            guard let self, textureSourceURL == url else { return }
+            switch PictureStore.shared.picture(at: url, maxSide: 512) {
+            case .ready(let picture):
+                textureImageSource = picture.frames.first
+                ditheredImage = nil
+            default:
+                failed?()
+            }
+        }
+        switch lookup {
+        case .missing, .inCloud: return
+        case .ready(let picture):
+            textureSourceURL = url
+            textureImageSource = picture.frames.first
+            ditheredImage = nil
+        case .loading:
+            textureSourceURL = url
+        }
     }
 
     /// The colour and texture as they stand in the sheet, for the window behind it.
@@ -368,7 +395,7 @@ struct ProjectIconMark: View {
         switch icon {
         case .emoji: return true
         case .symbol(let name): return NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
-        case .image(let path, _): return ProjectIconImages.image(atPath: path) != nil
+        case .image(let path, _): return ProjectIconImages.isPicture(atPath: path)
         }
     }
 
@@ -408,20 +435,29 @@ struct ProjectIconMark: View {
     }
 }
 
-/// Image icons, loaded once per file version. Thread-safe, since `canDraw` is asked off the main actor.
+/// Image icons, read and decoded off main through `PictureStore`, which also keys them by file version.
+/// Nil until one lands; SwiftUI bodies that asked are redrawn then, since the store is observed.
 enum ProjectIconImages {
-    private static let cache = NSCache<NSString, NSImage>()
+    /// Icons are drawn at menu and sidebar sizes.
+    static let side = 256
 
-    /// The image at `path`, SVG or bitmap. Keyed on the modification date too, so editing the file in
-    /// place shows on the next draw that asks.
     static func image(atPath path: String) -> NSImage? {
-        let date = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
-        guard let date else { return nil }
-        let key = "\(path)|\(date.timeIntervalSinceReferenceDate)" as NSString
-        if let hit = cache.object(forKey: key) { return hit }
-        guard let image = NSImage(contentsOfFile: path), image.size.width > 0, image.size.height > 0 else { return nil }
-        cache.setObject(image, forKey: key)
-        return image
+        guard Thread.isMainThread else { return nil }
+        return MainActor.assumeIsolated {
+            PictureStore.shared.picture(at: URL(fileURLWithPath: path), maxSide: side).picture?.image
+        }
+    }
+
+    /// Whether `path` is a picture, or might be one still decoding — what decides an icon over the ring.
+    /// Off main, only whether the file is there.
+    nonisolated static func isPicture(atPath path: String) -> Bool {
+        guard Thread.isMainThread else { return FileManager.default.fileExists(atPath: path) }
+        return MainActor.assumeIsolated {
+            switch PictureStore.shared.picture(at: URL(fileURLWithPath: path), maxSide: side) {
+            case .ready, .loading: return true
+            case .missing, .inCloud: return false
+            }
+        }
     }
 }
 

@@ -251,6 +251,7 @@ targets:
       - path: PM/Canvas/CanvasSessionPill.swift
       - path: PM/Canvas/CanvasCardEditing.swift
       - path: PM/Canvas/CanvasDocumentStore.swift
+      - path: PM/Canvas/CanvasStoreRegistry.swift
       - path: PM/Canvas/CanvasCardShows.swift
       - path: PM/Canvas/CanvasProjectNoteCard.swift
       - path: PM/Canvas/CanvasNavigation.swift
@@ -285,6 +286,7 @@ targets:
       - path: PM/Canvas/CanvasDrop.swift
       - path: PM/Canvas/CanvasFolderCard.swift
       - path: PM/Shared/CloudFile.swift
+      - path: PM/Shared/Pictures.swift
       - path: PM/Canvas/CanvasDocSession.swift
       - path: PM/Canvas/CanvasFolderOptions.swift
       - path: PM/Canvas/CanvasFolderBrowser.swift

@@ -12,6 +12,11 @@ import PmLib
 /// Saving is automatic and debounced: a canvas is dragged around, and a save per frame of a drag would
 /// be absurd while a save only on ⌘S would mean a window you can lose work from.
 ///
+/// **Read and written off main**, on the file's own queue (`CanvasFileQueue`). A board on a cloud drive
+/// whose provider has stalled holds a read or a write in the kernel indefinitely, and on main that was the
+/// app frozen. Saves land in the order asked; a re-read waits behind them. Opening a board reads it there
+/// too — see `CanvasStoreRegistry.load`.
+///
 /// **One store per file, however many things are looking at it.** One board can be up in two windows at
 /// once, and in two tabs of one window, and two stores on one file would be worse than either alone: each debounces its own writes and each watches the file for outside
 /// changes, so a save by one is read by the other as somebody else's edit, reloaded over the top, and
@@ -82,12 +87,19 @@ final class CanvasDocumentStore {
     /// cost is nothing; the interval is about how long you'd tolerate seeing a stale board.
     private static let watchInterval: TimeInterval = 2
 
-    init(url: URL) throws {
+    /// A store on a document already read — off main, by `CanvasStoreRegistry.load`.
+    init(url: URL, read: CanvasFileQueue.Read) {
         self.url = url
         self.undoManager = UndoManager()
-        self.document = try CanvasDocument.read(contentsOf: url)
+        self.document = read.document
+        self.written = read.document
         self.resolver = CanvasFileResolver(canvas: url)
-        self.knownStamp = Self.modified(url)
+        self.knownStamp = read.stamp
+    }
+
+    /// Reads the file here and now, on the caller's thread. For tests and for the registry's fallback.
+    convenience init(url: URL) throws {
+        self.init(url: url, read: try CanvasFileQueue.readNow(url))
     }
 
     deinit { watch?.invalidate() }
@@ -208,14 +220,44 @@ final class CanvasDocumentStore {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.saveDelay, execute: work)
     }
 
-    /// Write now — on ⌘S, and when the window closes.
+    /// What the file holds as far as this store knows: what it read, or what the last write asked for.
+    /// Nil after a write failed, so the next save writes whatever the board holds.
+    private var written: CanvasDocument?
+    /// Writes asked for and not landed. While any are out the file is ours, and the watch leaves it be.
+    private(set) var writesInFlight = 0
+    /// A re-read is out — see `checkForOutsideChange`.
+    private(set) var isRereading = false
+
+    /// Whether the board holds anything not yet on its way to disk.
+    var hasUnsavedChanges: Bool { document != written }
+
+    /// Ask for the write now — on ⌘S, when the window closes, and at quit. Returns at once; the write
+    /// lands later, on the file's queue. Nothing to write is nothing asked for.
     func save() {
         saveWork?.cancel()
         saveWork = nil
-        do {
-            try document.write(to: url)
-            knownStamp = Self.modified(url)
-        } catch {
+        guard hasUnsavedChanges else { return }
+        let document = document, url = url, writer = CanvasFileQueue.writer
+        written = document
+        writesInFlight += 1
+        CanvasFileQueue.queue(for: url).async {
+            let result = Result { () throws -> Date? in
+                try writer(document, url)
+                return CanvasFileQueue.modified(url)
+            }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self.landed(result) }
+            }
+        }
+    }
+
+    private func landed(_ result: Result<Date?, Error>) {
+        writesInFlight -= 1
+        switch result {
+        case .success(let stamp):
+            knownStamp = stamp
+        case .failure(let error):
+            written = nil
             Log.write("canvas save failed: \(url.lastPathComponent): \(error)")
             presentSaveFailure(error)
         }
@@ -256,21 +298,106 @@ final class CanvasDocumentStore {
     /// to prevent. Instead the pending save is dropped and the file wins, because the alternative is
     /// silently clobbering an edit made in the other app. The window says so; undo still holds
     /// everything PM did.
+    ///
+    /// - The check is a `stat` on main, which answers for any file without reading it.
+    /// - The read and parse are on the file's queue, behind any write of ours. One at a time: a read
+    ///   that never returns stops the checks, not the app.
+    /// - Not while a write of ours is out: the stamp is about to be ours.
+    /// - A save asked for while the read was out wins over what it read — that edit is newer still.
     func checkForOutsideChange() {
-        guard let stamp = Self.modified(url), stamp != knownStamp else { return }
-        guard let reloaded = try? CanvasDocument.read(contentsOf: url) else { return }
+        guard !isRereading, writesInFlight == 0,
+              let stamp = CanvasFileQueue.modified(url), stamp != knownStamp else { return }
+        isRereading = true
+        let url = url, reader = CanvasFileQueue.reader
+        CanvasFileQueue.queue(for: url).async {
+            let reloaded = try? reader(url)
+            let stamp = CanvasFileQueue.modified(url) ?? stamp
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self.reread(reloaded, stamp: stamp) }
+            }
+        }
+    }
+
+    private func reread(_ reloaded: CanvasDocument?, stamp: Date) {
+        isRereading = false
+        guard writesInFlight == 0 else { return }
+        // Unreadable — half-written by something that doesn't write atomically, most likely. Taken as
+        // seen, so it isn't read again every two seconds; the write that finishes it is a new stamp.
+        knownStamp = stamp
+        guard let reloaded else { return }
         saveWork?.cancel()
         saveWork = nil
-        knownStamp = stamp
+        written = reloaded
         guard reloaded != document else { return }
         document = reloaded
         resolver.refresh()
         documentChanged()
         documentReloaded()
     }
+}
 
-    private static func modified(_ url: URL) -> Date? {
-        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+/// Where board files are read and written: a serial queue per file, so a store's saves land in order,
+/// a re-read waits behind them, and `ProjectLinksSync`'s edits of a closed board take turns with a store
+/// opening it.
+enum CanvasFileQueue {
+    /// A board's document as read, and the file's modification date then.
+    struct Read: Sendable {
+        let document: CanvasDocument
+        let stamp: Date?
+    }
+
+    /// How a board is read and written. A test stands in a slow or stuck one.
+    nonisolated(unsafe) static var reader: @Sendable (URL) throws -> CanvasDocument = {
+        try CanvasDocument.read(contentsOf: $0)
+    }
+    nonisolated(unsafe) static var writer: @Sendable (CanvasDocument, URL) throws -> Void = {
+        try $0.write(to: $1)
+    }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var queues: [String: DispatchQueue] = [:]
+
+    static func queue(for url: URL) -> DispatchQueue {
+        let key = url.standardizedFileURL.path
+        lock.lock()
+        defer { lock.unlock() }
+        if let queue = queues[key] { return queue }
+        let queue = DispatchQueue(label: "Folio.board-file", qos: .userInitiated)
+        queues[key] = queue
+        return queue
+    }
+
+    /// Read on the caller's thread.
+    static func readNow(_ url: URL) throws -> Read {
+        let document = try reader(url)
+        return Read(document: document, stamp: modified(url))
+    }
+
+    /// `stat`'s modification date, which never downloads or waits on the file's contents.
+    static func modified(_ url: URL) -> Date? {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        let time = info.st_mtimespec
+        return Date(timeIntervalSince1970: Double(time.tv_sec) + Double(time.tv_nsec) / 1_000_000_000)
+    }
+
+    /// At quit: wait up to `timeout` for every board write asked for so far. False if one hasn't
+    /// landed — a provider that stalled — which is logged; quitting anyway beats hanging.
+    @discardableResult
+    static func finishAll(timeout: TimeInterval = 2) -> Bool {
+        lock.lock()
+        let all = Array(queues.values)
+        lock.unlock()
+        let group = DispatchGroup()
+        for queue in all {
+            group.enter()
+            queue.async { group.leave() }
+        }
+        guard group.wait(timeout: .now() + timeout) == .success else {
+            Log.write("quit with a board's write still out after \(timeout)s")
+            return false
+        }
+        return true
     }
 }
 

@@ -75,7 +75,10 @@ private struct NoteImage: View {
     private var url: URL? { markdownDestinationURL(destination, relativeTo: noteURL) }
 
     var body: some View {
-        if let url, let image = NoteImageCache.shared.image(at: url) {
+        // Read and decoded off main, and redrawn when it lands — `PictureStore` is observed.
+        let lookup = url.map { PictureStore.shared.picture(at: $0) } ?? .missing
+        if let url, let picture = lookup.picture {
+            let image = picture.image
             Image(nsImage: image)
                 .resizable()
                 .aspectRatio(image.size.width / image.size.height, contentMode: .fit)
@@ -99,6 +102,18 @@ private struct NoteImage: View {
                 // rather than a re-encoded copy, so a screenshot dropped elsewhere is byte-identical.
                 .onDrag { NSItemProvider(contentsOf: url) ?? NSItemProvider(object: image) }
                 .contextMenu { NoteImageMenu(url: url, image: image) }
+        } else if case .inCloud = lookup {
+            // Not downloaded: reading it would. Opening it is how to ask for that.
+            HStack(spacing: 5) {
+                Image(systemName: "icloud.and.arrow.down")
+                Text(alt.isEmpty ? (destination as NSString).lastPathComponent : alt)
+            }
+            .font(Font(font).italic())
+            .foregroundStyle(.tertiary)
+            .help("In iCloud, not on this Mac: \(destination)")
+        } else if case .loading = lookup {
+            // The note's own line height, so the note doesn't jump as much when it lands.
+            Color.clear.frame(height: font.pointSize * 1.4)
         } else {
             missing
         }
@@ -168,34 +183,5 @@ private struct NoteImageMenu: View {
         guard panel.runModal() == .OK, let destination = panel.url else { return }
         try? FileManager.default.removeItem(at: destination)
         try? FileManager.default.copyItem(at: url, to: destination)
-    }
-}
-
-/// Decoded note images, so a session row that redraws on every store change doesn't read the disk each
-/// time it does.
-///
-/// Keyed by the file's modification date as well as its path, which is what makes it safe to hold
-/// these at all: a picture replaced under the same name is a different key and reloads, and the entry
-/// it replaced ages out. `NSCache` evicts under memory pressure on its own, and the count limit keeps
-/// a note full of screenshots from being the thing that causes the pressure.
-final class NoteImageCache {
-    static let shared = NoteImageCache()
-    private let cache = NSCache<NSString, NSImage>()
-
-    private init() { cache.countLimit = 48 }
-
-    func image(at url: URL) -> NSImage? {
-        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-        guard let attributes else { return nil }
-        let stamp = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        let key = "\(url.path)\t\(stamp)\t\(attributes[.size] as? Int ?? 0)" as NSString
-        if let hit = cache.object(forKey: key) { return hit }
-        // Not `isValid`: an NSImage made from a file it can't decode reports a zero size and draws
-        // nothing, which is the missing case wearing the wrong clothes.
-        guard let image = NSImage(contentsOf: url), image.size.width > 0, image.size.height > 0 else {
-            return nil
-        }
-        cache.setObject(image, forKey: key)
-        return image
     }
 }

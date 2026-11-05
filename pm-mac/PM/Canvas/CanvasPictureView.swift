@@ -17,19 +17,21 @@ import AppKit
 /// be the app throwing away the composition the card was shaped for. Fill is a tidy-up for a card
 /// that is *approximately right already*, never a re-crop.
 ///
-/// Built around `NSImageView` rather than drawing the picture here, so an animated GIF still animates
-/// and the image still names itself to VoiceOver. The fill is done by *layout*: the image view is
-/// given the smallest frame of the picture's own shape that covers the card, centred, and this view
-/// clips. `scaleProportionallyUpOrDown` then fills that frame exactly, because the frame is the
-/// picture's shape.
+/// Drawn by a layer holding decoded bitmaps (`Picture`), never an `NSImage` from the file: an
+/// `NSImageView` decodes lazily inside Core Animation's commit on the main thread, and plays an
+/// animated GIF by decoding each frame there too — see `Pictures.swift`. An animation's frames are a
+/// keyframe animation on the layer's contents, which the render server plays without the app. The
+/// fill is done by *layout*: the layer is given the smallest frame of the picture's own shape that
+/// covers the card, centred, and this view clips.
 @MainActor
 final class CanvasPictureView: NSView {
-    private let picture = NSImageView()
+    /// What draws the picture. Exposed for tests, which assert where it lands.
+    let pictureLayer = CALayer()
 
-    var image: NSImage? {
-        get { picture.image }
-        set {
-            picture.image = newValue
+    var picture: Picture? {
+        didSet {
+            guard picture !== oldValue else { return }
+            show()
             needsLayout = true
         }
     }
@@ -40,35 +42,65 @@ final class CanvasPictureView: NSView {
         // The overflow of a filled picture is clipped here rather than by the card, which masks
         // nothing: a card's shadow lives outside its own bounds. See `CanvasNodeView`.
         layer?.masksToBounds = true
-        picture.imageScaling = .scaleProportionallyUpOrDown
-        addSubview(picture)
+        pictureLayer.contentsGravity = .resize
+        pictureLayer.actions = ["bounds": NSNull(), "position": NSNull(), "contents": NSNull(),
+                                "hidden": NSNull()]
+        layer?.addSublayer(pictureLayer)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.image)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func setAccessibilityLabel(_ label: String?) {
-        picture.setAccessibilityLabel(label)
+    private func show() {
+        pictureLayer.removeAnimation(forKey: "frames")
+        guard let picture else {
+            pictureLayer.contents = nil
+            return
+        }
+        if let vector = picture.vector {
+            pictureLayer.contents = vector
+            return
+        }
+        pictureLayer.contents = picture.frames.first
+        // Reduce Motion: the first frame, held — what Safari does with a GIF under the same setting.
+        guard picture.isAnimated, picture.duration > 0, !Motion.isReduced else { return }
+        let animation = CAKeyframeAnimation(keyPath: "contents")
+        animation.values = picture.frames
+        animation.calculationMode = .discrete
+        var start: TimeInterval = 0
+        animation.keyTimes = picture.delays.map { delay in
+            defer { start += delay }
+            return NSNumber(value: start / picture.duration)
+        }
+        animation.duration = picture.duration
+        animation.repeatCount = .infinity
+        animation.isRemovedOnCompletion = false
+        pictureLayer.add(animation, forKey: "frames")
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        pictureLayer.contentsScale = window?.backingScaleFactor ?? 2
     }
 
     override func layout() {
         super.layout()
-        guard let size = image?.size, size.width > 0, size.height > 0 else {
-            picture.frame = bounds
-            return
-        }
-        guard CanvasPictureFit.fills(card: bounds.size, picture: size) else {
-            picture.frame = bounds
-            return
-        }
+        pictureLayer.frame = pictureFrame
+    }
+
+    private var pictureFrame: NSRect {
+        guard let size = picture?.size, size.width > 0, size.height > 0,
+              CanvasPictureFit.fills(card: bounds.size, picture: size) else { return bounds }
         // The smallest rect of the picture's shape that covers the card, centred on it. Rounded
         // outwards, so a half-point of rounding shows a half-point more picture rather than a
         // half-point of card.
         let scale = max(bounds.width / size.width, bounds.height / size.height)
         let filled = NSSize(width: (size.width * scale).rounded(.up),
                             height: (size.height * scale).rounded(.up))
-        picture.frame = NSRect(x: ((bounds.width - filled.width) / 2).rounded(.down),
-                               y: ((bounds.height - filled.height) / 2).rounded(.down),
-                               width: filled.width, height: filled.height)
+        return NSRect(x: ((bounds.width - filled.width) / 2).rounded(.down),
+                      y: ((bounds.height - filled.height) / 2).rounded(.down),
+                      width: filled.width, height: filled.height)
     }
 }
 

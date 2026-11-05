@@ -63,30 +63,37 @@ enum CanvasTexture {
     /// isn't there or won't decode — a missing texture draws nothing rather than complaining from the
     /// background.
     @MainActor
-    static func spec(for texture: ProjectTexture?, style: ProjectTextureStyle, notesPath: String?) -> Spec? {
-        tile(for: texture, cells: style.tile, notesPath: notesPath).map { Spec(tile: $0, style: style) }
+    /// An image texture is read and decoded off main (`PictureStore`): nil until it lands, and then
+    /// `whenReady`, so the caller can ask again.
+    static func spec(for texture: ProjectTexture?, style: ProjectTextureStyle, notesPath: String?,
+                     owner: AnyObject? = nil, whenReady: (@MainActor () -> Void)? = nil) -> Spec? {
+        tile(for: texture, cells: style.tile, notesPath: notesPath, owner: owner, whenReady: whenReady)
+            .map { Spec(tile: $0, style: style) }
     }
 
     /// The tile alone — for the settings sheet, which draws swatches rather than a board.
     @MainActor
-    static func tile(for texture: ProjectTexture?, cells: Int, notesPath: String?) -> Tile? {
+    static func tile(for texture: ProjectTexture?, cells: Int, notesPath: String?,
+                     owner: AnyObject? = nil, whenReady: (@MainActor () -> Void)? = nil) -> Tile? {
         switch texture {
         case nil: return nil
         case .named(let name): return tile(rows: rows(name))
         case .image:
             guard let notesPath, let url = texture?.imageURL(notesPath: notesPath) else { return nil }
-            // Keyed on the modification date too, so replacing the file in place is seen on the next read.
-            let date = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
-            let key = "\(url.path)|\(date?.timeIntervalSinceReferenceDate ?? 0)|\(cells)"
-            if let hit = imageTiles[key] { return hit }
-            guard let image = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil),
-                  let tile = dithered(image, cells: cells) else { return nil }
-            imageTiles[key] = tile
+            // Small: a tile is a few dozen cells across, so nothing near a screen's worth is decoded.
+            guard case .ready(let picture) = PictureStore.shared.picture(
+                      at: url, maxSide: 512, owner: owner, whenReady: whenReady),
+                  let image = picture.frames.first else { return nil }
+            // Keyed on the decoded picture, which is a new one when the file changes in place.
+            let key = "\(ObjectIdentifier(picture).hashValue)|\(cells)"
+            if let hit = imageTiles[key]?.tile, imageTiles[key]?.picture === picture { return hit }
+            guard let tile = dithered(image, cells: cells) else { return nil }
+            imageTiles[key] = (picture, tile)
             return tile
         }
     }
 
-    @MainActor private static var imageTiles: [String: Tile] = [:]
+    @MainActor private static var imageTiles: [String: (picture: Picture, tile: Tile)] = [:]
 
     /// A built-in pattern's eight rows, most significant bit leftmost.
     static func rows(_ name: ProjectTexture.Name) -> [UInt8] {

@@ -162,6 +162,7 @@ final class FaviconLoader {
             let (data, resp) = try await anonymous.data(for: req)
             guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
                   data.count <= maxBytes,
+                  // picture: off main, and capped at `maxBytes` — an icon's decode is too small to hold a frame.
                   let img = NSImage(data: data), img.size.width > 0, img.size.height > 0 else { return nil }
             return Fetched(image: img, data: data)
         } catch {
@@ -209,6 +210,7 @@ final class FaviconLoader {
                   .contentModificationDate,
               Date().timeIntervalSince(modified) < maxAge,
               let data = try? Data(contentsOf: file),
+              // picture: off main; a stored icon, which `fetch` capped at `maxBytes`.
               let img = NSImage(data: data), img.size.width > 0, img.size.height > 0 else { return nil }
         return img
     }

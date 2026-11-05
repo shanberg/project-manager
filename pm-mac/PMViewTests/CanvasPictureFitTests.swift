@@ -51,10 +51,10 @@ final class CanvasPictureFitTests: XCTestCase {
     /// where that subview ends up: covering the card, centred, and proportional.
     func testFillingCoversTheCardWithTheOverflowSplitBetweenBothEdges() throws {
         let view = CanvasPictureView(frame: NSRect(x: 0, y: 0, width: 400, height: 280))
-        view.image = NSImage(size: NSSize(width: 4032, height: 3024))
+        view.picture = Picture(frames: [], delays: [], size: NSSize(width: 4032, height: 3024))
         view.layoutSubtreeIfNeeded()
 
-        let inside = try XCTUnwrap(view.subviews.first)
+        let inside = view.pictureLayer
         XCTAssertGreaterThanOrEqual(inside.frame.width, view.bounds.width)
         XCTAssertGreaterThanOrEqual(inside.frame.height, view.bounds.height)
         XCTAssertEqual(inside.frame.midX, view.bounds.midX, accuracy: 1, "the crop is off centre")
@@ -66,10 +66,10 @@ final class CanvasPictureFitTests: XCTestCase {
     /// And fitting leaves the image view exactly the card, which is what letterboxes it.
     func testFittingLeavesTheImageViewTheWholeCard() throws {
         let view = CanvasPictureView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
-        view.image = NSImage(size: NSSize(width: 4032, height: 3024))
+        view.picture = Picture(frames: [], delays: [], size: NSSize(width: 4032, height: 3024))
         view.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(try XCTUnwrap(view.subviews.first).frame, view.bounds)
+        XCTAssertEqual(view.pictureLayer.frame, view.bounds)
     }
 
     /// A card with no picture in it is not a card with a stale frame in it.
@@ -77,6 +77,6 @@ final class CanvasPictureFitTests: XCTestCase {
         let view = CanvasPictureView(frame: NSRect(x: 0, y: 0, width: 400, height: 280))
         view.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(try XCTUnwrap(view.subviews.first).frame, view.bounds)
+        XCTAssertEqual(view.pictureLayer.frame, view.bounds)
     }
 }

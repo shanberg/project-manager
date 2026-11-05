@@ -43,6 +43,8 @@ enum CanvasPageSnapshots {
         if let known = memory[card] { return known.image }
         // Lazy: `NSImage` reads the file's header here and decodes when something draws it, so a board
         // building forty cards pays for the handful it can see.
+        // picture: Folio's own PNGs, shrunk before they're written, in the local Caches folder —
+        // never online-only and never larger than a card. Lazy on purpose (above).
         let image = NSImage(contentsOf: file(for: card))
         // Remembered either way. A card with no picture is most of them, and the miss is worth keeping
         // so that building it again doesn't go back to the disk to be told the same thing.

@@ -167,11 +167,16 @@ final class Spaces {
         guard let to = canvas(of: target), from.standardizedFileURL != to.standardizedFileURL else { return }
         let id = space(forCanvas: from)?.id ?? ""
         if !FileManager.default.fileExists(atPath: to.path) { try? makeCanvas(at: to) }
-        guard let source = try? CanvasStoreRegistry.store(for: from) else { return }
-        defer { CanvasStoreRegistry.release(source) }
-        guard var node = source.document.node(id: cardID),
-              let destination = try? CanvasStoreRegistry.store(for: to) else { return }
-        defer { CanvasStoreRegistry.release(destination) }
+        // Both boards read off main when they aren't open. See `CanvasStoreRegistry.withStores`.
+        CanvasStoreRegistry.withStores([from, to]) { [weak self] stores in
+            guard let self, stores.count == 2 else { return }
+            move(cardID, from: stores[0], to: stores[1], spaceID: id, target: target)
+        }
+    }
+
+    private func move(_ cardID: String, from source: CanvasDocumentStore, to destination: CanvasDocumentStore,
+                      spaceID id: String, target: String) {
+        guard var node = source.document.node(id: cardID) else { return }
         let right = destination.document.nodes.map { $0.frame.x + $0.frame.width }.max() ?? 0
         node.frame = CanvasRect(x: right + 40, y: 0, width: node.frame.width, height: node.frame.height)
         SpaceCardMarks.setPinned(false, on: &node)
@@ -195,8 +200,17 @@ final class Spaces {
     /// From the dock's flyout: a web card to a project — onto its board (and off the space's), into its
     /// `## Links`, or as a task linked to the page.
     func send(_ cardID: String, in id: String, as kind: Send, to project: (key: String, name: String)) {
-        guard let canvas = canvas(of: id), let document = try? CanvasDocument.read(contentsOf: canvas),
-              let node = document.node(id: cardID), case .link(let address) = node.content,
+        guard let canvas = canvas(of: id) else { return }
+        // The board read off main when it isn't open. See `CanvasStoreRegistry.withStores`.
+        CanvasStoreRegistry.withStores([canvas]) { [weak self] stores in
+            guard let self, let store = stores.first else { return }
+            send(cardID, on: canvas, document: store.document, as: kind, to: project)
+        }
+    }
+
+    private func send(_ cardID: String, on canvas: URL, document: CanvasDocument, as kind: Send,
+                      to project: (key: String, name: String)) {
+        guard let node = document.node(id: cardID), case .link(let address) = node.content,
               let url = URL(string: address) else { return }
         let title = CanvasExistingCards.card(node)?.title ?? url.host() ?? address
         switch kind {

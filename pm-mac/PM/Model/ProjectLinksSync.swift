@@ -83,8 +83,6 @@ enum ProjectLinksSync {
         if rerun.remove(notesPath) != nil { sync(notesPath: notesPath, projectPath: projectPath) }
     }
 
-    /// Where closed canvases are read and written — one at a time, so two edits to one file can't race.
-    private static let fileQueue = DispatchQueue(label: "com.stuarthanberg.pm.canvas-edit", qos: .utility)
 
     /// Change a canvas from outside any board: through its store if a board has it open, so the change
     /// is the board's — shown at once, saved by it, and undoable under `named` when there is a name —
@@ -105,7 +103,9 @@ enum ProjectLinksSync {
             then(result)
             return
         }
-        fileQueue.async {
+        // The file's own queue (`CanvasFileQueue`): one edit at a time, and a board opening meanwhile
+        // reads after this has written.
+        CanvasFileQueue.queue(for: url).async {
             var result: Output?
             do {
                 var document = try CanvasDocument.read(contentsOf: url)

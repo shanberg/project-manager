@@ -493,6 +493,8 @@ struct MarkdownTextEditor: NSViewRepresentable {
         /// The column width the note's pictures were last sized for, when one of them was narrowed to
         /// fit it — the one case where a resize that keeps the gutter still has to restyle.
         private var imagesFittedTo: CGFloat?
+        /// The view the last restyle was of — what a picture landing restyles again.
+        private weak var imageTextView: NSTextView?
 
         init(_ parent: MarkdownTextEditor) { self.parent = parent }
 
@@ -634,6 +636,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
         /// Style-only, on the text storage — it doesn't register undo actions, so native text undo stays
         /// per-keystroke.
         func highlight(_ textView: NSTextView) {
+            imageTextView = textView
             guard let storage = textView.textStorage else { return }
             let text = textView.string
             let base = parent.baseFont
@@ -683,8 +686,17 @@ struct MarkdownTextEditor: NSViewRepresentable {
             guard columnWidth > 0 else { return }
             let ns = text as NSString
             for embed in markdownImages(in: text) where isMarkdownImagePath(embed.destination) {
+                // Read and decoded off main; the note is restyled when it lands. See `PictureStore`.
                 guard let url = markdownDestinationURL(embed.destination, relativeTo: parent.noteURL),
-                      let image = NoteImageCache.shared.image(at: url) else { continue }
+                      let image = MainActor.assumeIsolated({ PictureStore.shared.picture(at: url, owner: self, whenReady: { [weak self] in
+                          guard let self, let textView = self.imageTextView else { return }
+                          self.highlight(textView)
+                          textView.needsDisplay = true
+                          DispatchQueue.main.async { [weak self, weak textView] in
+                              guard let self, let textView else { return }
+                              self.reportHeight(textView)
+                          }
+                      }).picture?.image }) else { continue }
                 let range = NSRange(embed.range, in: text)
                 let paragraph = ns.paragraphRange(for: range)
                 guard let style = storage.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil)

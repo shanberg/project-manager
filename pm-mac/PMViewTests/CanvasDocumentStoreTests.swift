@@ -214,6 +214,7 @@ final class CanvasDocumentStoreTests: XCTestCase {
         type("written to disk", into: card)
         settle()
         store.save()
+        CanvasFileQueue.queue(for: url).sync {}   // saves land off main, on the file's queue
 
         let reread = try CanvasDocument.read(contentsOf: url)
         guard case .text(let value) = reread.nodes.first(where: { $0.id == card })?.content else {
@@ -230,6 +231,7 @@ final class CanvasDocumentStoreTests: XCTestCase {
         settle()
         store.undoManager.undo()
         store.save()
+        CanvasFileQueue.queue(for: url).sync {}   // saves land off main, on the file's queue
 
         let reread = try CanvasDocument.read(contentsOf: url)
         guard case .text(let value) = reread.nodes.first(where: { $0.id == card })?.content else {
