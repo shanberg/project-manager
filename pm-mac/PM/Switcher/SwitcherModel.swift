@@ -24,6 +24,8 @@ struct SwitcherModel: Equatable {
         var key: String
         var title: String
         var isFocused = false
+        /// A space: after the projects, past a divider, and never focused.
+        var isSpace = false
         /// The latest session: its label and when.
         var session: String?
         /// The focused task's text.

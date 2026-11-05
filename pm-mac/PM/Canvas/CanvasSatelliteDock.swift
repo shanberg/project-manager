@@ -63,6 +63,10 @@ final class CanvasSatelliteDock: NSObject {
         var projectKey: String?
         var workspaces: [Workspace] = []
         var windowCount: Int { workspaces.reduce(0) { $0 + $1.satellites.count } }
+        /// A space's mark, after the divider (docs/spaces.md). Nil for a project or a file.
+        var space: String?
+        /// A space whose window isn't open: its mark is drawn dimmed.
+        var isClosed = false
     }
 
     private(set) var groups: [Group] = []
@@ -133,6 +137,8 @@ final class CanvasSatelliteDock: NSObject {
     /// that workspace — else the window as it is; else, for a project whose window went on to another,
     /// a window opened on it (`CanvasBoardView.showWorkspaceWindow`).
     func show(_ group: Group) {
+        // A space with nothing open opens; one that's open is shown like any other window.
+        if let space = group.space, group.project == nil, group.workspaces.isEmpty { return Spaces.shared.show(space) }
         let away = group.workspaces.first { $0.board?.window.map { !$0.isVisible } ?? false }
         if let board = away?.board { return board.showWorkspaceWindow() }
         if let project = group.project { return project.show() }
@@ -140,7 +146,7 @@ final class CanvasSatelliteDock: NSObject {
     }
 
     private func rebuild() {
-        groups = Self.groups(projects: openProjects(), open: CanvasSatelliteWindow.open)
+        groups = Self.withSpaces(Self.groups(projects: openProjects(), open: CanvasSatelliteWindow.open))
         guard !groups.isEmpty else {
             closeFlyout()
             panel?.orderOut(nil)
@@ -149,7 +155,12 @@ final class CanvasSatelliteDock: NSObject {
         let panel = self.panel ?? makePanel()
         column.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let focusedKey = PMFiles.focusedProjectKey()
+        var dividerPlaced = false
         for group in groups {
+            if group.space != nil, !dividerPlaced {
+                dividerPlaced = true
+                if column.arrangedSubviews.count > 0 { column.addArrangedSubview(Self.markDivider()) }
+            }
             let mark = DockMark(group: group)
             mark.isFocused = group.projectKey != nil && group.projectKey == focusedKey
             mark.onMenu = { [weak self] key, event, view in self?.showMenu(for: key, with: event, in: view) }
@@ -172,6 +183,39 @@ final class CanvasSatelliteDock: NSObject {
 
     private func group(_ key: String) -> Group? { groups.first { $0.key == key } }
 
+    /// The groups with every space after them, open or not, in the order they were made. A space's
+    /// window and pop-outs come off the list above and onto its mark, which says whose they are.
+    static func withSpaces(_ found: [Group]) -> [Group] {
+        var rest = found
+        let spaces = Spaces.shared.all.map { space -> Group in
+            let canvas = space.canvas(in: Spaces.folder)
+            var group = Group(key: "space:\(space.id)", canvas: canvas, title: space.title,
+                              color: ProjectColor(value: space.color)?.nsColor, icon: ProjectIcon(value: space.icon),
+                              space: space.id)
+            let path = canvas.standardizedFileURL.path
+            if let at = rest.firstIndex(where: { $0.canvas?.standardizedFileURL.path == path }) {
+                let open = rest.remove(at: at)
+                group.project = open.project
+                group.workspaces = open.workspaces
+            }
+            group.isClosed = !(group.project?.window?.isVisible ?? false) && group.workspaces.isEmpty
+            return group
+        }
+        return rest + spaces
+    }
+
+    /// The rule between the projects' marks and the spaces'.
+    private static func markDivider() -> NSView {
+        let line = NSBox()
+        line.boxType = .custom
+        line.borderWidth = 0
+        line.fillColor = NSColor.labelColor.withAlphaComponent(0.15)
+        line.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([line.heightAnchor.constraint(equalToConstant: 1),
+                                     line.widthAnchor.constraint(equalToConstant: markSize - 12)])
+        return line
+    }
+
     // MARK: A mark's menu
 
     /// Right-click on a mark: Show Window, then Focus or Unfocus for a project's mark.
@@ -181,6 +225,22 @@ final class CanvasSatelliteDock: NSObject {
         let menu = NSMenu()
         let show = MarkMenuItem(title: "Show Window") { [weak self] in self?.show(found) }
         menu.addItem(show)
+        if let space = found.space {
+            menu.addItem(.separator())
+            menu.addItem(MarkMenuItem(title: "Rename…") { Spaces.shared.rename(space) })
+            let colours = NSMenu()
+            for name in ProjectColor.Name.allCases {
+                let item = MarkMenuItem(title: name.rawValue.capitalized) { Spaces.shared.setColor(space, .named(name)) }
+                item.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?
+                    .withSymbolConfiguration(.init(paletteColors: [ProjectColor.named(name).nsColor]))
+                colours.addItem(item)
+            }
+            let colour = NSMenuItem(title: "Colour", action: nil, keyEquivalent: "")
+            colour.submenu = colours
+            menu.addItem(colour)
+            menu.addItem(.separator())
+            menu.addItem(MarkMenuItem(title: "Delete Space…") { Spaces.shared.delete(space) })
+        }
         if let projectKey = found.projectKey {
             menu.addItem(.separator())
             if PMFiles.focusedProjectKey() == projectKey {
@@ -659,6 +719,7 @@ private final class DockMark: NSView {
         initial = String(group.title.prefix(1)).uppercased()
         let side = CanvasSatelliteDock.markSize
         super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
+        alphaValue = group.isClosed ? 0.45 : 1
         translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([widthAnchor.constraint(equalToConstant: side),
                                      heightAnchor.constraint(equalToConstant: side)])

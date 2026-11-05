@@ -5,25 +5,41 @@ Related: [web-cards.md](web-cards.md), [concepts.md](concepts.md), [canvas-works
 
 ## Spaces
 
-Not built.
+Rebuilt 2026-11-04 on workspaces (`Spaces`, `SpaceModel`). The first build, a browser window of its own with a tab sidebar, is gone.
 
-- A space is a browser window apart from projects: a name, an icon, a colour, its own sign-ins.
-- Never the focused project. No notes, tasks, sessions or time tracking.
-- No board: a space holds tabs, not cards on a canvas.
-- One window per space.
-- Sidebar, hidden by default; ⌘S or the window's left edge shows it:
-  - the address, which opens the command bar scoped to the space;
-  - favourites, as icons;
-  - Pinned tabs;
-  - Today: New Tab, then today's tabs. They stay until closed.
-- Tab strips only on a split. A split is one sidebar row.
-- Tab actions: split with the current tab, send to a project, close (unpin, for a pinned tab).
-- Send to a project: as a card on its board (the tab leaves the space), into its `## Links`, or as a task linked to the page.
-- Links from other apps: with a project window in front, onto its board, as today. Otherwise a Today tab in the front (or most recent) space.
+- A space is a board and its workspaces that belong to no project: a canvas file, `~/.config/pm/spaces/<id>.canvas`, opened in the ordinary window.
+- So it holds any tile a project's board does: web, folder, file, note, view. Workspaces, tabs in tiles, pop-outs, the address bar, Copy Sign-In From all work as they do on a project.
+- `~/.config/pm/spaces.json` keeps what a file can't: name, icon, colour.
+- File ▸ New Space: untitled, an empty board in its window. Named with Rename… on its dock mark; clearing the name makes it untitled again.
+- A dock mark's right-click menu: Show Window, Rename…, Colour, Delete Space… (the canvas goes to the Trash).
+- The window is named for the space (Untitled Space until named).
+- Never the focused project: a window on a file changes nothing (concepts.md § Workspace).
+- Comes back at launch with the other windows (Settings' Restore).
+- Web cards in a space use the shared sign-ins, or a card's own Session; there's no per-space store.
+- Spaces from the first build: their tabs became web cards in a row on the new board, once (`Spaces.carryOverTabs`).
+- Not built: Arc's sidebar of pinned and today tabs, the playing dot, sending a tile to a project, links from other apps going to a space.
 
-## Dock
+## The frame
 
-- Projects, a divider, then spaces. Same squircle marks.
+Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Not built.
+
+- An Arc-style sidebar over a board's workspaces. The sidebar lists what's on the board; the main area is the workspace tiling.
+- For spaces and projects alike. A project's sidebar has Notes as a row. Replaces the window's tab row; supersedes "projects keep their window" above.
+- Sidebar, top to bottom: the address; favourites as icons; Board (the freeform canvas, the overview); Pinned; Today (spaces only), with New Tab.
+- A row is a card: web, folder, file, note, view. Frames on the board are folders in the sidebar.
+- Named workspaces are rows among Pinned, showing their tiles' icons.
+- Pinned and favourite are marks on the card, stored on the node (`pm*` keys), so the board stays the one record. The rest of a space's cards are Today; they stay until closed.
+- Clicking a card that isn't showing replaces the tile you're in, as Arc. In a named workspace of several tiles, that leaves the workspace for the card on its own.
+- Clicking a card that's in another named workspace jumps to that workspace, with the card's tile picked.
+- ⌥-click, or dragging a row onto the page: a tile beside the one you're in.
+- ⌘-click rows, then ⌘↩: tile them as a new workspace (a new Pinned row).
+- Tiles keep grid / master-and-stack, sizes, maximize, pop-out. A tile's strip shows only in a split.
+- ⌘T: a new card in Today, shown in the tile you're in. ⌘W closes the card in front (off the board); ⇧⌘T brings it back. Closing a pinned card unpins it.
+- An unnamed tiling of several tiles offers Keep as Workspace.
+
+
+
+- Projects, a divider, then every space, open or not. Same squircle marks; a closed space's is dimmed. A space's window and pop-outs belong to its mark. The dock shows whenever a space exists.
 - The focused project's mark has a ring in its colour. Built.
 - Not built: a grey bar beside the mark of the window in front, apart from focus.
 - A space playing audio: a dot under its mark.
@@ -46,7 +62,7 @@ Built 2026-11-04 for projects (`SwitcherController`, `SwitcherModel`); spaces jo
 - First press lands on the item after the one in front, as ⌘Tab.
 - Tab / ⇧Tab move along the row; ↓ ↑ move into a card's list; letting go of ⌥ jumps. Return and click also jump; Esc stays.
 - A project card: icon, name, Focused, current session, focused task, then Notes and each workspace with its tiles.
-- A space card: icon, name, tab count, its first tabs. Not built.
+- Open spaces follow the projects, past a divider, with their workspaces and tiles like a project's card. Built.
 - Jumping to a project focuses it (its window becoming key does).
 - The row is the dock's groups: project windows, projects with windows out, windows on a file. Ordered by window stack.
 - A quick tap (⌥ up within 0.12 s) switches without drawing the panel.

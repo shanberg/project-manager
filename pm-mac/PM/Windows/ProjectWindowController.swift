@@ -382,7 +382,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     /// What this window is of: the file it was opened on, or the project. The header's pill says this.
     var windowName: String {
-        // A window opened on a file is named for the file.
+        // A space's window is named for the space (docs/spaces.md); any other file's, for the file.
+        if let space = Spaces.shared.space(forCanvas: openedCanvas) { return space.title }
         if let openedCanvas { return openedCanvas.deletingPathExtension().lastPathComponent }
         let title = store.notes?.title.trimmingCharacters(in: .whitespacesAndNewlines)
         // The folder name is the fallback and the one that carries a code, so it's written the way the

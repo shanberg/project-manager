@@ -327,7 +327,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// inferred, and a quit at the end of a long afternoon would be worth an hour of it.
     func applicationWillTerminate(_ notification: Notification) {
         AttentionKeeper.shared.stop()
+        Spaces.shared.flush()
     }
+
+    /// File ▸ New Space…. docs/spaces.md.
+    @objc func newSpace() { Spaces.shared.newSpace() }
 
     /// Coming forward is the moment a stale view is most obvious — you have just been editing the notes
     /// somewhere else — so check the watched files immediately instead of waiting out the poll.

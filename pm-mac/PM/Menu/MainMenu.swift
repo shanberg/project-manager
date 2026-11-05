@@ -118,6 +118,7 @@ enum MainMenu {
             modifiers: [.command, .control])
         add(menu, "New Area…", #selector(AppDelegate.newArea), target: target, key: "")
         add(menu, "Take On a Folder…", #selector(AppDelegate.adoptArea), target: target, key: "")
+        add(menu, "New Space", #selector(AppDelegate.newSpace), target: target, key: "")
         menu.addItem(.separator())
         add(menu, "New Window", #selector(AppDelegate.newWindow), target: target, key: "n",
             modifiers: [.command, .option])

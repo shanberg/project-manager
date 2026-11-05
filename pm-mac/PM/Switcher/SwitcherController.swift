@@ -87,7 +87,10 @@ final class SwitcherController {
                 + group.workspaces.flatMap(\.satellites).compactMap(\.window)
             return windows.compactMap { window in stack.firstIndex { $0 === window } }.min() ?? Int.max
         }
-        let groups = dock.groups.sorted { depth($0) < depth($1) }
+        // Open projects front window first, then open spaces the same way (docs/spaces.md).
+        let open = dock.groups.filter { !$0.isClosed }
+        let groups = open.filter { $0.space == nil }.sorted { depth($0) < depth($1) }
+            + open.filter { $0.space != nil }.sorted { depth($0) < depth($1) }
         let focusedKey = PMFiles.focusedProjectKey()
         looks = [:]
         return groups.map { group in
@@ -95,6 +98,7 @@ final class SwitcherController {
             let controller = Self.controller(for: group)
             var card = SwitcherModel.Card(key: group.key, title: group.title)
             card.isFocused = group.projectKey != nil && group.projectKey == focusedKey
+            card.isSpace = group.space != nil
             if let store = controller?.store, group.projectKey != nil {
                 if let latest = store.notes?.sessions.first {
                     card.session = latest.label.isEmpty ? latest.date : "\(latest.label) · \(latest.date)"
@@ -279,6 +283,9 @@ struct SwitcherView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 10) {
                         ForEach(Array(model.cards.enumerated()), id: \.element.key) { index, card in
+                            if card.isSpace, index > 0, !model.cards[index - 1].isSpace {
+                                Divider().frame(height: 120)
+                            }
                             cardView(card, index: index, model: model)
                         }
                     }
@@ -318,7 +325,7 @@ struct SwitcherView: View {
                 .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(card.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                    Text(card.isFocused ? "Focused" : "Project")
+                    Text(card.isFocused ? "Focused" : card.isSpace ? "Space" : "Project")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(card.isFocused ? ink : .secondary)
                 }
