@@ -33,6 +33,7 @@ struct SpaceFile: Codable, Equatable {
     var spaces: [Space] = []
 
     static func read(_ url: URL) -> SpaceFile {
+        // read: Folio's own spaces.json, in ~/.config/pm: local.
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(SpaceFile.self, from: data) else { return SpaceFile() }
         return file

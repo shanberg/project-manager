@@ -1365,7 +1365,7 @@ extension CanvasBoardView {
             deleting: going, from: document, docs: CanvasDocCards.folder(forCanvasAt: store.url),
             locate: { self.store.resolver.resolve($0).url })
         // An empty document is a card that was never written in: it goes with its card, unasked.
-        let empty = documents.filter { (try? Data(contentsOf: $0))?.isEmpty == true }
+        let empty = documents.filter(CloudFile.isEmptyFile)
         let trashing: [URL]
         switch askDeleting(going, documents: documents.filter { !empty.contains($0) }) {
         case .cancel: return
@@ -1419,7 +1419,7 @@ extension CanvasBoardView {
     private func takeBackCreatedFiles(_ files: [URL]) {
         let fm = FileManager.default
         let present = files.map(currentLocation(of:)).filter { fm.fileExists(atPath: $0.path) }
-        let isEmpty = { (url: URL) in (try? Data(contentsOf: url))?.isEmpty == true }
+        let isEmpty = CloudFile.isEmptyFile
         let blank = present.filter(isEmpty)
         let written = present.filter { !isEmpty($0) }
         var trashed: [(from: URL, to: URL)] = []

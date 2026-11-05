@@ -423,6 +423,7 @@ final class PMStore {
                 }
                 // Read the bytes here rather than through `notesShow(handle:)`, because the icon lives
                 // in frontmatter the parsed notes don't carry — one read, handed to both.
+                // read: on the store's `io` queue.
                 let raw = try handle.io.readContent(path: handle.notesPath)
                 // With the folder, so the read carries the picks that live beside the notes.
                 let output = try notesShow(rawText: raw, projectPath: handle.projectPath)
@@ -696,6 +697,7 @@ final class PMStore {
     /// IO — off-main only. Takes a handle rather than a project name so a caller that needs two reads,
     /// or a read and a write, pays for resolving the project once.
     private nonisolated static func snapshot(_ handle: NotesHandle) throws -> DocSnapshot {
+        // read: nonisolated, off main only.
         DocSnapshot(notesPath: handle.notesPath, raw: try handle.io.readContent(path: handle.notesPath))
     }
 

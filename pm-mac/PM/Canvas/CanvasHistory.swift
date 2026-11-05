@@ -28,6 +28,7 @@ enum CanvasHistory {
 
     private static var all: [String: Visit] {
         if let rows { return rows }
+        // read: Folio's own history.json, in ~/.config/pm: local.
         let read = (try? Data(contentsOf: fileURL)).flatMap { try? decoder.decode([Visit].self, from: $0) } ?? []
         let loaded = Dictionary(read.map { ($0.address, $0) }, uniquingKeysWith: { $0.last > $1.last ? $0 : $1 })
         rows = loaded

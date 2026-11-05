@@ -10,6 +10,7 @@ struct PanelSettings: Codable, Equatable {
     static let `default` = PanelSettings(pinned: false)
 
     static func load() -> PanelSettings {
+        // read: Folio's own file in ~/.config/pm: local.
         guard let data = try? Data(contentsOf: PMFiles.panelSettingsURL),
               let decoded = try? JSONDecoder().decode(PanelSettings.self, from: data) else {
             return .default

@@ -504,9 +504,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// workspaces up: the project's window if it has one, else a new one. For satellites whose board
     /// has lost its window (`CanvasSatelliteKeeper.reopen`).
     static func showWorkspace(_ name: String, projectKey: String?, canvas: URL) {
-        let controller = projectKey.map { WindowManager.shared.open(projectKey: $0) }
-            ?? WindowManager.shared.open(canvas: canvas)
-        controller?.showTab(name.isEmpty ? .board(.whole) : .board(.workspace(name)))
+        let tab: ProjectTabView = name.isEmpty ? .board(.whole) : .board(.workspace(name))
+        if let projectKey { return WindowManager.shared.open(projectKey: projectKey).showTab(tab) }
+        WindowManager.shared.open(canvas: canvas) { $0.showTab(tab) }
     }
 
     func openProjectCanvas() {

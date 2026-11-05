@@ -234,6 +234,18 @@ final class CanvasFolderModel: ObservableObject {
     /// Where files being dragged over the card would go if let go now — the folder showing, or one of
     /// its folder rows — so the card can say so. Nil with nothing over it. See `CanvasFolderDrop`.
     @Published var dropTarget: URL?
+    /// Files being copied or moved in, off main, and which — what the status bar says meanwhile. See
+    /// `CanvasFolderDrop.file`.
+    @Published private(set) var filing: (count: Int, copying: Bool)?
+
+    func beginFiling(_ count: Int, copying: Bool) {
+        filing = ((filing?.count ?? 0) + count, copying)
+    }
+
+    func endFiling(_ count: Int) {
+        guard let filing else { return }
+        self.filing = filing.count > count ? (filing.count - count, filing.copying) : nil
+    }
     /// How the card lays the folder out, as its node says — kept in step by `CanvasFileNodeView.update`.
     /// A new order is a new read, since the cap is applied after sorting.
     @Published var options: CanvasFolderOptions {
@@ -575,6 +587,13 @@ enum CanvasFolderDrop {
     static func perform(_ files: [URL], into folder: URL, copying: Bool,
                         fileManager: FileManager = .default) throws -> [(from: URL, to: URL)] {
         var done: [(from: URL, to: URL)] = []
+        try perform(files, into: folder, copying: copying, fileManager: fileManager, done: &done)
+        return done
+    }
+
+    /// The same, with what was done kept in `done` even when it throws part way.
+    static func perform(_ files: [URL], into folder: URL, copying: Bool,
+                        fileManager: FileManager = .default, done: inout [(from: URL, to: URL)]) throws {
         for file in files {
             // Already there is left alone — one of several dragged out of this folder and back.
             guard file.standardizedFileURL.deletingLastPathComponent().path
@@ -587,7 +606,6 @@ enum CanvasFolderDrop {
             }
             done.append((file, target))
         }
-        return done
     }
 
     /// `name` in `folder`, or the Finder's next free "name 2.ext", "name 3.ext" when it is taken.
@@ -606,6 +624,39 @@ enum CanvasFolderDrop {
 
     /// Put a drop back: moved files go home, copies go to the Trash (not deleted — an undo that
     /// destroys is not an undo you can undo).
+    /// One filing at a time, in the order asked, off main: a copy takes as long as the file is big — a
+    /// video is gigabytes — and an online-only file downloads as it is copied.
+    nonisolated static let queue = DispatchQueue(label: "Folio.folder-filing", qos: .userInitiated)
+
+    /// `perform` on `queue`, with `model` saying so while it runs. `then` gets what was done — all of
+    /// it, even when a later file failed — and the failure.
+    @MainActor
+    static func file(_ files: [URL], into folder: URL, copying: Bool, model: CanvasFolderModel?,
+                     then: @escaping @MainActor (_ done: [(from: URL, to: URL)], _ failure: Error?) -> Void) {
+        model?.beginFiling(files.count, copying: copying)
+        queue.async {
+            var done: [(from: URL, to: URL)] = []
+            var failure: Error?
+            do { try perform(files, into: folder, copying: copying, done: &done) } catch { failure = error }
+            let finished = done, failed = failure
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    model?.endFiling(files.count)
+                    then(finished, failed)
+                }
+            }
+        }
+    }
+
+    /// `undo` on `queue`: putting a move between disks back is a copy too.
+    @MainActor
+    static func undoInBackground(_ done: [(from: URL, to: URL)], copied: Bool, then: @escaping @MainActor () -> Void = {}) {
+        queue.async {
+            undo(done, copied: copied)
+            DispatchQueue.main.async { MainActor.assumeIsolated { then() } }
+        }
+    }
+
     static func undo(_ done: [(from: URL, to: URL)], copied: Bool, fileManager: FileManager = .default) {
         for (from, to) in done.reversed() {
             if copied {

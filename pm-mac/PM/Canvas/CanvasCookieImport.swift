@@ -104,6 +104,7 @@ enum CanvasCookieImport {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(atPath: root.path) else { return [] }
         var names: [String: String] = [:]
+        // read: a browser's local profile folder, for Copy Sign-In From.
         if let data = try? Data(contentsOf: root.appending(path: "Local State")),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let cache = (json["profile"] as? [String: Any])?["info_cache"] as? [String: Any] {
@@ -123,6 +124,7 @@ enum CanvasCookieImport {
 
     /// Firefox profiles from `profiles.ini`, those with a cookie file.
     static func firefoxProfiles(root: URL) -> [(title: String, cookies: URL)] {
+        // read: a browser's local profile folder, for Copy Sign-In From.
         guard let ini = try? String(contentsOf: root.appending(path: "profiles.ini"), encoding: .utf8) else {
             return []
         }
@@ -156,6 +158,7 @@ enum CanvasCookieImport {
         case .safari(let file):
             let data: Data
             do {
+                // read: `read` runs off main (see its doc).
                 data = try Data(contentsOf: file)
             } catch let error as CocoaError where error.code == .fileReadNoPermission {
                 throw Failure.needsFullDiskAccess

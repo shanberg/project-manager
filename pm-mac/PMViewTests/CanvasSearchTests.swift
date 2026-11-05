@@ -36,6 +36,11 @@ final class CanvasSearchTests: XCTestCase {
         let doc = CanvasDocument(nodes: [node("f", .file(path: file.path, subpath: nil)),
                                          node("l", .file(path: folder.appendingPathComponent("x.png").path, subpath: nil))])
         let resolver = CanvasFileResolver(canvas: canvas)
+        // Read off main (`CanvasProse`): the first ask starts the read, and finds it once it has landed.
+        var read = false
+        _ = CanvasSearch.prose(at: file.path, resolver: resolver, whenReady: { read = true })
+        let deadline = Date().addingTimeInterval(5)
+        while !read, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
         XCTAssertEqual(CanvasSearch.matches("dpa", in: doc, pageTitle: noTitles,
                                             fileText: { CanvasSearch.prose(at: $0, resolver: resolver) }), ["f"])
         XCTAssertEqual(CanvasSearch.matches("dpa", in: doc, pageTitle: noTitles), [],

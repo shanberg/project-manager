@@ -3346,6 +3346,9 @@ extension CanvasBoardView {
 
     /// Every card whose content mentions `query`, in the order they sit in the file. The rule — what a
     /// card says, a web card's remembered page name included — is `CanvasSearch.matches`.
+    ///
+    /// A document not read yet is read off main (`CanvasProse`) and isn't matched this time; the next
+    /// keystroke or Return has it.
     func matches(_ query: String) -> [String] {
         let resolver = store.resolver
         return CanvasSearch.matches(query, in: document,

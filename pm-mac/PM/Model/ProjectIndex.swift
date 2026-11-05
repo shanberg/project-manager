@@ -426,6 +426,7 @@ final class ProjectIndex {
         -> (output: NotesShowOutput, icon: ProjectIcon?, color: ProjectColor?, partOf: String?)? {
         guard let handle = try? resolveNotesHandle(project: name),
               !CloudFile.isCloudOnly(URL(fileURLWithPath: handle.notesPath)),
+              // read: nonisolated, on the scan's queue; online-only notes skipped above.
               let raw = try? handle.io.readContent(path: handle.notesPath),
               let output = try? notesShow(rawText: raw) else { return nil }
         return (output, projectIcon(rawText: raw, notesPath: handle.notesPath), projectColor(rawText: raw), projectPartOf(rawText: raw))

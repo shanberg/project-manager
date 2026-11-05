@@ -19,6 +19,7 @@ enum PMFiles {
 
     /// The focused project key, or nil if unset/unreadable.
     static func focusedProjectKey() -> String? {
+        // read: Folio's own file in ~/.config/pm: local.
         guard let data = try? Data(contentsOf: focusedURL),
               let decoded = try? JSONDecoder().decode(FocusedFile.self, from: data) else { return nil }
         let key = decoded.projectKey?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -72,6 +73,7 @@ enum PMFiles {
     }
 
     static func recentProjects() -> [RecentProject] {
+        // read: Folio's own file in ~/.config/pm: local.
         guard let data = try? Data(contentsOf: recentProjectsURL),
               let decoded = try? JSONDecoder().decode([RecentProject].self, from: data) else { return [] }
         return decoded

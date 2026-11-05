@@ -16,6 +16,14 @@ enum CloudFile {
         guard stat(url.path, &info) == 0 else { return false }
         return info.st_flags & UInt32(SF_DATALESS) != 0
     }
+
+    /// Whether `url` is a file with nothing in it, from `stat`: the size an online-only file reports is
+    /// its real one, so this never reads or downloads anything.
+    nonisolated static func isEmptyFile(_ url: URL) -> Bool {
+        var info = stat()
+        guard stat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return false }
+        return info.st_size == 0
+    }
 }
 
 /// A file's bytes read off the main thread, answered on main.

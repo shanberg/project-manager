@@ -348,6 +348,7 @@ enum CanvasFileQueue {
 
     /// How a board is read and written. A test stands in a slow or stuck one.
     nonisolated(unsafe) static var reader: @Sendable (URL) throws -> CanvasDocument = {
+        // read: the reader hook; run on CanvasFileQueue, or by `readNow` where a caller chose to.
         try CanvasDocument.read(contentsOf: $0)
     }
     nonisolated(unsafe) static var writer: @Sendable (CanvasDocument, URL) throws -> Void = {

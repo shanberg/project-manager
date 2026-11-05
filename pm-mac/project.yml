@@ -287,6 +287,7 @@ targets:
       - path: PM/Canvas/CanvasFolderCard.swift
       - path: PM/Shared/CloudFile.swift
       - path: PM/Shared/Pictures.swift
+      - path: PM/Shared/HangWatchdog.swift
       - path: PM/Canvas/CanvasDocSession.swift
       - path: PM/Canvas/CanvasFolderOptions.swift
       - path: PM/Canvas/CanvasFolderBrowser.swift

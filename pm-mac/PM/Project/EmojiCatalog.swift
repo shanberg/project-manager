@@ -68,6 +68,7 @@ struct EmojiCatalog: Sendable {
 
     static func load() -> EmojiCatalog {
         guard let url = Bundle.main.url(forResource: "emoji", withExtension: "json", subdirectory: "Emoji"),
+              // read: the app bundle's emoji list.
               let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(File.self, from: data) else {
             return EmojiCatalog(groups: [], names: [:])

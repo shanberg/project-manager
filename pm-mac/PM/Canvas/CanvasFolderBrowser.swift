@@ -276,6 +276,11 @@ final class CanvasFolderBrowser: NSView {
             statusBar.stringValue = "Loading…"
             return
         }
+        if let filing = model.filing {
+            let items = filing.count == 1 ? "1 item" : "\(filing.count) items"
+            statusBar.stringValue = "\(filing.copying ? "Copying" : "Moving") \(items)…"
+            return
+        }
         statusBar.stringValue = Self.status(total: model.listing.total, selected: surface.selectedURLs.count,
                                             available: Self.available(at: model.location))
     }

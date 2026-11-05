@@ -36,6 +36,7 @@ enum CanvasAdvancedRules {
                                           subdirectory: "AdvancedRules") else {
             return Log.write("canvas blocking: no advanced rules in the bundle")
         }
+        // read: the app bundle's own resources.
         guard let source = try? String(contentsOf: js, encoding: .utf8),
               let packed = try? Data(contentsOf: table),
               let raw = try? (packed as NSData).decompressed(using: .zlib) as Data else {

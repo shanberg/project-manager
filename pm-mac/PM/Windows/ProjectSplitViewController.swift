@@ -365,6 +365,9 @@ final class ProjectSplitViewController: NSSplitViewController {
         // Only a board already read: this is asked while the window is coming up. `loadBoard` asks again.
         guard let url = canvasSource().url, let board = CanvasStoreRegistry.storeIfReady(for: url)
         else { return nil }
+        // Given back a turn later, once the pane built in this pass holds the board itself. It used to
+        // be kept for good, which left the board open and polled after its window closed.
+        DispatchQueue.main.async { CanvasStoreRegistry.release(board) }
         return CanvasProjectNoteCard.notesWorkspace(on: board.document, at: url,
                                                     resolver: board.resolver)
     }

@@ -53,6 +53,7 @@ final class WaitingWatcher {
     }
 
     private static func loadSeen() -> [String]? {
+        // read: Folio's own file in ~/.config/pm: local.
         guard let data = try? Data(contentsOf: seenURL) else { return nil }
         return try? JSONDecoder().decode([String].self, from: data)
     }

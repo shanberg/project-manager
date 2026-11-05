@@ -279,6 +279,41 @@ final class CanvasFolderCardTests: XCTestCase {
                        "other copy.md")
     }
 
+    // MARK: Filing off main
+
+    /// A drop's copy runs on `CanvasFolderDrop.queue`: asked for, it returns at once, the card says
+    /// it's copying until it lands, and then the file is there and the undo has what was done.
+    func testFilingCopiesOffMainAndTheCardSaysSoMeanwhile() throws {
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent("filing-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: source) }
+        let big = source.appendingPathComponent("movie.mov")
+        try Data(count: 64 * 1024 * 1024).write(to: big)
+        let model = CanvasFolderModel(url: root)
+        model.waitForReads()
+        defer { model.stop() }
+
+        // Held up behind something else on the queue, as a long copy before it would be.
+        let release = DispatchSemaphore(value: 0)
+        CanvasFolderDrop.queue.async { release.wait() }
+        var landed: [(from: URL, to: URL)]?
+        let start = Date()
+        CanvasFolderDrop.file([big], into: root, copying: true, model: model) { done, failure in
+            XCTAssertNil(failure)
+            landed = done
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.05, "the copy ran on main")
+        XCTAssertEqual(model.filing?.count, 1)
+        XCTAssertEqual(model.filing?.copying, true)
+        release.signal()
+
+        let deadline = Date().addingTimeInterval(10)
+        while landed == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        XCTAssertEqual(landed?.map(\.to.lastPathComponent), ["movie.mov"])
+        XCTAssertNil(model.filing)
+        XCTAssert(FileManager.default.fileExists(atPath: root.appendingPathComponent("movie.mov").path))
+    }
+
     // MARK: Staying true
 
     /// A file added to the folder shows up on a card already up.

@@ -308,6 +308,15 @@ final class CanvasItemListView: NSView {
         detail?.refresh(selection)
     }
 
+    /// A document's text was read (`CanvasProse`): its row draws its line now, at its new height.
+    private func excerptLanded(_ id: String) {
+        let rows = IndexSet(lines.indices.filter { lines[$0].item?.id == id })
+        guard !rows.isEmpty else { return }
+        heights = [:]
+        table.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
+        table.noteHeightOfRows(withIndexesChanged: rows)
+    }
+
     /// Put the selection somewhere by id — what a lens is told after the board has acted.
     func select(_ ids: [String]) {
         let wanted = Set(ids)
@@ -437,8 +446,12 @@ final class CanvasItemListView: NSView {
             guard let url = store.resolver.resolve(path).url else { return nil }
             let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             if let known = excerpts[url.path], known.modified == modified { return known.line }
-            let line = CanvasSearch.prose(at: path, resolver: store.resolver)
-                .flatMap { Self.firstLine(of: $0, besides: item.title) }
+            // Read off main (`CanvasProse`); the row is drawn again when it lands.
+            let id = item.id
+            guard case .ready(let text) = CanvasSearch.lookup(at: path, resolver: store.resolver, owner: self,
+                                                              whenReady: { [weak self] in self?.excerptLanded(id) })
+            else { return nil }
+            let line = text.flatMap { Self.firstLine(of: $0, besides: item.title) }
             excerpts[url.path] = (modified, line)
             return line
         default:

@@ -78,6 +78,24 @@ enum CanvasStoreRegistry {
         }
     }
 
+    /// What reading the file threw, when `load` read it and it wouldn't parse — and it hasn't changed since.
+    static func readFailure(_ url: URL) -> Error? {
+        let key = url.standardizedFileURL
+        guard open[key] == nil, isReady(key), case .failure(let error) = read[key]?.result else { return nil }
+        return error
+    }
+
+    /// A board's document to look at without holding it: the open store's, or what `load` read. Nil
+    /// otherwise, and the file is read off main for next time, with `whenReady` once it has been.
+    /// For previews — the switcher, the dock's space card — that shouldn't open a board to draw a list.
+    static func peek(_ url: URL, whenReady: (@MainActor () -> Void)? = nil) -> CanvasDocument? {
+        let key = url.standardizedFileURL
+        if let entry = open[key] { return entry.store.document }
+        if isReady(key), let read = try? read[key]?.result.get() { return read.document }
+        load(key) { whenReady?() }
+        return nil
+    }
+
     /// Load each board, then run `work` with their stores, then let them go. For an edit to a board that
     /// may not be open — a card moved between spaces — so it doesn't read the file on main.
     static func withStores(_ urls: [URL], _ work: @escaping @MainActor ([CanvasDocumentStore]) -> Void) {

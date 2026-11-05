@@ -33,6 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.write("=== PM launched (build \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] ?? "?")) configDir=\(PMFiles.configDir.path) ===")
         NSApp.setActivationPolicy(.regular)
+        // First, so a freeze anywhere in launch is caught too.
+        HangWatchdog.shared.start()
         // Before the menu is built or a name is written anywhere: a preference that moved keys has to
         // finish moving before anything reads the new one.
         ProjectCodes.migrateLegacyKey()
@@ -336,6 +338,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// File ▸ New Space…. docs/spaces.md.
     @objc func newSpace() { Spaces.shared.newSpace() }
+
+    /// Help ▸ Show Freeze Reports: the folder `HangWatchdog` samples into, in the Finder.
+    @objc func showFreezeReports() {
+        let folder = HangWatchdog.folder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
+    }
 
     /// Coming forward is the moment a stale view is most obvious — you have just been editing the notes
     /// somewhere else — so check the watched files immediately instead of waiting out the poll.

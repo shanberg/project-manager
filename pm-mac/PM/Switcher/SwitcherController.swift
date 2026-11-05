@@ -120,7 +120,8 @@ final class SwitcherController {
     /// Each workspace with its tiles, named the way a tile's tab names its card.
     private static func workspaces(_ names: [String], of canvas: URL?) -> [(name: String, tiles: [(id: String, title: String)])] {
         guard let canvas else { return names.map { ($0, []) } }
-        let document = try? CanvasDocument.read(contentsOf: canvas)
+        // Not read here: the open board's, or one read off main (the names fill in next time).
+        let document = CanvasStoreRegistry.peek(canvas)
         return names.map { name in
             let ids = CanvasWorkspaces.tiling(named: name, of: canvas)?.ids ?? []
             let tiles = ids.compactMap { id -> (id: String, title: String)? in

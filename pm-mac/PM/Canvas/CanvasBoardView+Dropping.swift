@@ -211,20 +211,24 @@ extension CanvasBoardView {
         let operation = CanvasFolderDrop.operation(for: files, into: folder, allowed: sender.draggingSourceOperationMask)
         guard !operation.isEmpty else { return false }
         let copying = operation == .copy
-        do {
-            let done = try CanvasFolderDrop.perform(files, into: folder, copying: copying)
-            registerFilingUndo(done, copied: copying)
-            return true
-        } catch {
-            NSSound.beep()
-            Log.write("folder drop failed: \(folder.path): \(error)")
-            return false
+        // Off main, the card saying so meanwhile: the drop is accepted now and lands when it's done.
+        let model = dropSession?.folder.flatMap { folderModel($0.card) }
+        CanvasFolderDrop.file(files, into: folder, copying: copying, model: model) { [weak self] done, failure in
+            if let failure {
+                NSSound.beep()
+                Log.write("folder drop failed: \(folder.path): \(failure)")
+            }
+            self?.registerFilingUndo(done, copied: copying)
+            model?.refresh()
         }
+        return true
     }
 
     private func registerFilingUndo(_ done: [(from: URL, to: URL)], copied: Bool) {
         guard !done.isEmpty, let undo = window?.undoManager else { return }
-        undo.registerUndo(withTarget: self) { _ in CanvasFolderDrop.undo(done, copied: copied) }
+        undo.registerUndo(withTarget: self) { _ in
+            MainActor.assumeIsolated { CanvasFolderDrop.undoInBackground(done, copied: copied) }
+        }
         let what = done.count == 1 ? "“\(done[0].to.lastPathComponent)”" : "\(done.count) Items"
         undo.setActionName(copied ? "Copy of \(what)" : "Move of \(what)")
     }

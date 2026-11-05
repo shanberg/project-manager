@@ -129,6 +129,7 @@ enum CanvasContentBlocker {
 
         for file in files {
             let name = file.deletingPathExtension().deletingPathExtension().lastPathComponent
+            // read: compiled block lists in the app bundle and Caches: local.
             guard let packed = try? Data(contentsOf: file) else { continue }
             // Named by what it contains, so a list that changes in a new release gets a new identity
             // and the previous compilation is never mistaken for the new one. Hashing two megabytes

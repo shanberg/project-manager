@@ -15,6 +15,7 @@ struct TaskTiming: Codable {
     private static var url: URL { PMFiles.configDir.appendingPathComponent("task-timing.json") }
 
     static func load() -> TaskTiming? {
+        // read: Folio's own file in ~/.config/pm: local.
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(TaskTiming.self, from: data)
     }

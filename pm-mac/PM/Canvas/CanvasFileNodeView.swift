@@ -70,6 +70,9 @@ final class CanvasFileNodeView: CanvasNodeView {
     private var loading: URL?
     /// A picture card's view, kept across rebuilds so an animation doesn't restart on every one.
     private var pictureView: CanvasPictureView?
+    /// A PDF card's document as last parsed, and the file it is out for. See `pdfDocument(of:)`.
+    private var pdf: (url: URL, stamp: Date?, document: PDFBox)?
+    private var pdfLoading: URL?
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
@@ -288,9 +291,9 @@ final class CanvasFileNodeView: CanvasNodeView {
             // interaction it isn't going to get: one page, scaled to the card, no scrolling, no
             // shadow. Opening it properly is what the strip's button is for.
             if CloudFile.isCloudOnly(url) { return cloudOnlyView(url) }
-            guard let read = contents(of: url) else { return NSView() }
+            guard let read = pdfDocument(of: url) else { return NSView() }
             let view = PDFView()
-            view.document = read.flatMap(PDFDocument.init(data:))
+            view.document = read
             view.autoScales = true
             view.displayMode = .singlePage
             view.displaysPageBreaks = false
@@ -467,6 +470,28 @@ final class CanvasFileNodeView: CanvasNodeView {
             contentChanged()
         }
         return had
+    }
+
+    /// The PDF at `url`, read *and parsed* off main — a large or broken PDF parses as slowly as it likes
+    /// there. Nil until it lands, which rebuilds the card; the inner nil is a file that isn't one.
+    private func pdfDocument(of url: URL) -> PDFDocument?? {
+        let stamp = CanvasFileQueue.modified(url)
+        if let pdf, pdf.url == url, pdf.stamp == stamp { return .some(pdf.document.document) }
+        guard pdfLoading != url else { return pdf.flatMap { $0.url == url ? .some($0.document.document) : nil } }
+        pdfLoading = url
+        let reader = BackgroundFileRead.reader
+        PictureStore.queue.async {
+            let parsed = PDFBox(document: reader(url).flatMap(PDFDocument.init(data:)))
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { [weak self] in
+                    guard let self, pdfLoading == url else { return }
+                    pdfLoading = nil
+                    pdf = (url, stamp, parsed)
+                    contentChanged()
+                }
+            }
+        }
+        return pdf.flatMap { $0.url == url ? .some($0.document.document) : nil }
     }
 
     /// A file that is in the cloud and not on this Mac. Not read: reading downloads it, and a card
@@ -665,7 +690,7 @@ final class CanvasFileNodeView: CanvasNodeView {
             // On the file's write queue, after the writes, and off main.
             let url = session.url
             session.afterWrites {
-                if (try? Data(contentsOf: url))?.isEmpty == true { try FileManager.default.removeItem(at: url) }
+                if CloudFile.isEmptyFile(url) { try FileManager.default.removeItem(at: url) }
             }
             return
         }
@@ -808,4 +833,9 @@ extension CanvasFileNodeView: CanvasFolderBrowserHost {
     func folderBrowser(_ browser: CanvasFolderBrowser, addCardsFor urls: [URL]) {
         board.addFileCards(urls, beside: node.id)
     }
+}
+
+/// A parsed PDF handed from the queue that parsed it to main, which is the only side that uses it.
+private struct PDFBox: @unchecked Sendable {
+    let document: PDFDocument?
 }

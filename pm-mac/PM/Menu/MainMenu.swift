@@ -270,6 +270,11 @@ enum MainMenu {
                                      action: #selector(AppDelegate.openShortcutsSettings),
                                      keyEquivalent: "")
         shortcuts.target = target
+        menu.addItem(.separator())
+        // Where `HangWatchdog` keeps its samples: what to send when Folio froze.
+        let hangs = menu.addItem(withTitle: "Show Freeze Reports", action: #selector(AppDelegate.showFreezeReports),
+                                 keyEquivalent: "")
+        hangs.target = target
     }
 
     // MARK: View

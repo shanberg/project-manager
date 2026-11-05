@@ -522,7 +522,11 @@ final class CanvasSatelliteDock: NSObject {
             flyoutSize = size
             laidOut = container
         } else if let spaceID = group.space,
-                  let card = SpaceDockCard.make(spaceID: spaceID, dismiss: { [weak self] in self?.closeFlyout() }) {
+                  let card = SpaceDockCard.make(spaceID: spaceID, dismiss: { [weak self] in self?.closeFlyout() },
+                                                whenReady: { [weak self] in
+                                                    guard let self, flyoutKey == key else { return }
+                                                    fillFlyout(key)
+                                                }) {
             let host = NSHostingView(rootView: card)
             let fitted = host.fittingSize
             flyoutSize = NSSize(width: 300, height: min(max(fitted.height, 90), 560))

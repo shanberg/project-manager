@@ -104,13 +104,27 @@ final class CanvasFolderActions: NSObject, QLPreviewPanelDataSource, QLPreviewPa
         return target
     }
 
+    /// Copied off main (`CanvasFolderDrop.queue`), the status bar saying so meanwhile.
     func duplicate(_ urls: [URL]) {
-        var made: [URL] = []
-        for url in urls {
-            let target = Self.copyName(for: url, fileManager: files)
-            do { try files.copyItem(at: url, to: target); made.append(target) } catch { NSSound.beep(); break }
+        guard !urls.isEmpty else { return }
+        let files = files, model = model
+        model.beginFiling(urls.count, copying: true)
+        CanvasFolderDrop.queue.async {
+            var made: [URL] = []
+            var failed = false
+            for url in urls {
+                let target = Self.copyName(for: url, fileManager: files)
+                do { try files.copyItem(at: url, to: target); made.append(target) } catch { failed = true; break }
+            }
+            let finished = made, beep = failed
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { [weak self] in
+                    model.endFiling(urls.count)
+                    if beep { NSSound.beep() }
+                    self?.finishMaking(finished, "Duplicate")
+                }
+            }
         }
-        finishMaking(made, "Duplicate")
     }
 
     /// The Finder's name for a copy: "name copy.ext", then "name copy 2.ext".
@@ -201,16 +215,14 @@ final class CanvasFolderActions: NSObject, QLPreviewPanelDataSource, QLPreviewPa
         let pasted = (NSPasteboard.general.readObjects(forClasses: [NSURL.self],
                                                        options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
         guard !pasted.isEmpty else { return NSSound.beep() }
-        do {
-            let done = try CanvasFolderDrop.perform(pasted, into: model.location, copying: true)
-            guard !done.isEmpty else { return }
+        // Off main, the status bar saying so meanwhile. See `CanvasFolderDrop.file`.
+        CanvasFolderDrop.file(pasted, into: model.location, copying: true, model: model) { [weak self] done, failure in
+            if failure != nil { NSSound.beep() }
+            guard let self, !done.isEmpty else { return }
             registerUndo(done.count == 1 ? "Paste Item" : "Paste Items") { actions in
-                CanvasFolderDrop.undo(done, copied: true)
-                actions.refresh()
+                CanvasFolderDrop.undoInBackground(done, copied: true) { actions.refresh() }
             }
             refresh(selecting: done.map(\.to))
-        } catch {
-            NSSound.beep()
         }
     }
 

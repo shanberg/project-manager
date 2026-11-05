@@ -49,6 +49,7 @@ enum BrowserTab {
     static func family(ofAppAt app: URL) -> Family? {
         guard let info = Bundle(url: app)?.infoDictionary,
               let name = info["OSAScriptingDefinition"] as? String,
+              // read: an installed app's own scripting dictionary: local.
               let sdef = try? String(contentsOf: app.appending(path: "Contents/Resources/\(name)"),
                                      encoding: .utf8) else { return nil }
         guard sdef.contains("name=\"URL\"") else { return nil }

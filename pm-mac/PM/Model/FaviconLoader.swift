@@ -209,6 +209,7 @@ final class FaviconLoader {
               let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
                   .contentModificationDate,
               Date().timeIntervalSince(modified) < maxAge,
+              // read: off main; Folio's own icon cache.
               let data = try? Data(contentsOf: file),
               // picture: off main; a stored icon, which `fetch` capped at `maxBytes`.
               let img = NSImage(data: data), img.size.width > 0, img.size.height > 0 else { return nil }

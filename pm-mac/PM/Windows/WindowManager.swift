@@ -94,18 +94,24 @@ final class WindowManager {
     /// broken file look identical and only one of them is something you can fix. Read for the answer
     /// rather than by taking a store: taking one and giving it back would write the file on the way
     /// out, which is a great deal to do to a file you have only been asked to look at.
+    ///
+    /// The file is read off main first (`CanvasStoreRegistry.load`), so a canvas not open anywhere opens
+    /// a moment later and the answer is nil; `then` gets the window either way.
     @discardableResult
-    func open(canvas url: URL) -> ProjectWindowController? {
+    func open(canvas url: URL, then: ((ProjectWindowController) -> Void)? = nil,
+              read: Bool = false) -> ProjectWindowController? {
         let key = url.standardizedFileURL
         if let existing = controllers.first(where: { $0.openedCanvas == key && !$0.isCarrier }) {
             existing.show()
+            then?(existing)
             return existing
         }
-        do {
-            let document = try CanvasDocument.read(contentsOf: key)
-            Log.write("canvas opened: \(key.lastPathComponent) "
-                + "nodes=\(document.nodes.count) edges=\(document.edges.count)")
-        } catch {
+        // Read once, off main. A file changing as fast as it is read opens anyway: the window reads it too.
+        if !read, !CanvasStoreRegistry.isReady(key) {
+            CanvasStoreRegistry.load(key) { [weak self] in self?.open(canvas: key, then: then, read: true) }
+            return nil
+        }
+        if let error = CanvasStoreRegistry.readFailure(key) {
             Log.write("canvas open failed: \(key.lastPathComponent): \(error)")
             let alert = NSAlert()
             alert.messageText = "Couldn't open \(url.lastPathComponent)."
@@ -115,7 +121,13 @@ final class WindowManager {
             alert.runModal()
             return nil
         }
-        return open(projectKey: nil, reusingExistingWindow: false, canvas: key)
+        if let document = CanvasStoreRegistry.peek(key) {
+            Log.write("canvas opened: \(key.lastPathComponent) "
+                + "nodes=\(document.nodes.count) edges=\(document.edges.count)")
+        }
+        let controller = open(projectKey: nil, reusingExistingWindow: false, canvas: key)
+        then?(controller)
+        return controller
     }
 
     /// Open a window on the project a `[[…]]` names, given the folder name written inside it.

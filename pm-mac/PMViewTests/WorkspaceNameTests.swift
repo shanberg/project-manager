@@ -42,21 +42,21 @@ final class WorkspaceNameTests: XCTestCase {
 /// The name a workspace is born with — see `WorkspaceNamePrompt.freshName(avoiding:)`.
 final class WorkspaceFreshNameTests: XCTestCase {
     func testTheFirstOneIsJustTheWord() {
-        XCTAssertEqual(WorkspaceNamePrompt.freshName(avoiding: []), "Workspace")
+        XCTAssertEqual(WorkspaceNamePrompt.freshName(avoiding: []), "Layout")
     }
 
     /// Counted past the ones that exist, so ⌘Return never has to ask and never collides.
     func testItCountsPastWhatIsTaken() {
-        XCTAssertEqual(WorkspaceNamePrompt.freshName(avoiding: ["Workspace"]), "Workspace 2")
-        XCTAssertEqual(WorkspaceNamePrompt.freshName(avoiding: ["Workspace", "Workspace 2"]),
-                       "Workspace 3")
+        XCTAssertEqual(WorkspaceNamePrompt.freshName(avoiding: ["Layout"]), "Layout 2")
+        XCTAssertEqual(WorkspaceNamePrompt.freshName(avoiding: ["Layout", "Layout 2"]),
+                       "Layout 3")
     }
 
     /// The first free number rather than one past the highest, so a row you have been renaming out of
     /// does not climb forever.
     func testItTakesTheFirstFreeNumber() {
-        XCTAssertEqual(WorkspaceNamePrompt.freshName(avoiding: ["Workspace", "Workspace 3"]),
-                       "Workspace 2")
+        XCTAssertEqual(WorkspaceNamePrompt.freshName(avoiding: ["Layout", "Layout 3"]),
+                       "Layout 2")
     }
 }
 

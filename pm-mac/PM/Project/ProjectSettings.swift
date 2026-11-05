@@ -16,7 +16,14 @@ enum ProjectSettings {
     /// Takes the folder name rather than a sidebar row, so the menu bar item — which only ever has a
     /// store — can offer the same command.
     static func present(projectNamed name: String, isArchived: Bool) {
-        let model = ProjectSettingsModel(projectNamed: name)
+        // The notes read off main first: they are in the vault, which may be a stalled cloud drive.
+        ProjectNotesRead.read(projectNamed: name) { notes in
+            present(projectNamed: name, isArchived: isArchived, notes: notes)
+        }
+    }
+
+    private static func present(projectNamed name: String, isArchived: Bool, notes: ProjectNotesRead) {
+        let model = ProjectSettingsModel(projectNamed: name, notes: notes)
         let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         window.title = "\(model.kind.displayName) Settings"
@@ -178,7 +185,7 @@ final class ProjectSettingsModel {
     /// Taken when the sheet opens, so choosing an emoji doesn't reshuffle the row under the pointer.
     let recentEmoji = EmojiCatalog.recents
 
-    init(projectNamed name: String) {
+    init(projectNamed name: String, notes: ProjectNotesRead) {
         let config = (try? loadConfig()) ?? nil
         kind = ProjectKind.of(folderName: name)
         folderName = name
@@ -190,9 +197,8 @@ final class ProjectSettingsModel {
         title = originalTitle
 
         // One read for both the icon and the preview ring's progress.
-        let handle = try? resolveNotesHandle(project: name)
-        notesPath = handle?.notesPath
-        let raw = handle.flatMap { try? $0.io.readContent(path: $0.notesPath) }
+        notesPath = notes.notesPath
+        let raw = notes.raw
         let todos = raw.flatMap { try? notesShow(rawText: $0) }?.todos ?? []
         (done, total) = todos.progress
         originalIcon = raw.flatMap(projectIcon(rawText:))
@@ -207,7 +213,7 @@ final class ProjectSettingsModel {
             textureMode = .pattern; texturePattern = name
         case .image(let path):
             textureMode = .image; texturePattern = Self.defaultPattern; textureImagePath = path
-            textureURL = handle.flatMap { ProjectTexture.image(path).imageURL(notesPath: $0.notesPath) }
+            textureURL = notes.notesPath.flatMap { ProjectTexture.image(path).imageURL(notesPath: $0) }
         case nil:
             textureMode = .none; texturePattern = Self.defaultPattern
         }
@@ -772,5 +778,22 @@ struct ProjectSettingsView: View {
         .help(help)
         .accessibilityLabel(help)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// A project's notes as a sheet needs them, read off main before the sheet comes up.
+struct ProjectNotesRead: Sendable {
+    let notesPath: String?
+    let raw: String?
+
+    @MainActor
+    static func read(projectNamed name: String, then: @escaping @MainActor (ProjectNotesRead) -> Void) {
+        BackgroundFileRead.queue.async {
+            let handle = try? resolveNotesHandle(project: name)
+            let read = ProjectNotesRead(notesPath: handle?.notesPath,
+                                        // read: on BackgroundFileRead.queue.
+                                        raw: handle.flatMap { try? $0.io.readContent(path: $0.notesPath) })
+            DispatchQueue.main.async { MainActor.assumeIsolated { then(read) } }
+        }
     }
 }

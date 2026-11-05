@@ -24,6 +24,7 @@ final class Spaces {
     /// Spaces made before they were boards (2026-11-04) kept their pages as tabs in `spaces.json`. A space
     /// with no canvas yet gets those pages as web cards, in a row, once; the old keys go on the next write.
     static func carryOverTabs(from list: URL, into folder: URL) {
+        // read: Folio's own spaces.json, in ~/.config/pm: local.
         guard let data = try? Data(contentsOf: list),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let spaces = object["spaces"] as? [[String: Any]] else { return }

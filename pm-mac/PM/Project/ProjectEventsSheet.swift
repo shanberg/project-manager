@@ -7,7 +7,12 @@ import SwiftUI
 @MainActor
 enum ProjectEventsSheet {
     static func present(projectNamed name: String) {
-        let model = ProjectEventsModel(projectNamed: name)
+        // The notes read off main first: they are in the vault, which may be a stalled cloud drive.
+        ProjectNotesRead.read(projectNamed: name) { present(projectNamed: name, notes: $0) }
+    }
+
+    private static func present(projectNamed name: String, notes: ProjectNotesRead) {
+        let model = ProjectEventsModel(projectNamed: name, notes: notes)
         let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         window.title = PMCommand.showEvents.title
@@ -75,10 +80,8 @@ final class ProjectEventsModel {
     /// Each calendar's own colour, by row id. Not a row's business, which is what gets saved.
     private(set) var colors: [String: NSColor] = [:]
 
-    convenience init(projectNamed name: String) {
-        let handle = try? resolveNotesHandle(project: name)
-        let raw = handle.flatMap { try? $0.io.readContent(path: $0.notesPath) }
-        self.init(folderName: name, sources: raw.map(projectEventSources(rawText:)) ?? [],
+    convenience init(projectNamed name: String, notes: ProjectNotesRead) {
+        self.init(folderName: name, sources: notes.raw.map(projectEventSources(rawText:)) ?? [],
                   access: CalendarEvents.shared.access, calendars: CalendarEvents.shared.calendars())
     }
 

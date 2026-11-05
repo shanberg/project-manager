@@ -36,6 +36,7 @@ enum ProjectLinksSync {
             let found = Result { () -> (String, NotesIO, [LinkEntry], String?) in
                 guard let config = try loadConfig() else { throw PmError.configNotFound }
                 let io = makeNotesIO(notesPath: notesPath, config: config)
+                // read: on a background queue.
                 let raw = try io.readContent(path: notesPath)
                 let links = try parseNotes(markdown: raw).links
                 var canvas = try resolveProjectCanvasPath(projectPath: projectPath)
@@ -108,6 +109,7 @@ enum ProjectLinksSync {
         CanvasFileQueue.queue(for: url).async {
             var result: Output?
             do {
+                // read: on the board's CanvasFileQueue.
                 var document = try CanvasDocument.read(contentsOf: url)
                 let before = document
                 result = mutate(&document)
@@ -124,6 +126,7 @@ enum ProjectLinksSync {
     private static func writeNotes(_ links: [LinkEntry], to notesPath: String, io: NotesIO) {
         DispatchQueue.global(qos: .utility).async {
             do {
+                // read: on a background queue.
                 let raw = try io.readContent(path: notesPath)
                 guard let out = try ProjectLinksFrame.notes(raw, with: links, notesPath: notesPath) else { return }
                 try io.writeContent(path: notesPath, content: out)

@@ -485,9 +485,10 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         let ground = board.enclosingScrollView as? CanvasScrollView
         wash.color = ground?.washColor
         wash.texture = ground?.groundView.texture
-        let icon = CanvasProjectNoteCard.notes(forCanvasAt: board.store.url).flatMap { notes in
-            (try? String(contentsOf: notes, encoding: .utf8)).flatMap { projectIcon(rawText: $0, notesPath: notes.path) }
-        }
+        // From the sidebar's index, which read the notes off main — never the notes file here.
+        let folder = CanvasProjectNoteCard.candidateProject(forCanvasAt: board.store.url).lastPathComponent
+        let icon = ProjectIndex.shared.allProjects.first { $0.name == folder }
+            .flatMap { entry in entry.icon?.resolved(notesPath: entry.notesPath) }
         projectMarkIcon = icon.flatMap { ProjectIconMark.canDraw($0) ? $0 : nil }
         let tint = wash.color?.swiftUIColor
         // In the title's ink rather than the project's colour, which the bar's wash already says: drawn

@@ -23,9 +23,17 @@ struct SpaceDockCard: View {
     let dismiss: () -> Void
 
     /// Read the space's board as it stands: the file, and whichever pages are making sound now.
-    static func make(spaceID: String, dismiss: @escaping () -> Void) -> SpaceDockCard? {
+    /// Nil while a closed space's board is read off main; `whenReady` once it has been.
+    static func make(spaceID: String, dismiss: @escaping () -> Void,
+                     whenReady: (@MainActor () -> Void)? = nil) -> SpaceDockCard? {
         guard let space = Spaces.shared.space(spaceID), let canvas = Spaces.shared.canvas(of: spaceID) else { return nil }
-        let document = (try? CanvasDocument.read(contentsOf: canvas)) ?? CanvasDocument()
+        let document: CanvasDocument
+        if FileManager.default.fileExists(atPath: canvas.path) {
+            guard let peeked = CanvasStoreRegistry.peek(canvas, whenReady: whenReady) else { return nil }
+            document = peeked
+        } else {
+            document = CanvasDocument()
+        }
         let sounding = CanvasLinkNodeView.playingCards(onCanvas: canvas)
         let items = CanvasItems.all(of: document, lookups: CanvasExistingCards.lookups()).compactMap { item -> Item? in
             guard let node = document.node(id: item.id) else { return nil }

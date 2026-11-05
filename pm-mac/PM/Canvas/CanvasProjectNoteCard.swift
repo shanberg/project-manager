@@ -55,7 +55,7 @@ enum CanvasProjectNoteCard {
 
     /// `docs/<Title>.canvas` is where `getProjectCanvasPath` puts a board; one adopted from Obsidian can
     /// sit at the top of the project folder instead. Both are one step from the project.
-    private static func candidateProject(forCanvasAt canvas: URL) -> URL {
+    static func candidateProject(forCanvasAt canvas: URL) -> URL {
         let folder = canvas.deletingLastPathComponent()
         return folder.lastPathComponent == "docs" ? folder.deletingLastPathComponent() : folder
     }

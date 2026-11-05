@@ -52,13 +52,61 @@ enum CanvasSearch {
         .map(\.id)
     }
 
-    /// What a markdown or text file card says, read from disk. Nil for any other kind of file, one that
-    /// can't be found, and one too large to be a note (over a megabyte), which search skips.
-    @MainActor static func prose(at stored: String, resolver: CanvasFileResolver) -> String? {
-        guard ["md", "markdown", "txt"].contains((stored as NSString).pathExtension.lowercased()),
-              let url = resolver.resolve(stored).url,
-              let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 1_000_000
+    /// What a markdown or text file card says. Nil for any other kind of file, one that can't be found,
+    /// one too large to be a note (over a megabyte), one only in the cloud, and one not read yet — which
+    /// `CanvasProse` reads off main and has next time.
+    @MainActor static func prose(at stored: String, resolver: CanvasFileResolver,
+                                 owner: AnyObject? = nil, whenReady: (@MainActor () -> Void)? = nil) -> String? {
+        guard case .ready(let text) = lookup(at: stored, resolver: resolver, owner: owner, whenReady: whenReady)
         else { return nil }
-        return try? String(contentsOf: url, encoding: .utf8)
+        return text
+    }
+
+    @MainActor static func lookup(at stored: String, resolver: CanvasFileResolver,
+                                  owner: AnyObject? = nil, whenReady: (@MainActor () -> Void)? = nil) -> CanvasProse.Lookup {
+        guard ["md", "markdown", "txt"].contains((stored as NSString).pathExtension.lowercased()),
+              let url = resolver.resolve(stored).url else { return .ready(nil) }
+        return CanvasProse.shared.text(of: url, owner: owner, whenReady: whenReady)
+    }
+}
+
+/// The text of prose files on boards, read off main and kept per file version — for search and the item
+/// list, which ask about every document card on a board at once.
+///
+/// - The version is `stat`'s modification date and size: nothing is read to ask.
+/// - Over a megabyte, or only in the cloud: nil, without reading. A note isn't that size, and reading an
+///   online-only file downloads it.
+@MainActor
+final class CanvasProse {
+    static let shared = CanvasProse()
+
+    enum Lookup: Equatable {
+        case ready(String?)
+        case loading
+    }
+
+    private var known: [String: (stamp: String, text: String?)] = [:]
+    private var inFlight: [String: [AnyHashable: @MainActor () -> Void]] = [:]
+
+    func text(of url: URL, owner: AnyObject? = nil, whenReady: (@MainActor () -> Void)? = nil) -> Lookup {
+        var info = stat()
+        guard stat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              info.st_size <= 1_000_000, info.st_flags & UInt32(SF_DATALESS) == 0 else { return .ready(nil) }
+        let path = url.path
+        let stamp = "\(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec)\t\(info.st_size)"
+        if let hit = known[path], hit.stamp == stamp { return .ready(hit.text) }
+
+        let owned: AnyHashable = owner.map { AnyHashable(ObjectIdentifier($0)) } ?? AnyHashable(UUID())
+        if inFlight[path] != nil {
+            if let whenReady { inFlight[path]?[owned] = whenReady }
+            return .loading
+        }
+        inFlight[path] = whenReady.map { [owned: $0] } ?? [:]
+        BackgroundFileRead.read(url) { [weak self] data in
+            guard let self else { return }
+            known[path] = (stamp, data.flatMap { String(data: $0, encoding: .utf8) })
+            for job in (inFlight.removeValue(forKey: path) ?? [:]).values { job() }
+        }
+        return .loading
     }
 }
