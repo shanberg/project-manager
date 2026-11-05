@@ -151,7 +151,7 @@ final class ScreenDimmer {
         }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = duration
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.timingFunction = Motion.Curve.out
             context.allowsImplicitAnimation = true
             windows.forEach { $0.animator().alphaValue = alpha }
         } completionHandler: { [weak self] in

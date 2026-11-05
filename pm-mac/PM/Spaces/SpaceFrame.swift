@@ -355,8 +355,10 @@ final class SpaceFrame {
             alone(id, on: canvasBoard)
             return refresh()
         }
+        // A tab switch, so a cut (`replaceInTiling`). From the Board overview it's a crossing into the
+        // card, which does show where it was, and stays animated.
         if board.isTiled, let tile = board.focusedTile ?? board.tiling?.ids.first {
-            board.replaceInTiling(tile, with: id)
+            board.replaceInTiling(tile, with: id, animated: false)
             board.select([id])
         } else {
             board.tile([id])
@@ -366,11 +368,11 @@ final class SpaceFrame {
 
     private func alone(_ id: String, on board: CanvasBoardView) {
         if let tiling = board.tiling, tiling.ids.count == 1, let only = tiling.ids.first {
-            board.replaceInTiling(only, with: id)
+            board.replaceInTiling(only, with: id, animated: false)
             board.select([id])
         } else {
             if board.isTiled { board.leaveTiling(animated: false) }
-            board.tile([id])
+            board.tile([id], animated: false)
         }
     }
 
@@ -585,6 +587,16 @@ struct SpaceFrameSidebar: View {
     @State private var fieldWidth: CGFloat = 220
     @State private var ruleHover = false
     @State private var sidebarHover = false
+    /// A card's icon is one thing whether it's on a row or a favourite: adding to (or taking off)
+    /// Favourites moves it between the two (`matchedGeometryEffect`).
+    @Namespace private var glyphs
+
+    /// Every card's place in the sidebar. A change to it (closing, Clear, archive, ⌘T, pinning,
+    /// favouriting, Move to Space) animates the rows into their new places; anything else, such as the
+    /// card in front changing, doesn't. Folding a folder isn't in it: folders snap.
+    private var placement: [String] {
+        frame.favorites.map { "f" + $0.id } + frame.cardsInOrder.map(\.id)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -620,9 +632,18 @@ struct SpaceFrameSidebar: View {
                     .controlSize(.small)
                     .frame(maxWidth: .infinity)
             }
-            if let row = frame.player { SpaceMiniPlayer(row: row, frame: frame) }
+            if let row = frame.player {
+                // It turns up because sound left the screen, which you didn't do on purpose: rises 8pt as it
+                // fades in, and goes quicker than it came.
+                SpaceMiniPlayer(row: row, frame: frame)
+                    .transition(Motion.moving(.asymmetric(
+                        insertion: .opacity.combined(with: .offset(y: 8)),
+                        removal: .opacity.combined(with: .offset(y: 4)).animation(.easeIn(duration: Motion.Tempo.exit)))))
+            }
             footer
         }
+        .animation(Motion.animation(.easeOut(duration: 0.22)), value: placement)
+        .animation(Motion.animation(.easeOut(duration: Motion.Tempo.standard)), value: frame.player?.id)
         .padding(.horizontal, 10)
         .padding(.top, 42)
         .padding(.bottom, 10)
@@ -674,7 +695,7 @@ struct SpaceFrameSidebar: View {
     private var favorites: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 44, maximum: 80), spacing: 8)], spacing: 8) {
             ForEach(frame.favorites) { row in
-                SpaceFavoriteTile(row: row) { frame.click(row.id) }
+                SpaceFavoriteTile(row: row, glyphs: glyphs) { frame.click(row.id) }
                     .contextMenu { menu(for: row) }
             }
         }
@@ -686,14 +707,17 @@ struct SpaceFrameSidebar: View {
         HStack(spacing: 6) {
             Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1)
             if !frame.today.isEmpty && (ruleHover || sidebarHover) {
+                // Shown whenever the pointer enters the sidebar, so it fades rather than flickering.
                 Button { frame.clearToday() } label: {
                     Label("Clear", systemImage: "arrow.down").labelStyle(.titleAndIcon)
                         .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .help("Close every Today card (⌘Z brings them back)")
+                .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: Motion.Tempo.quick), value: ruleHover || sidebarHover)  // motion: fade-only
         .frame(height: 18)
         .padding(.horizontal, 8).padding(.vertical, 3)
         .contentShape(Rectangle())
@@ -738,7 +762,7 @@ struct SpaceFrameSidebar: View {
     }
 
     private func cardRow(_ row: SpaceFrame.Row, indent: Bool) -> some View {
-        SpaceSidebarRow(row: row, indent: indent, picked: frame.picked.contains(row.id),
+        SpaceSidebarRow(row: row, indent: indent, picked: frame.picked.contains(row.id), glyphs: glyphs,
                         close: { frame.close(row.id) },
                         pause: { row.muted ? frame.setMuted(row.id, false) : frame.pause(row.id) }) { frame.click(row.id) }
             .contextMenu { menu(for: row) }
@@ -797,12 +821,14 @@ struct SpaceSelectedFill: View {
 
 struct SpaceFavoriteTile: View {
     let row: SpaceFrame.Row
+    var glyphs: Namespace.ID?
     let tap: () -> Void
     @State private var hover = false
 
     var body: some View {
         Button(action: tap) {
             SpaceRowGlyph(row: row, size: 20)
+                .matchedGlyph(row.id, in: glyphs)
                 .frame(maxWidth: .infinity).frame(height: 42)
                 .overlay(alignment: .topTrailing) {
                     if row.playing {
@@ -838,6 +864,8 @@ struct SpaceSidebarRow: View {
     var picked = false
     var disclosure: Bool?
     var close: (() -> Void)?
+    var glyphs: Namespace.ID?
+    var cardID: String?
     let tap: () -> Void
     @State private var hover = false
 
@@ -851,9 +879,10 @@ struct SpaceSidebarRow: View {
     var muted = false
     var pause: (() -> Void)?
 
-    init(row: SpaceFrame.Row, indent: Bool, picked: Bool, close: @escaping () -> Void,
+    init(row: SpaceFrame.Row, indent: Bool, picked: Bool, glyphs: Namespace.ID? = nil, close: @escaping () -> Void,
          pause: (() -> Void)? = nil, tap: @escaping () -> Void) {
         title = row.title; symbol = row.symbol; host = row.host; on = row.showing; front = row.front
+        self.glyphs = glyphs; cardID = row.id
         playing = row.playing || row.muted
         muted = row.muted
         self.indent = indent; self.picked = picked; self.close = close; self.pause = pause; self.tap = tap
@@ -876,6 +905,7 @@ struct SpaceSidebarRow: View {
                 .frame(width: 24, alignment: .leading)
             } else {
                 SpaceRowGlyph(host: host, symbol: symbol, title: title, size: 16)
+                    .matchedGlyph(cardID, in: glyphs)
             }
             Text(title).font(.system(size: 13)).lineLimit(1)
                 .foregroundStyle(dim && !front ? .secondary : .primary)
@@ -1002,8 +1032,10 @@ struct SpaceDownloadsButton: View {
                 .overlay(alignment: .topTrailing) {
                     if downloads.finishedCount > seen {
                         Circle().fill(Color.accentColor).frame(width: 6, height: 6).offset(x: 2, y: -2)
+                            .transition(Motion.moving(.scale(scale: 0.4).combined(with: .opacity)))
                     }
                 }
+                .animation(Motion.animation(.easeOut(duration: 0.15)), value: downloads.finishedCount > seen)
                 .frame(width: 22, height: 22).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1012,5 +1044,13 @@ struct SpaceDownloadsButton: View {
             CanvasDownloadsList().frame(width: 340, height: 360)
         }
         .onAppear { seen = downloads.finishedCount }
+    }
+}
+
+private extension View {
+    /// The card's icon as one view wherever it shows (a row, a favourite), when there's a namespace.
+    @ViewBuilder
+    func matchedGlyph(_ id: String?, in namespace: Namespace.ID?) -> some View {
+        if let id, let namespace { matchedGeometryEffect(id: id, in: namespace) } else { self }
     }
 }

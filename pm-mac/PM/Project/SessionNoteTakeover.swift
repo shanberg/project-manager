@@ -284,7 +284,7 @@ struct SessionNoteTakeover: View {
         // The card's own margin, and 8pt below: the header stands over the editor rather than above
         // it, so the gap is the editor's top inset.
         .padding(.horizontal, TaskRowMetrics.margin).padding(.top, 10).padding(.bottom, 8)
-        .animation(.easeOut(duration: 0.18), value: controlActiveState)
+        .animation(.easeOut(duration: 0.18), value: controlActiveState)  // motion: fade-only
     }
 
     /// Whether this header's window is the one you are working in — see `HeaderChrome`.

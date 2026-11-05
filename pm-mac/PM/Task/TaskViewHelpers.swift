@@ -84,10 +84,10 @@ struct WriteFailureBanner: View {
                 .font(.caption)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .transition(Motion.moving(.move(edge: .top).combined(with: .opacity)))
             }
         }
-        .animation(.snappy, value: showing)
+        .animation(Motion.animation(.snappy), value: showing)
         .onChange(of: failure) { _, new in
             showing = new
             guard let new else { return }

@@ -924,9 +924,9 @@ final class CanvasBoardView: NSView {
     ///
     /// `seconds` and `timing` are the crossing's, for the one caller that gives the cards and the zoom
     /// different curves so that one leads and the other trails — see `CanvasBoardView.cross`. Everything
-    /// else takes the spring over 0.3s that a card landing in a slot has always used.
+    /// else takes `Motion.settle` over 0.3s, the curve a card landing in a slot uses.
     func setLayout(_ next: CanvasLayout, animated: Bool,
-                   seconds: Double = 0.3, timing: CAMediaTimingFunction = Motion.spring) {
+                   seconds: Double = 0.3, timing: CAMediaTimingFunction = Motion.settle) {
         // **While picking, the board is what is shown**, whatever the tiling would lay out. Every change
         // to the workspace a click makes there comes through here with the tiles' layout, and taking it
         // would fly the cards back into tiles in the middle of choosing them.
@@ -959,7 +959,7 @@ final class CanvasBoardView: NSView {
     /// Its own method because a reorder ends without the layout changing at all: the order was applied
     /// as you crossed, and what is left on mouse-up is one card that has been held away from a slot it
     /// already owns. `setLayout` would decline that as a no-op.
-    func settleIntoLayout(seconds: Double = 0.3, timing: CAMediaTimingFunction = Motion.spring) {
+    func settleIntoLayout(seconds: Double = 0.3, timing: CAMediaTimingFunction = Motion.settle) {
         settling += 1
         let generation = settling
         NSAnimationContext.runAnimationGroup { context in

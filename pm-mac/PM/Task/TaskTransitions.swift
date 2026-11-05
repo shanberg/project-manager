@@ -52,23 +52,52 @@ extension AnyTransition {
     /// down-and-right (the child is both deeper and further down the outline), and a completion bubbling
     /// up to a sibling-less ancestor travels up-and-left. `horizontal` and `vertical` name the edges the
     /// *incoming* content enters from (either may be nil for a purely vertical or horizontal move); the
-    /// outgoing content leaves toward the opposite corner. Crossfaded so it reads like `.push`, and
-    /// size-proportional (built from `.move`), so it scales to whatever it animates.
-    static func cornerPush(horizontal: Edge?, vertical: Edge?) -> AnyTransition {
-        func opposite(_ e: Edge) -> Edge {
-            switch e {
-            case .leading:  return .trailing
-            case .trailing: return .leading
-            case .top:      return .bottom
-            case .bottom:   return .top
+    /// outgoing content leaves toward the opposite corner.
+    ///
+    /// **A nudge, not a crossing.** The task arrives from `travel` points away and the old one leaves by
+    /// less than half that, quicker, crossfading the whole time. It used to be built from `.move(edge:)`
+    /// — each card travelling its whole size, the leaving one as far as the arriving one — on a change
+    /// that happens many times an hour; the direction reads just as well from a short offset, and the
+    /// leaving task is no longer what the eye follows.
+    static func cornerPush(horizontal: Edge?, vertical: Edge?, travel: CGFloat) -> AnyTransition {
+        func sign(_ edge: Edge?) -> CGFloat {
+            switch edge {
+            case .leading?, .top?: return -1
+            case .trailing?, .bottom?: return 1
+            case nil: return 0
             }
         }
-        var insertion: AnyTransition = .opacity
-        var removal: AnyTransition = .opacity
-        for edge in [horizontal, vertical].compactMap({ $0 }) {
-            insertion = insertion.combined(with: .move(edge: edge))
-            removal = removal.combined(with: .move(edge: opposite(edge)))
+        let dx = sign(horizontal), dy = sign(vertical)
+        let leaving = travel * 0.4
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(x: dx * travel, y: dy * travel)),
+            removal: .opacity.combined(with: .offset(x: -dx * leaving, y: -dy * leaving))
+                .animation(.easeIn(duration: Motion.Tempo.exit)))
+    }
+}
+
+extension FocusMove {
+    /// How the focused task changes on screen — one definition for every place that shows it (the focus
+    /// panel's card, the menubar title), so they can't drift apart.
+    ///
+    /// `travel` is the arriving task's offset, sized to its surface. Under Reduce Motion every move,
+    /// the wipe included, becomes a plain crossfade: the task still visibly changes, nothing travels.
+    func transition(travel: CGFloat) -> AnyTransition {
+        let moving: AnyTransition
+        switch self {
+        case .right: moving = .cornerPush(horizontal: .trailing, vertical: .bottom, travel: travel)  // dove into a subtask → down-right
+        case .left:  moving = .cornerPush(horizontal: .leading,  vertical: .top,    travel: travel)  // bubbled up to an ancestor → up-left
+        case .down:  moving = .cornerPush(horizontal: nil,       vertical: .bottom, travel: travel)  // next → rises from below
+        case .up:    moving = .cornerPush(horizontal: nil,       vertical: .top,    travel: travel)  // previous → drops from above
+        case .wipe:  moving = .wipe
+        case .none:  return .identity
         }
-        return .asymmetric(insertion: insertion, removal: removal)
+        return Motion.moving(moving)
+    }
+
+    /// The curve for the change: a quick snappy arrival for a spatial move, a gentle ease for a wipe.
+    /// Not routed through `Motion.animation` — under Reduce Motion the crossfade still runs.
+    var animation: Animation {
+        self == .wipe ? .easeInOut(duration: 0.24) : .snappy(duration: Motion.Tempo.standard)
     }
 }

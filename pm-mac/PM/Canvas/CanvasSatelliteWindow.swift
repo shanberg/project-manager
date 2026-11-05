@@ -647,7 +647,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
 
     private func showButtons(_ shown: Bool) {
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
+            context.duration = 0.15  // motion: fade-only
             for button in [bringBack, gather, more] { button.animator().alphaValue = shown ? 1 : 0 }
         }
     }
@@ -1130,8 +1130,8 @@ final class CanvasSatelliteTabs: NSView {
         }
         travelling = true
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.2
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.duration = Motion.duration(Motion.Tempo.standard)
+            context.timingFunction = Motion.Curve.out
             chip.animator().frame = target
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {

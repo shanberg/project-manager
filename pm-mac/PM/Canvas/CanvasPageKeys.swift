@@ -336,7 +336,7 @@ final class KeyHint {
             window.addChildWindow(panel, ordered: .above)
         }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
+            context.duration = 0.12  // motion: fade-only
             panel.animator().alphaValue = 1
         }
     }

@@ -976,7 +976,7 @@ extension ProjectWindowController {
     private func setSidebar(_ item: NSSplitViewItem, collapsed: Bool) {
         guard !Motion.isReduced else { item.isCollapsed = collapsed; return }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.3
+            context.duration = Motion.Tempo.travel
             context.allowsImplicitAnimation = true
             item.animator().isCollapsed = collapsed
         }

@@ -134,7 +134,7 @@ struct MenubarTitleContent: View {
                     .clipped()
                     // Scope the animation to the task alone: only a real, classified move advances the
                     // token, and the ring / project code are outside this so they never slide with it.
-                    .animation(move == .wipe ? .easeInOut(duration: 0.3) : .snappy(duration: 0.32), value: moveToken)
+                    .animation(move.animation, value: moveToken)
                 Text("·").foregroundStyle(.tertiary)
                 Text(project).foregroundStyle(.secondary)
             } else {
@@ -155,16 +155,8 @@ struct MenubarTitleContent: View {
         }
     }
 
-    private var transition: AnyTransition {
-        switch move {
-        case .right: return .cornerPush(horizontal: .trailing, vertical: .bottom)  // dove into a subtask → down-right
-        case .left:  return .cornerPush(horizontal: .leading,  vertical: .top)     // bubbled up to an ancestor → up-left
-        case .down:  return .cornerPush(horizontal: nil,       vertical: .bottom)  // next → up from below
-        case .up:    return .cornerPush(horizontal: nil,       vertical: .top)     // previous → down from above
-        case .wipe:  return .wipe
-        case .none:  return .identity
-        }
-    }
+    /// The menubar is one line high, so the task arrives from closer than the focus panel's does.
+    private var transition: AnyTransition { move.transition(travel: 6) }
 }
 
 // MARK: - Non-interactive host (header)

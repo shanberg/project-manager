@@ -228,8 +228,8 @@ final class FocusPanelChrome {
         suppressNextFitAnimation = false
         if animate {
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.22
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ctx.duration = Motion.duration(Motion.Tempo.standard)
+                ctx.timingFunction = Motion.Curve.out
                 ctx.allowsImplicitAnimation = true
                 panel.animator().setFrame(frame, display: true)
             } completionHandler: { [weak self] in
@@ -317,8 +317,8 @@ final class FocusPanelChrome {
         else { return }
         isProgrammaticMove = true
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.24
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ctx.duration = Motion.duration(Motion.Tempo.standard)
+            ctx.timingFunction = Motion.Curve.out
             ctx.allowsImplicitAnimation = true
             panel.animator().setFrame(target, display: true)
         } completionHandler: { [weak self] in
@@ -437,7 +437,7 @@ final class SnapGhostWindow {
     private func animate(_ body: @escaping () -> Void, completion: (() -> Void)? = nil) {
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = Self.fade
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            ctx.timingFunction = Motion.Curve.out
             body()
         }, completionHandler: completion)
     }

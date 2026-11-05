@@ -188,8 +188,8 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
         panel.setFrame(tuckedIn(final), display: false)
         panel.orderFront(nil)
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.duration = Motion.Tempo.standard
+            context.timingFunction = Motion.Curve.out
             panel.animator().alphaValue = 1
             panel.animator().setFrame(final, display: true)
         } completionHandler: { [weak self] in
@@ -203,8 +203,8 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
         fadeGeneration += 1
         let generation = fadeGeneration
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.14
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            context.duration = Motion.Tempo.exit
+            context.timingFunction = Motion.Curve.exit
             panel.animator().alphaValue = 0
             panel.animator().setFrame(tuckedIn(panel.frame), display: true)
         } completionHandler: { [weak self] in
@@ -286,8 +286,8 @@ final class CanvasSatelliteCompanion: NSObject, NSWindowDelegate {
         guard frame != panel.frame else { return }
         if glides {
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.22
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                context.duration = Motion.duration(Motion.Tempo.standard)
+                context.timingFunction = Motion.Curve.out
                 panel.animator().setFrame(frame, display: true)
             } completionHandler: { [weak self] in
                 MainActor.assumeIsolated { self?.settled() }

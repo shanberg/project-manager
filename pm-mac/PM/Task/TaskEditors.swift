@@ -246,8 +246,8 @@ struct AddEditor: View {
                         .disabled(reading.text.isEmpty)
                     Button("Cancel", action: onCancel)
                 }
-                .animation(.snappy, value: reading.due)
-                .animation(.snappy, value: reading.unreadableDue)
+                .animation(Motion.animation(.snappy), value: reading.due)
+                .animation(Motion.animation(.snappy), value: reading.unreadableDue)
             }
         }
         .controlSize(.small)

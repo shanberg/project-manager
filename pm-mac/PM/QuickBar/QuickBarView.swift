@@ -65,7 +65,7 @@ struct QuickBarView: View {
         // interpolation of one edge; the controller reads the height off the curve and moves the
         // window to wherever the content already is. Animating the window instead put a second curve
         // under the same corners, and the frames where the two disagreed showed square ones.
-        .animation(model.animatesLayout ? .easeOut(duration: QuickBarMetrics.resizeDuration) : nil,
+        .animation(model.animatesLayout ? Motion.animation(.easeOut(duration: QuickBarMetrics.resizeDuration)) : nil,
                    value: heightSignature)
         .background(GeometryReader { geo in
             Color.clear.preference(key: QuickBarHeightKey.self, value: geo.size.height)
@@ -149,7 +149,7 @@ struct QuickBarView: View {
                 // It moves nothing around it, which is the condition the field's stillness puts on any
                 // animation up here.
                 .contentTransition(.symbolEffect(.replace))
-                .animation(.easeOut(duration: 0.18), value: model.mode.symbol)
+                .animation(.easeOut(duration: 0.18), value: model.mode.symbol)  // motion: symbol replace; SF Symbols honour Reduce Motion
             TextField(model.mode.placeholder, text: $model.query)
                 .textFieldStyle(.plain)
                 .focused($fieldFocused)
@@ -255,7 +255,7 @@ struct QuickBarView: View {
                 .frame(width: 18, height: QuickBarMetrics.noteLineHeight)
                 .padding(.top, QuickBarMetrics.noteTextInset)
                 .contentTransition(.symbolEffect(.replace))
-                .animation(.easeOut(duration: 0.18), value: model.mode.symbol)
+                .animation(.easeOut(duration: 0.18), value: model.mode.symbol)  // motion: symbol replace; SF Symbols honour Reduce Motion
             // The placeholder is the editor's own, drawn on the column its first character lands on.
             // It was a `Text` overlaid here, positioned by adding up this view's constants — which is
             // how it spent a release standing a gutter's width to the left of the caret it was
@@ -479,7 +479,7 @@ struct QuickBarView: View {
         // The one place in this bar where something is *meant* to move. The box is below everything
         // you aim at, so a line sliding between two positions costs nothing and is the whole point:
         // you see where ↑/↓ and ⌥ put the task rather than reading that they would.
-        .animation(model.animatesLayout ? .easeOut(duration: 0.14) : nil, value: ghostSignature)
+        .animation(model.animatesLayout ? Motion.animation(.easeOut(duration: 0.14)) : nil, value: ghostSignature)
         // Read as one thing. Line by line it's a list of tasks the reader can't act on, and the rows
         // above have already said what ⏎ will do.
         .accessibilityElement(children: .ignore)

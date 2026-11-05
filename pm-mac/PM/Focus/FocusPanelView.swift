@@ -89,9 +89,9 @@ struct FocusPanelView: View {
         // The content is meant to run to the window's own edges; without this the hosting controller
         // insets it below an absent titlebar and the measured height comes up short.
         .ignoresSafeArea(.container, edges: .top)
-        .animation(.snappy, value: activeEditor)
-        .animation(.snappy, value: addingTask)
-        .animation(.snappy, value: pendingDelete.isEmpty)
+        .animation(Motion.animation(.snappy), value: activeEditor)
+        .animation(Motion.animation(.snappy), value: addingTask)
+        .animation(Motion.animation(.snappy), value: pendingDelete.isEmpty)
         .onPreferenceChange(ActiveEditorFrameKey.self) { outsideClick.editorFrame = $0 }
         .background(WindowAccessor { outsideClick.window = $0 })
         .onChange(of: requests.pending) { request in
@@ -239,7 +239,7 @@ struct FocusPanelView: View {
             } else {
                 heroDisplay(hero)
                     .id(heroSignature(hero))
-                    .transition(heroTransition(for: store.focusMove))
+                    .transition(store.focusMove.transition(travel: Self.heroTravel))
             }
 
             // Editors whose row/edit lands BELOW: due edit, Add After (sibling), Add Subtask.
@@ -275,7 +275,7 @@ struct FocusPanelView: View {
         .padding(.bottom, 14)
         // Drive the transition off the store's move token: only a real, classified change animates
         // (incidental reloads leave the token untouched), and the direction/curve match it.
-        .animation(heroAnimation(for: store.focusMove), value: store.focusMoveToken)
+        .animation(store.focusMove.animation, value: store.focusMoveToken)
         // Contain the sliding task within the card so a directional push doesn't bleed into the
         // project bar or the Next line.
         .clipped()
@@ -338,23 +338,8 @@ struct FocusPanelView: View {
     /// while incidental changes (due, indent) update in place.
     private func heroSignature(_ hero: Todo) -> String { "\(PMStore.key(for: hero))|\(hero.text)" }
 
-    /// The transition for a change: a directional push whose incoming edge matches the direction of
-    /// travel, or an in-place wipe for a text edit.
-    private func heroTransition(for move: FocusMove) -> AnyTransition {
-        switch move {
-        case .right: return .cornerPush(horizontal: .trailing, vertical: .bottom)  // dove into a subtask → down-right
-        case .left:  return .cornerPush(horizontal: .leading,  vertical: .top)     // bubbled up to an ancestor → up-left
-        case .down:  return .cornerPush(horizontal: nil,       vertical: .bottom)  // next → rises up from below
-        case .up:    return .cornerPush(horizontal: nil,       vertical: .top)     // previous → drops down from above
-        case .wipe:  return .wipe
-        case .none:  return .identity
-        }
-    }
-
-    /// The curve for a change — a quick snappy slide for spatial moves, a smooth ease for a wipe.
-    private func heroAnimation(for move: FocusMove) -> Animation {
-        move == .wipe ? .easeInOut(duration: 0.3) : .snappy(duration: 0.32)
-    }
+    /// How far the hero's task arrives from on a classified move (`FocusMove.transition`).
+    private static let heroTravel: CGFloat = 14
 
     /// Read-only due-date chip (editing goes through the context menu's Set Due Date). Own dates read
     /// solid orange; an inherited date reads dashed and secondary, matching the task list's chip.

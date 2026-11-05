@@ -569,7 +569,7 @@ struct CanvasProjectNote: View {
             .onChange(of: scrollToken) { _, _ in
                 guard let key = scrollTarget,
                       let id = cardLines.first(where: { $0.originKey == key })?.id else { return }
-                withAnimation(.easeOut(duration: 0.15)) { scroller.scrollTo(id, anchor: .center) }
+                withAnimation(Motion.animation(.easeOut(duration: 0.15))) { scroller.scrollTo(id, anchor: .center) }
             }
             }
         }
@@ -1378,7 +1378,7 @@ struct CanvasProjectNote: View {
         }
         // Dim the dragged subtree in place, under the ghost floating over it.
         .opacity(draggedSubtree.contains(key) ? 0.35 : 1)
-        .animation(.easeOut(duration: 0.15), value: draggedSubtree.contains(key))
+        .animation(.easeOut(duration: 0.15), value: draggedSubtree.contains(key))  // motion: fade-only
         // Double-click *activates* — focuses the task — exactly as it does in the project window. It
         // used to open the text editor here, which meant the same gesture on the same object meant two
         // different things depending on which surface you were looking at it through. The surface is
@@ -2043,7 +2043,7 @@ private struct CardTitleButtonStyle: ButtonStyle {
                 )
                 .padding(-3)
                 .onHover { hovering = $0 }
-                .animation(.easeOut(duration: 0.12), value: hovering)
+                .animation(.easeOut(duration: 0.12), value: hovering)  // motion: fade-only
         }
     }
 }

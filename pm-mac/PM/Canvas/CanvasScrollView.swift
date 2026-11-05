@@ -337,8 +337,8 @@ final class CanvasScrollView: NSScrollView {
         guard let flight else { return ticker.stop() }
         let fraction = min(1, max(0, (now - flight.startedAt) / flight.seconds))
         // Ease out, matching the curve the cards are flying on closely enough that the two read as one
-        // movement. Not the spring: the board overshooting its zoom would show as the whole window
-        // breathing, which is a much larger claim than a card landing.
+        // movement. Never an overshooting curve: the board overshooting its zoom would show as the whole
+        // window breathing.
         let eased = 1 - pow(1 - fraction, 3)
         magnification = flight.from * pow(flight.to / flight.from, CGFloat(eased))
         centre(on: CanvasPoint(x: flight.at.x + (flight.centre.x - flight.at.x) * eased,

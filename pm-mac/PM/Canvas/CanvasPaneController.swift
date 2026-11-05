@@ -2127,10 +2127,10 @@ extension CanvasPaneController {
         ])
         hud = hint
         hint.alphaValue = 0
-        NSAnimationContext.runAnimationGroup { $0.duration = 0.2; hint.animator().alphaValue = 1 }
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.2; hint.animator().alphaValue = 1 }  // motion: fade-only
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak hint] in
             guard let hint else { return }
-            NSAnimationContext.runAnimationGroup({ $0.duration = 0.4; hint.animator().alphaValue = 0 },
+            NSAnimationContext.runAnimationGroup({ $0.duration = 0.4; hint.animator().alphaValue = 0 },  // motion: fade-only
                                                  completionHandler: { hint.removeFromSuperview() })
         }
     }
@@ -2317,9 +2317,27 @@ final class EdgeReveal: NSResponder {
 
     override func mouseMoved(with event: NSEvent) { check(event) }
     override func mouseEntered(with event: NSEvent) { check(event) }
+    override func mouseExited(with event: NSEvent) { pending?.cancel(); pending = nil }
+
+    /// **After the pointer has rested at the edge for a moment**, not as it arrives: on the way to
+    /// something else (a window behind, the Dock) it brushes the edge, and the sidebar flashing out
+    /// and back each time was noise.
+    static let rest: TimeInterval = 0.08
+    private var pending: DispatchWorkItem?
 
     private func check(_ event: NSEvent) {
         guard let view = watched else { return }
-        if view.convert(event.locationInWindow, from: nil).x <= Self.reach { reached() }
+        guard view.convert(event.locationInWindow, from: nil).x <= Self.reach else {
+            pending?.cancel()
+            pending = nil
+            return
+        }
+        guard pending == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.pending = nil
+            self?.reached()
+        }
+        pending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.rest, execute: work)
     }
 }

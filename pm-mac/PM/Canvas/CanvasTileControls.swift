@@ -11,6 +11,11 @@ import SwiftUI
 ///   that isn't a web page has the second half only.
 /// - Closes 0.45s after the pointer leaves both grip and capsule (never while editing), when its tile
 ///   leaves the layout, and when the window resizes.
+/// - Motion (`.claude/mocks/folio-spaces-motion.html`): drops 4pt into place with a fade (0.16s); going
+///   after the pointer leaves, it rises back and fades quicker (0.12s), and every other close is a cut.
+///   Widens and narrows round the address field (0.18s). Pin and Favourite replace their symbols and
+///   bounce once turning on; Maximize replaces; Reload is Stop while the page loads; a press shrinks a
+///   control to 92%.
 @MainActor
 final class CanvasTileControls {
     static let shared = CanvasTileControls()
@@ -69,6 +74,7 @@ final class CanvasTileControls {
         self.board = board
         tile = id
         model.editing = false
+        model.presented = false
         refresh()
         let made = Host(controls: self)
         content.addSubview(made, positioned: .above, relativeTo: nil)
@@ -96,12 +102,24 @@ final class CanvasTileControls {
         board?.refreshTileHandles()
     }
 
+    /// The pointer left it: back up into the grip with a fade, then gone. Quicker than it came.
+    private func dismiss() {
+        guard let leaving = host else { return }
+        rest?.cancel()
+        leave?.cancel()
+        withAnimation(.easeIn(duration: Motion.Tempo.exit)) { model.presented = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Motion.Tempo.exit) { [weak self] in
+            guard let self, self.host === leaving, !self.model.presented else { return }
+            self.close()
+        }
+    }
+
     private func scheduleLeave() {
         guard host != nil else { return }
         leave?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.pointerInCapsule, !self.pointerOnGrip, !self.model.editing else { return }
-            self.close()
+            self.dismiss()
         }
         leave = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.leaveDelay, execute: work)
@@ -149,6 +167,7 @@ final class CanvasTileControls {
         guard let board, let tile, let node = board.document.node(id: tile) else { return }
         let card = self.card
         model.isWeb = card != nil
+        model.loading = card?.isLoading ?? false
         model.canBack = card?.canGoBack ?? false
         model.canForward = card?.canGoForward ?? false
         let url = card?.liveURL
@@ -167,7 +186,15 @@ final class CanvasTileControls {
 
     func back() { card?.goBack(); later() }
     func forward() { card?.goForward(); later() }
-    func reload() { card?.reload() }
+    func reload() {
+        card?.reload()
+        model.loading = true
+    }
+
+    func stop() {
+        card?.stopLoading()
+        model.loading = false
+    }
 
     func editAddress() {
         guard let board else { return }
@@ -189,18 +216,21 @@ final class CanvasTileControls {
     func togglePinned() {
         guard let tile, let frame else { return }
         frame.setPinned(tile, !model.pinned)
+        model.pinned.toggle()   // at once, so the symbol answers the click rather than the refresh
         later()
     }
 
     func toggleFavorite() {
         guard let tile, let frame else { return }
         frame.setFavorite(tile, !model.favorite)
+        model.favorite.toggle()
         later()
     }
 
     func toggleMaximize() {
         guard let board, let tile else { return }
         board.toggleMaximizeTile(tile)
+        model.maximized = board.tiling?.maximized == tile
         later()
     }
 
@@ -242,6 +272,9 @@ final class CanvasTileControls {
         var maximized = false
         var canMaximize = true
         var editing = false
+        /// Down and in place; false while arriving and while going.
+        var presented = false
+        var loading = false
         var draft = ""
         var focusToken = 0
         var candidates: [CanvasAddressSuggestions.Candidate] = []
@@ -297,7 +330,8 @@ final class CanvasTileControls {
         /// Only the capsule takes the pointer, not the room round it for the shadow.
         override func hitTest(_ point: NSPoint) -> NSView? {
             let local = convert(point, from: superview)
-            guard bounds.insetBy(dx: Self.margin, dy: Self.margin).contains(local) else { return nil }
+            guard controls?.model.presented ?? false,
+                  bounds.insetBy(dx: Self.margin, dy: Self.margin).contains(local) else { return nil }
             return super.hitTest(point)
         }
     }
@@ -306,22 +340,21 @@ final class CanvasTileControls {
 struct CanvasTileControlsView: View {
     let controls: CanvasTileControls
     @Bindable var model: CanvasTileControls.Model
-    @State private var shown = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         capsule
-            // Unfolds from the middle of its top edge, under the grip: wider and taller at once, on a
-            // spring, the material scaling with it rather than a mask cutting it out.
-            .scaleEffect(x: shown ? 1 : 0.6, y: shown ? 1 : 0.7, anchor: .top)
-            .opacity(shown ? 1 : 0)
+            // Drops 4pt into place with a fade; rises back the same way when it goes. Chosen over
+            // scaling up out of its middle, which in a narrow tile isn't under the grip at all. Under
+            // Reduce Motion, the fade alone.
+            .offset(y: model.presented || reduceMotion ? 0 : -4)
+            .opacity(model.presented ? 1 : 0)
             .padding(CanvasTileControls.Host.margin)
             .frame(height: CanvasTileControls.Host.height, alignment: .top)
             .ignoresSafeArea()
             .fixedSize(horizontal: true, vertical: false)
             .onAppear {
-                if reduceMotion { shown = true; return }
-                withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) { shown = true }  // motion: Reduce Motion checked above
+                withAnimation(.easeOut(duration: reduceMotion ? Motion.Tempo.quick : 0.16)) { model.presented = true }  // motion: fade-only under Reduce Motion
             }
     }
 
@@ -330,13 +363,16 @@ struct CanvasTileControlsView: View {
             if model.isWeb {
                 icon("chevron.left", "Back") { controls.back() }.disabled(!model.canBack)
                 icon("chevron.right", "Forward") { controls.forward() }.disabled(!model.canForward)
-                icon("arrow.clockwise", "Reload") { controls.reload() }
+                // Stop while the page loads, as Safari's: one control, so the symbol replaces in place.
+                icon(model.loading ? "xmark" : "arrow.clockwise", model.loading ? "Stop" : "Reload") {
+                    if model.loading { controls.stop() } else { controls.reload() }
+                }
                 address
                 Rectangle().fill(Color.primary.opacity(0.12)).frame(width: 1, height: 16).padding(.horizontal, 2)
             }
             if model.inSpace {
-                icon("pin", model.pinned ? "Unpin" : "Pin", on: model.pinned) { controls.togglePinned() }
-                icon("star", model.favorite ? "Remove from Favourites" : "Add to Favourites", on: model.favorite) {
+                icon("pin", model.pinned ? "Unpin" : "Pin", on: model.pinned, bounces: true) { controls.togglePinned() }
+                icon("star", model.favorite ? "Remove from Favourites" : "Add to Favourites", on: model.favorite, bounces: true) {
                     controls.toggleFavorite()
                 }
             }
@@ -350,6 +386,8 @@ struct CanvasTileControlsView: View {
                 .help("More")
         }
         .padding(3)
+        // Widening round the address field and narrowing back, rather than jumping.
+        .animation(Motion.animation(.easeOut(duration: 0.18)), value: model.editing)
         .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.regularMaterial))
         .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.18), radius: 7, y: 3)
@@ -391,17 +429,37 @@ struct CanvasTileControlsView: View {
         }
     }
 
-    private func icon(_ symbol: String, _ help: String, on: Bool = false, action: @escaping () -> Void) -> some View {
+    private func icon(_ symbol: String, _ help: String, on: Bool = false, bounces: Bool = false,
+                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: on ? symbol + ".fill" : symbol)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(on ? Color.accentColor : .primary)
+            TileControlSymbol(name: on ? symbol + ".fill" : symbol, on: on, bounces: bounces)
                 .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(TileControlStyle())
         .help(help)
         .accessibilityLabel(help)
+    }
+}
+
+/// A control's symbol: SF Symbols' own replace when it changes (outline to filled, maximize to restore),
+/// and one bounce when a mark turns on. Under Reduce Motion it just changes.
+private struct TileControlSymbol: View {
+    let name: String
+    let on: Bool
+    let bounces: Bool
+    @State private var bounce = 0
+
+    var body: some View {
+        Image(systemName: name)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(on ? Color.accentColor : .primary)
+            .contentTransition(.symbolEffect(.replace))
+            .symbolEffect(.bounce, value: bounce)
+            .animation(Motion.animation(.snappy(duration: Motion.Tempo.standard)), value: name)
+            .onChange(of: on) { _, now in
+                if bounces, now, !Motion.isReduced { bounce &+= 1 }
+            }
     }
 }
 
@@ -414,6 +472,9 @@ private struct TileControlStyle: ButtonStyle {
         @Environment(\.isEnabled) private var enabled
         var body: some View {
             configuration.label
+                // Shrinks to 92% while held: the press answers before the action does.
+                .scaleEffect(configuration.isPressed && !Motion.isReduced ? 0.92 : 1)
+                .animation(Motion.animation(.easeOut(duration: 0.09)), value: configuration.isPressed)
                 .opacity(enabled ? 1 : 0.35)
                 .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(Color.primary.opacity(configuration.isPressed ? 0.14 : hover && enabled ? 0.08 : 0)))

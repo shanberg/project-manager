@@ -17,6 +17,8 @@ final class CanvasLinkPreview: NSView, WKNavigationDelegate, WKUIDelegate {
     private let panel = NSView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let keep: (String) -> Void
+    /// The page it was ⇧-clicked from, which Open as Card moves the panel onto.
+    private weak var source: WKWebView?
     /// Off for a Private card's preview, as for the card.
     private let recordsHistory: Bool
 
@@ -30,8 +32,36 @@ final class CanvasLinkPreview: NSView, WKNavigationDelegate, WKUIDelegate {
         preview.layoutPanel()
         current = preview
         preview.window?.makeFirstResponder(preview.web)
-        preview.alphaValue = 0
-        NSAnimationContext.runAnimationGroup { $0.duration = Motion.duration(0.15); preview.animator().alphaValue = 1 }
+        preview.arrive()
+    }
+
+    /// The window dims and the panel grows from 97% out of the link you ⇧-clicked (0.2s). Under Reduce
+    /// Motion, a fade only.
+    private func arrive() {
+        alphaValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Motion.isReduced ? Motion.Tempo.quick : Motion.Tempo.standard
+            context.timingFunction = Motion.Curve.out
+            animator().alphaValue = 1
+        }
+        guard !Motion.isReduced, let layer = panel.layer else { return }
+        let click = panel.convert(window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
+        let at = CGPoint(x: min(max(click.x, 0), panel.bounds.width), y: min(max(click.y, 0), panel.bounds.height))
+        let grow = CABasicAnimation(keyPath: "transform")
+        grow.fromValue = Self.transform(layer, scale: CGSize(width: 0.97, height: 0.97),
+                                        moving: CGPoint(x: at.x * 0.03, y: at.y * 0.03))
+        grow.toValue = CATransform3DIdentity
+        grow.duration = Motion.Tempo.standard
+        grow.timingFunction = Motion.Curve.out
+        layer.add(grow, forKey: "arrive")
+    }
+
+    /// A transform for the panel's layer that scales its bounds by `scale` from their origin and then
+    /// moves them by `moving` — whatever anchor point AppKit gave the layer.
+    private static func transform(_ layer: CALayer, scale: CGSize, moving: CGPoint) -> CATransform3D {
+        let pivot = CGPoint(x: layer.anchorPoint.x * layer.bounds.width, y: layer.anchorPoint.y * layer.bounds.height)
+        let shift = CGPoint(x: moving.x + scale.width * pivot.x - pivot.x, y: moving.y + scale.height * pivot.y - pivot.y)
+        return CATransform3DScale(CATransform3DMakeTranslation(shift.x, shift.y, 0), scale.width, scale.height, 1)
     }
 
     private init(url: URL, source: WKWebView, keep: @escaping (String) -> Void) {
@@ -43,6 +73,7 @@ final class CanvasLinkPreview: NSView, WKNavigationDelegate, WKUIDelegate {
         web = WKWebView(frame: .zero, configuration: configuration)
         web.customUserAgent = source.customUserAgent
         self.keep = keep
+        self.source = source
         recordsHistory = source.configuration.websiteDataStore.isPersistent
         super.init(frame: .zero)
         wantsLayer = true
@@ -116,18 +147,62 @@ final class CanvasLinkPreview: NSView, WKNavigationDelegate, WKUIDelegate {
         super.keyDown(with: event)
     }
 
+    /// Open as Card: the panel moves onto the tile it came from (0.25s), where the card is about to
+    /// be, and the dimming lifts; then the card takes its place. Under Reduce Motion, it fades.
     @objc private func keepIt() {
         let address = web.url?.absoluteString
-        close()
-        if let address { keep(address) }
+        let finish = { [weak self] in
+            self?.close(animated: false)
+            if let address { self?.keep(address) }
+        }
+        guard !Motion.isReduced, let layer = panel.layer, let source, source.window === window else {
+            return close(animated: true, then: { if let address { self.keep(address) } })
+        }
+        let target = convert(source.bounds, from: source)
+        let from = panel.frame
+        let move = CABasicAnimation(keyPath: "transform")
+        move.fromValue = CATransform3DIdentity
+        move.toValue = Self.transform(layer, scale: CGSize(width: target.width / from.width, height: target.height / from.height),
+                                      moving: CGPoint(x: target.minX - from.minX, y: target.minY - from.minY))
+        move.duration = Motion.duration(0.25)
+        move.timingFunction = Motion.Curve.out
+        move.fillMode = .forwards
+        move.isRemovedOnCompletion = false
+        let lift = CABasicAnimation(keyPath: "backgroundColor")
+        lift.toValue = NSColor.clear.cgColor
+        lift.duration = Motion.duration(0.25)
+        lift.fillMode = .forwards
+        lift.isRemovedOnCompletion = false
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { MainActor.assumeIsolated { finish() } }
+        layer.add(move, forKey: "keep")
+        self.layer?.add(lift, forKey: "keep")
+        CATransaction.commit()
     }
 
-    @objc private func dismiss() { close() }
+    @objc private func dismiss() { close(animated: true) }
 
-    private func close() {
+    /// Gone in one frame when replaced or kept; otherwise it fades out, quicker than it came (0.12s).
+    private func close(animated: Bool = false, then: (() -> Void)? = nil) {
         web.stopLoading()
-        removeFromSuperview()
+        if Self.current === self { Self.current = nil }
+        guard animated else { removeFromSuperview(); then?(); return }
+        closing = true
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = Motion.Tempo.exit
+            context.timingFunction = Motion.Curve.exit
+            animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                self?.removeFromSuperview()
+                then?()
+            }
+        })
     }
+
+    /// Fading out: takes no more clicks or keys.
+    private var closing = false
+    override func hitTest(_ point: NSPoint) -> NSView? { closing ? nil : super.hitTest(point) }
 
     // MARK: The page
 

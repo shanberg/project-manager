@@ -266,7 +266,7 @@ extension CanvasBoardView {
         scroll.fly(to: zoom, centre: centre, animated: true, byTransform: true,
                    curve: widening ? .leads : .trails, seconds: Self.curvedCrossing)
         setLayout(next, animated: true, seconds: Self.curvedCrossing,
-                  timing: widening ? Motion.Phase.trails.timing : Motion.spring)
+                  timing: widening ? Motion.Phase.trails.timing : Motion.settle)
     }
 
     /// How long a crossing takes. Longer than the 0.3s the two halves used to share, because they no
@@ -819,14 +819,18 @@ extension CanvasBoardView {
 
     /// Put a card from the board where `id` is showing, and take `id` out — back to its place on the
     /// board, untouched. Focused, as a card you went looking for is (`addExistingCard`).
-    func replaceInTiling(_ id: String, with other: String) {
+    ///
+    /// `animated` is false for a space's sidebar, where this is a browser's tab switch: done hundreds of
+    /// times a day, much of it from the keyboard (⌃⇥, ⌘1…⌘9), and the card flying in from its spot on
+    /// the board is a journey nobody asked to watch. A cut, as `showTab` is.
+    func replaceInTiling(_ id: String, with other: String, animated: Bool = true) {
         let undoFrom = beginTilingUndo()
         defer { endTilingUndo("Replace Tile", from: undoFrom) }
         guard var session = tiling, document.node(id: other).map({ !$0.isGroup }) ?? false,
               session.replace(id, with: other) else { return NSSound.beep() }
         tiling = session
         select([other])
-        setLayout(session.layout, animated: true)
+        setLayout(session.layout, animated: animated)
         onTilingChanged?()
         announceTiling()
     }

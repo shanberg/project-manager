@@ -69,7 +69,7 @@ enum SheetDimming {
         }
         guard !dimmers.isEmpty else { return }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
+            context.duration = 0.25  // motion: fade-only
             dimmers.forEach { $0.animator().alphaValue = 0 }
         } completionHandler: {
             dimmers.forEach { $0.isHidden = true }

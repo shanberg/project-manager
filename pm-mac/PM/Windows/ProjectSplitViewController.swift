@@ -508,8 +508,10 @@ final class ProjectSplitViewController: NSSplitViewController {
 
     private func toggleSpaceSidebar() {
         hidePeek(animated: false)
+        // Folded from the keyboard many times a day, so quick and decelerating, never past its mark.
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = Motion.isReduced ? 0 : 0.22
+            context.duration = Motion.duration(0.18)
+            context.timingFunction = Motion.Curve.out
             context.allowsImplicitAnimation = true
             sidebarItem.animator().isCollapsed.toggle()
         }
@@ -535,15 +537,19 @@ final class ProjectSplitViewController: NSSplitViewController {
         }
         let bounds = view.bounds
         let shown = NSRect(x: 6, y: 6, width: width, height: bounds.height - 12)
-        made.frame = shown.offsetBy(dx: -(width + 20), dy: 0)
+        // In from 24pt with a fade, not its whole width: it says where it lives without sweeping across
+        // the page each time. Under Reduce Motion, the fade alone.
+        made.frame = Motion.isReduced ? shown : shown.offsetBy(dx: -24, dy: 0)
+        made.alphaValue = 0
         made.autoresizingMask = [.height]
         view.addSubview(made, positioned: .above, relativeTo: nil)
         peek = made
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = Motion.isReduced ? 0 : 0.2
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.duration = Motion.isReduced ? Motion.Tempo.quick : 0.18
+            context.timingFunction = Motion.Curve.out
             context.allowsImplicitAnimation = true
             made.animator().frame = shown
+            made.animator().alphaValue = 1
         }
     }
 
@@ -551,12 +557,13 @@ final class ProjectSplitViewController: NSSplitViewController {
         guard let leaving = peek else { return }
         peek = nil
         peekForAddress = false
-        guard animated, !Motion.isReduced else { return leaving.removeFromSuperview() }
+        guard animated else { return leaving.removeFromSuperview() }
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.16
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            context.duration = Motion.Tempo.exit
+            context.timingFunction = Motion.Curve.exit
             context.allowsImplicitAnimation = true
-            leaving.animator().frame = leaving.frame.offsetBy(dx: -(leaving.frame.width + 20), dy: 0)
+            if !Motion.isReduced { leaving.animator().frame = leaving.frame.offsetBy(dx: -12, dy: 0) }
+            leaving.animator().alphaValue = 0
         }, completionHandler: { MainActor.assumeIsolated { leaving.removeFromSuperview() } })
     }
 
@@ -1119,7 +1126,7 @@ final class ProjectSplitViewController: NSSplitViewController {
             let transition = CATransition()
             transition.type = .fade
             transition.duration = fade
-            transition.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            transition.timingFunction = Motion.Curve.out
             layer.add(transition, forKey: "projectSwitch")
         }
         // Every tab was a view of the *old* project, so none of them survive. The window follows this

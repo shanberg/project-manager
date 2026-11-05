@@ -92,6 +92,21 @@ Built 2026-11-05.
 - Page menu: Show Reader (⇧⌘R) — the page's article (`<article>`, `<main>`, or the block with the most paragraph text) over the page in plain type; again, Esc or Close Reader takes it away (`CanvasReader`). Mute Page. More Page Commands ▸ Copy Address.
 - ⇧⌘C in a space: the page's address on the pasteboard, as Arc's (in project windows it stays Canvas in New Window).
 
+## Motion
+
+Decided 2026-11-05 in `.claude/mocks/folio-spaces-motion.html`. All of it through `Motion` (Shared/Motion.swift): Reduce Motion drops the movement, and a fade stays only where noted.
+
+- Switching cards in a space (a row, ⌃⇥, ⇧⌘] / ⇧⌘[, ⌘1…⌘9, the mini player, Open as Card) is a cut: `replaceInTiling(_:with:animated: false)`. From the Board overview it stays a crossing.
+- Rows: closing, Clear, archive, Move to Space, ⌘T, pinning and favouriting animate the rows to their new places (0.22s ease-out). The card in front changing doesn't. Folders snap.
+- Add to / Remove from Favourites: the card's icon moves between its row and its favourite tile (`matchedGeometryEffect`).
+- Mini player: rises 8pt with a fade (0.2s); goes 4pt with a fade (0.12s).
+- Clear on the rule fades (0.12s); the finished-download dot scales in from 40% (0.15s).
+- ⇧-click preview: the window dims and the panel grows from 97% out of the click (0.2s); Esc, ✕ or a click outside fades it (0.12s); Open as Card moves the panel onto the page it came from (0.25s), then the card takes its place. Reduce Motion: fades.
+- ⌘S: the sidebar folds and unfolds over 0.18s on an ease-out, no overshoot.
+- Floating sidebar: after the pointer rests 0.08s at the window's left edge (`EdgeReveal.rest`); in from 24pt with a fade (0.18s), out 12pt with a fade (0.12s).
+- Tile capsule: drops 4pt into place with a fade (0.16s); when the pointer leaves, rises back with a fade (0.12s); every other close is a cut. Widens and narrows round the address field (0.18s).
+- Capsule symbols: Pin and Favourite replace (SF Symbols `.replace`) and bounce once turning on; Maximize / Restore replaces; Reload is Stop (✕) while the page loads. A control shrinks to 92% while pressed.
+
 ## Focus
 
 Built 2026-11-04. Facts in [concepts.md § Focus](concepts.md#focus).

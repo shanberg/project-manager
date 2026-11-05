@@ -21,20 +21,51 @@ enum Motion {
     /// A duration, or none at all.
     static func duration(_ normal: Double) -> Double { isReduced ? 0 : normal }
 
-    /// A curve that runs past its target and settles back onto it.
+    /// A curve that arrives fast and brakes hard onto its mark, for a tile landing in its slot.
     ///
-    /// The nearest thing to a spring available where AppKit will only take a timing function — which is
-    /// anything animated through `animator()`, including a card's frame. The overshoot is small on
-    /// purpose: enough that a tile arriving in its slot reads as having *landed* rather than having
-    /// been placed, and not so much that six of them at once looks like a wobble.
+    /// The nearest thing to a critically damped spring where AppKit will only take a timing function —
+    /// anything animated through `animator()`, including a card's frame. **It never passes the target.**
+    /// This used to be `(0.3, 1.35, 0.5, 1)`, which peaked at 1.041: a tile crossing 600 pt went 24 pt
+    /// past its slot and came back, into its neighbour's gap, on an action done many times a day. The
+    /// "landed, not placed" feel comes from the deceleration — most of the travel is spent in the first
+    /// third — not from the overshoot.
     ///
     /// Reduce Motion is handled by the duration going to zero around it, which lands every card on its
     /// mark in one frame and never runs the curve at all.
-    static var spring: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.3, 1.35, 0.5, 1) }
+    static var settle: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1) }
+
+    /// How long a change takes, by kind — so the same kind of thing moves at the same speed everywhere.
+    /// Pass through `Motion.duration` (or `Motion.animation`) so Reduce Motion still takes it to zero.
+    enum Tempo {
+        /// A hover, a chip, a ghost, a small fade — something already where the eye is.
+        static let quick = 0.12
+        /// A panel resizing or snapping, a card pushing in, a banner arriving.
+        static let standard = 0.2
+        /// Something crossing the window: a board move, the sidebar, several tiles at once.
+        static let travel = 0.3
+        /// A departure next to `standard`'s arrival: leaving is quieter than arriving.
+        static let exit = 0.12
+    }
+
+    /// The curves a timing function is drawn from, in place of the system's named ones — whose
+    /// `easeInEaseOut` spends its first sixty-odd milliseconds barely moving, which on a resize the user
+    /// just caused reads as lag.
+    enum Curve {
+        /// Something the user caused: moves at once and decelerates onto its mark.
+        static var out: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1) }
+        /// Something on screen changing state in place.
+        static var inOut: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.77, 0, 0.175, 1) }
+        /// Something leaving; pair with `Tempo.exit`.
+        static var exit: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.4, 0, 1, 1) }
+    }
 
     /// A SwiftUI animation, or none — `nil` is what `withAnimation` and `.animation(_:value:)` take to
     /// mean "change immediately".
     static func animation(_ wanted: Animation) -> Animation? { isReduced ? nil : wanted }
+
+    /// A transition that travels, or a plain fade when Reduce Motion is on: the change stays legible
+    /// without the movement, which is Apple's own substitution.
+    static func moving(_ travelling: AnyTransition) -> AnyTransition { isReduced ? .opacity : travelling }
 
     /// One movement made of two things that must not happen at the same rate.
     ///

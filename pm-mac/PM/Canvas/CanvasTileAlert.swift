@@ -325,7 +325,7 @@ final class CanvasTileAlert: NSView {
     private func fadeIn() {
         alphaValue = 0
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
+            context.duration = 0.15  // motion: fade-only
             animator().alphaValue = 1
         }
     }
