@@ -87,6 +87,10 @@ final class CanvasBoardView: NSView {
     /// A press on the ground around the tiles moves the window. Set in a space's window.
     var dragsWindowFromGround = false
 
+    /// Where a page's new tab goes (a link that asks for a new window, ⌘-click): set in a space, where
+    /// it's a card in Today. The flag is whether it comes to the front. Nil elsewhere: a tab in the tile.
+    var opensNewTab: ((String, Bool) -> Void)?
+
     /// Room at the top for the floating header, and nothing else.
     ///
     /// This used to add 18pt on three sides as well, which `CanvasTiling.frames` then inset again — two

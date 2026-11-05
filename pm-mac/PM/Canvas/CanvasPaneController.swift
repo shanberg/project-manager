@@ -68,6 +68,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     private func applyWindowButtons() {
         let away = hidesHeader && !trafficLightsAreElsewhere()
         lightsReveal.watch(away ? container : nil)
+        edgeReveal.watch(away ? container : nil)
         if away {
             setWindowButtons(shown: lightsReveal.isNear)
         } else {
@@ -92,6 +93,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     /// ⌘L in a space: the sidebar's address field, on the page in front. Set by the window's split.
     var focusSpaceAddress: () -> Void = {}
+
+    /// The pointer at the window's left edge with a space's sidebar folded: float it in. Set by the split.
+    var revealSidebar: () -> Void = {}
+
+    private lazy var edgeReveal = EdgeReveal { [weak self] in self?.revealSidebar() }
 
     /// The window's sidebar width, read and set, for `sidebarEdge`. Set by the window's split.
     var sidebarWidth: () -> CGFloat = { 0 }
@@ -321,7 +327,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // The header's tiling button says what it is about to do — "Fill Window with These 6 Cards" —
         // so it has to hear about the selection. Nothing was listening to this before; the board fired
         // it into an unset closure.
-        scroll.board.onSelectionChanged = { [weak self] _ in self?.refreshTileCommand() }
+        scroll.board.onSelectionChanged = { [weak self] _ in
+            self?.refreshTileCommand()
+            self?.onFrontPageChanged?()
+        }
         // The pane's own width, which is what the capsule has to fit inside — not the window's, since a
         // project window's sidebar takes a bite out of it.
         container.postsFrameChangedNotifications = true
@@ -646,6 +655,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     /// Told when this board tiles or untiles, so the tab holding it can re-title itself.
     var onTilingChanged: (() -> Void)?
+    /// The focused tile changed, or its page navigated or retitled: a space's address field follows it.
+    var onFrontPageChanged: (() -> Void)?
 
     /// Run `act` once this board is tiled into the workspace called `name` — at once if it already is.
     ///
@@ -1368,6 +1379,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     }
 
     func pageStateChanged() {
+        onFrontPageChanged?()
         // Whatever find is about to search, said in the field rather than assumed. Kept here because
         // this runs whenever you step into or out of a card, which is exactly when the answer changes.
         header.find.scope = findScope
@@ -1409,19 +1421,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// What the address field can suggest: this board's web cards, where this card has been, and every
     /// page PM remembers a name for — in that order, which is the order ties are broken in.
     private var addressCandidates: [CanvasAddressSuggestions.Candidate] {
-        var candidates: [CanvasAddressSuggestions.Candidate] = []
-        for node in scroll.board.document.nodes {
-            guard case .link(let url) = node.content else { continue }
-            let host = URL(string: url)?.host() ?? url
-            candidates.append(.init(title: CanvasPageTitles.of(url) ?? host, address: url, source: .board))
-        }
-        for step in engagedCard?.backSteps ?? [] {
-            candidates.append(.init(title: step.title, address: step.address, source: .history))
-        }
-        for page in CanvasPageTitles.remembered() {
-            candidates.append(.init(title: page.title, address: page.address, source: .history))
-        }
-        return candidates
+        CanvasHistory.candidates(board: scroll.board.document.nodes,
+                                 back: (engagedCard?.backSteps ?? []).map { (title: $0.title, address: $0.address) })
     }
 
     private var findScope: CanvasHeaderModel.Find.Scope {
@@ -2281,5 +2282,43 @@ final class CornerReveal: NSResponder {
         guard near != isNear else { return }
         isNear = near
         changed(near)
+    }
+}
+
+/// Tells when the pointer reaches a view's leading edge: where a folded sidebar comes back as Arc's
+/// does (docs/spaces.md § The frame).
+@MainActor
+final class EdgeReveal: NSResponder {
+    private let reached: () -> Void
+    private weak var watched: NSView?
+    private var area: NSTrackingArea?
+    /// How close counts: the gutter's width.
+    static let reach: CGFloat = 6
+
+    init(_ reached: @escaping () -> Void) {
+        self.reached = reached
+        super.init()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func watch(_ view: NSView?) {
+        guard view !== watched else { return }
+        if let area { watched?.removeTrackingArea(area) }
+        area = nil
+        watched = view
+        guard let view else { return }
+        let made = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        view.addTrackingArea(made)
+        area = made
+    }
+
+    override func mouseMoved(with event: NSEvent) { check(event) }
+    override func mouseEntered(with event: NSEvent) { check(event) }
+
+    private func check(_ event: NSEvent) {
+        guard let view = watched else { return }
+        if view.convert(event.locationInWindow, from: nil).x <= Self.reach { reached() }
     }
 }

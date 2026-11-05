@@ -458,6 +458,16 @@ final class ProjectSplitViewController: NSSplitViewController {
         let frame = SpaceFrame(spaceID: spaceID, canvas: url, store: store, split: self)
         spaceFrame = frame
         sidebarHosting.rootView = AnyView(SpaceFrameSidebar(frame: frame))
+        frame.presentAddress = { [weak self] in
+            guard let self else { return }
+            frame.addressInPeek = sidebarItem.isCollapsed
+            if sidebarItem.isCollapsed { showPeek(forAddress: true) }
+        }
+        frame.addressDone = { [weak self] in
+            guard let self, peekForAddress else { return }
+            peekForAddress = false
+            if !(peek?.isPointerInside ?? false) { hidePeek() }
+        }
         bottomBarView?.isHidden = true
         useBareSidebar()
         tabModel.hidesBar = true
@@ -496,7 +506,62 @@ final class ProjectSplitViewController: NSSplitViewController {
         }
     }
 
+    private func toggleSpaceSidebar() {
+        hidePeek(animated: false)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Motion.isReduced ? 0 : 0.22
+            context.allowsImplicitAnimation = true
+            sidebarItem.animator().isCollapsed.toggle()
+        }
+    }
+
+    // MARK: The floating sidebar
+
+    /// The sidebar over the content while it's folded away: up while the pointer is at the window's left
+    /// edge, and for ⌘T / ⌘L until the address is done — Arc's. The same model as the docked one.
+    private var peek: SidebarPeek?
+    private var peekForAddress = false
+
+    func showPeek(forAddress: Bool) {
+        guard let frame = spaceFrame, sidebarItem.isCollapsed else { return }
+        if forAddress { peekForAddress = true }
+        if peek != nil { return }
+        let width = max(ProjectWindow.sidebarMinWidth, min(sidebarItem.viewController.view.frame.width > 1
+            ? sidebarItem.viewController.view.frame.width : 240, ProjectWindow.sidebarMaxWidth))
+        let made = SidebarPeek(content: NSHostingView(rootView: AnyView(SpaceFrameSidebar(frame: frame, inPeek: true))))
+        made.onExit = { [weak self] in
+            guard let self, !peekForAddress else { return }
+            hidePeek()
+        }
+        let bounds = view.bounds
+        let shown = NSRect(x: 6, y: 6, width: width, height: bounds.height - 12)
+        made.frame = shown.offsetBy(dx: -(width + 20), dy: 0)
+        made.autoresizingMask = [.height]
+        view.addSubview(made, positioned: .above, relativeTo: nil)
+        peek = made
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Motion.isReduced ? 0 : 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.allowsImplicitAnimation = true
+            made.animator().frame = shown
+        }
+    }
+
+    func hidePeek(animated: Bool = true) {
+        guard let leaving = peek else { return }
+        peek = nil
+        peekForAddress = false
+        guard animated, !Motion.isReduced else { return leaving.removeFromSuperview() }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.16
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            context.allowsImplicitAnimation = true
+            leaving.animator().frame = leaving.frame.offsetBy(dx: -(leaving.frame.width + 20), dy: 0)
+        }, completionHandler: { MainActor.assumeIsolated { leaving.removeFromSuperview() } })
+    }
+
     func endSpaceFrame() {
+        hidePeek(animated: false)
         guard let frame = spaceFrame else { return }
         frame.stop()
         spaceFrame = nil
@@ -654,7 +719,12 @@ final class ProjectSplitViewController: NSSplitViewController {
             splitView.setPosition(clamped, ofDividerAt: 0)
         }
         pane.focusSpaceAddress = { [weak self] in self?.spaceFrame?.editFrontAddress() }
+        pane.revealSidebar = { [weak self] in self?.showPeek(forAddress: false) }
         pane.hidesHeader = spaceFrame != nil
+        pane.board.opensNewTab = spaceFrame == nil ? nil : { [weak self] address, front in
+            self?.spaceFrame?.openNewCard(address, showing: front)
+        }
+        pane.onFrontPageChanged = { [weak self] in self?.spaceFrame?.frontChanged() }
         pane.onTilingChanged = { [weak self] in
             self?.refreshTabModel()
             self?.spaceFrame?.refresh()
@@ -1078,6 +1148,8 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// doesn't reach into the others. The persisted value is only the default a first window opens
     /// with, so the app comes back the way you left it.
     override func toggleSidebar(_ sender: Any?) {
+        // A space's sidebar is a plain pane, which the controller's own toggle leaves alone.
+        if spaceFrame != nil { return toggleSpaceSidebar() }
         // An explicit toggle outranks the auto-hide in both directions: showing it means the window
         // makes room, and hiding it means it stays hidden however wide the window gets.
         sidebarHiddenForWidth = false
@@ -1194,4 +1266,53 @@ final class ProjectSplitView: NSSplitView {
     /// leading gutter is the sidebar's edge (`SidebarEdgeHandle`), which is what makes a divider
     /// unnecessary.
     override var dividerThickness: CGFloat { hidesDivider ? 0 : super.dividerThickness }
+}
+
+/// The floating sidebar's frame: rounded, lifted off the content, and told when the pointer leaves it.
+@MainActor
+final class SidebarPeek: NSView {
+    var onExit: () -> Void = {}
+    private(set) var isPointerInside = false
+
+    init(content: NSView) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        shadow = {
+            let shadow = NSShadow()
+            shadow.shadowBlurRadius = 18
+            shadow.shadowColor = NSColor.black.withAlphaComponent(0.28)
+            shadow.shadowOffset = NSSize(width: 0, height: -2)
+            return shadow
+        }()
+        content.wantsLayer = true
+        content.layer?.cornerRadius = 12
+        content.layer?.cornerCurve = .continuous
+        content.layer?.masksToBounds = true
+        content.autoresizingMask = [.width, .height]
+        addSubview(content)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        subviews.first?.frame = bounds
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isPointerInside = true }
+    override func mouseExited(with event: NSEvent) {
+        isPointerInside = false
+        // A moment's grace: a pointer that slips off the edge and straight back keeps it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, !isPointerInside else { return }
+            onExit()
+        }
+    }
 }

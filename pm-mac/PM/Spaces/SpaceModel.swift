@@ -11,6 +11,8 @@ struct Space: Codable, Equatable, Identifiable {
     var name: String
     var icon: String
     var color: String
+    /// Today's cards not shown for this long go (Arc's archive). Nil: kept until closed.
+    var archiveAfter: Double?
 
     init(id: String = UUID().uuidString, name: String = "", icon: String = "globe", color: String) {
         self.id = id

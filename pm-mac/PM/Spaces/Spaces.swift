@@ -104,6 +104,121 @@ final class Spaces {
         try SpaceCanvas.empty.write(to: url, options: .withoutOverwriting)
     }
 
+    /// The space whose window was last in front, kept between launches.
+    var lastUsed: String? {
+        get { UserDefaults.standard.string(forKey: "PMLastSpace") }
+        set { UserDefaults.standard.set(newValue, forKey: "PMLastSpace") }
+    }
+
+    /// Where a link from another app goes (Folio as the default browser): the space whose window is
+    /// furthest forward, else the one used last, else the first. Nil with no spaces at all.
+    var forIncomingLinks: String? {
+        let open = NSApp.orderedWindows.lazy.compactMap { $0.windowController as? ProjectWindowController }
+            .compactMap(\.spaceFrame).first?.spaceID
+        if let open { return open }
+        if let last = lastUsed, space(last) != nil { return last }
+        return file.spaces.first?.id
+    }
+
+    /// ⇧⌘T: a card closed in a space, back in that space.
+    func reopen(_ closed: CanvasHistory.Closed) {
+        guard space(closed.spaceID) != nil else { return }
+        show(closed.spaceID)
+        DispatchQueue.main.async { [weak self] in
+            guard let window = self?.window(of: closed.spaceID) else { return }
+            window.window?.makeKeyAndOrderFront(nil)
+            window.spaceFrame?.reopen(closed)
+        }
+    }
+
+    /// A link from another app, in a space: the card already on that address, else a new one in Today.
+    func openIncoming(_ url: URL, in id: String) {
+        show(id)
+        DispatchQueue.main.async { [weak self] in
+            guard let window = self?.window(of: id), let frame = window.spaceFrame else {
+                return Log.write("incoming link: space \(id) has no window")
+            }
+            window.window?.makeKeyAndOrderFront(nil)
+            frame.openIncoming(url.absoluteString)
+        }
+    }
+
+    /// Show a card in its space: the window, then the card in it, as a click on its sidebar row.
+    func showCard(_ cardID: String, in id: String) {
+        show(id)
+        DispatchQueue.main.async { [weak self] in self?.window(of: id)?.spaceFrame?.show(cardID) }
+    }
+
+    func pause(_ cardID: String, in id: String) {
+        guard let canvas = canvas(of: id) else { return }
+        CanvasLinkNodeView.pause(card: cardID, onCanvas: canvas)
+    }
+
+    // MARK: Moving a card to another space
+
+    /// A card off one space's board and onto another's, right of everything there, as Today.
+    func move(_ cardID: String, from id: String, to target: String) {
+        guard id != target, let from = canvas(of: id), let to = canvas(of: target) else { return }
+        if !FileManager.default.fileExists(atPath: to.path) { try? makeCanvas(at: to) }
+        guard let source = try? CanvasStoreRegistry.store(for: from) else { return }
+        defer { CanvasStoreRegistry.release(source) }
+        guard var node = source.document.node(id: cardID),
+              let destination = try? CanvasStoreRegistry.store(for: to) else { return }
+        defer { CanvasStoreRegistry.release(destination) }
+        let right = destination.document.nodes.map { $0.frame.x + $0.frame.width }.max() ?? 0
+        node.frame = CanvasRect(x: right + 40, y: 0, width: node.frame.width, height: node.frame.height)
+        SpaceCardMarks.setPinned(false, on: &node)
+        SpaceCardMarks.setFavorite(false, on: &node)
+        let moved = node
+        destination.change("Move from \(space(id)?.title ?? "Space")") { $0.nodes.append(moved) }
+        destination.save()
+        source.change("Move to \(space(target)?.title ?? "Space")") { doc in
+            doc.nodes.removeAll { $0.id == cardID }
+            doc.edges.removeAll { $0.fromNode == cardID || $0.toNode == cardID }
+        }
+        source.save()
+        CanvasSatelliteDock.shared.refresh()
+    }
+
+    // MARK: Sending a card to a project
+
+    enum Send { case card, link, task }
+
+    /// From the dock's flyout: a web card to a project — onto its board (and off the space's), into its
+    /// `## Links`, or as a task linked to the page.
+    func send(_ cardID: String, in id: String, as kind: Send, to project: (key: String, name: String)) {
+        guard let canvas = canvas(of: id), let document = try? CanvasDocument.read(contentsOf: canvas),
+              let node = document.node(id: cardID), case .link(let address) = node.content,
+              let url = URL(string: address) else { return }
+        let title = CanvasExistingCards.card(node)?.title ?? url.host() ?? address
+        switch kind {
+        case .card:
+            CanvasIncomingLinks.open(url, inProject: project.key, inNewWindow: false)
+            if let store = try? CanvasStoreRegistry.store(for: canvas) {
+                store.change("Move to Project") { $0.nodes.removeAll { $0.id == cardID } }
+                store.save()
+                CanvasStoreRegistry.release(store)
+            }
+        case .link:
+            var input = ApiInput()
+            input.project = project.name
+            input.text = address
+            input.label = title
+            perform(.notesAddLink, input)
+        case .task:
+            perform(.taskAdd, PMContract.input(project: project.name) { $0.text = "[\(title)](\(address))" })
+        }
+    }
+
+    private func perform(_ action: PMAction, _ input: ApiInput) {
+        do { _ = try PMContract.perform(action, input) } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't send the page."
+            alert.informativeText = ApiError.from(error).message
+            alert.runModal()
+        }
+    }
+
     // MARK: Making and removing
 
     /// File ▸ New Space: untitled, an empty board in its window. Named later, if ever.

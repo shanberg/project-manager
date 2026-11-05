@@ -760,6 +760,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         if let live = web?.url?.absoluteString, !capturingTitle || live != address {
             CanvasPageTitles.remember(title, for: live)
         }
+        CanvasHistory.record(web?.url, title: title, profile: profile, counts: false)
         refreshName()
         describeYourself()
     }
@@ -1111,6 +1112,68 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// Only a page that is running can be playing, whatever WebKit said last.
     override var isPlayingMedia: Bool { web != nil && playing }
 
+    /// Whether this card's page is making sound right now (`CanvasPageView.isPlayingAudio`).
+    var isPlayingAudio: Bool { (web as? CanvasPageView)?.isPlayingAudio ?? false }
+
+    /// The cards making sound on a canvas, on any board showing it. docs/spaces.md.
+    static func playingCards(onCanvas url: URL) -> Set<String> {
+        let key = url.standardizedFileURL
+        return Set(cards.allObjects.filter { $0.isPlayingAudio && $0.board.store.url.standardizedFileURL == key }
+            .map(\.node.id))
+    }
+
+    /// Stop whatever this card's page is playing — the Now Playing row's pause.
+    func pauseMedia() { web?.pauseAllMediaPlayback() }
+
+    /// The running card for `id` on this canvas, wherever it's shown.
+    static func card(_ id: String, onCanvas url: URL) -> CanvasLinkNodeView? {
+        let key = url.standardizedFileURL
+        return cards.allObjects.first { $0.node.id == id && $0.web != nil && $0.board.store.url.standardizedFileURL == key }
+    }
+
+    /// Play again what the page last paused (the mini player's play).
+    func resumeMedia() {
+        web?.evaluateJavaScript("""
+        (() => { const m = [...document.querySelectorAll('video, audio')].filter(e => e.paused && e.currentTime > 0);
+          (m.length ? m : [...document.querySelectorAll('video, audio')]).slice(0, 1).forEach(e => e.play()); })()
+        """, completionHandler: nil)
+    }
+
+    /// The page's video into picture-in-picture, or out of it. App-run script counts as a gesture.
+    func togglePictureInPicture() {
+        web?.evaluateJavaScript("""
+        (() => { if (document.pictureInPictureElement) { document.exitPictureInPicture(); return; }
+          const v = [...document.querySelectorAll('video')].sort((a, b) => (b.clientWidth * b.clientHeight) - (a.clientWidth * a.clientHeight))[0];
+          if (!v) return; v.disablePictureInPicture = false;
+          if (v.requestPictureInPicture) v.requestPictureInPicture().catch(() => v.webkitSetPresentationMode && v.webkitSetPresentationMode('picture-in-picture'));
+          else if (v.webkitSetPresentationMode) v.webkitSetPresentationMode('picture-in-picture'); })()
+        """, completionHandler: nil)
+    }
+
+    /// Mute or unmute this card (the card's own Mute, stored on the node).
+    func setMuted(_ on: Bool) {
+        let id = node.id
+        board.store.change(on ? "Mute Card" : "Unmute Card") { doc in
+            if let index = doc.nodes.firstIndex(where: { $0.id == id }) { CanvasCardMedia.setMuted(on, on: &doc.nodes[index]) }
+        }
+        NotificationCenter.default.post(name: CanvasPageView.audioChanged, object: web)
+    }
+
+    /// Reader: the page's article alone, in plain type, over the page. Again to put the page back.
+    func toggleReader() {
+        web?.evaluateJavaScript(CanvasReader.script, completionHandler: nil)
+    }
+
+
+    /// Pause the card on this canvas that's playing, wherever it's shown.
+    static func pause(card id: String, onCanvas url: URL) {
+        let key = url.standardizedFileURL
+        for card in cards.allObjects where card.node.id == id && card.isPlayingAudio
+            && card.board.store.url.standardizedFileURL == key {
+            card.pauseMedia()
+        }
+    }
+
     override var keepsPageRunning: Bool { CanvasCardMedia.keepsRunning(node) }
 
     /// Keep Running from the tile's menu, which is about this card rather than the selection.
@@ -1431,6 +1494,29 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         if let web, revealed { CanvasWebSession.showInspector(web) }
     }
 
+    /// File ▸ Print… and Export as PDF…: only a page that's running.
+    var canPrint: Bool { web != nil && revealed }
+
+    /// The page through the print panel (its PDF menu saves too), or straight to `pdf` without one.
+    func printPage(to pdf: URL? = nil) {
+        guard let web, revealed, let window = web.window else { return }
+        let info = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo()
+        info.horizontalPagination = .fit
+        info.verticalPagination = .automatic
+        info.isVerticallyCentered = false
+        if let pdf {
+            info.jobDisposition = .save
+            info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = pdf
+        }
+        let operation = web.printOperation(with: info)
+        // WKWebView's print view has no size of its own, and prints blank pages without one.
+        operation.view?.frame = web.bounds
+        operation.jobTitle = web.title ?? liveURL?.host() ?? "Page"
+        operation.showsPrintPanel = pdf == nil
+        operation.showsProgressPanel = pdf == nil
+        operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
     /// Load it again from the top — and if the card had given up, start over from the placeholder.
     func reload() {
         if let web, revealed { web.reload() } else { contentChanged() }
@@ -1658,6 +1744,7 @@ extension CanvasLinkNodeView: CanvasPageLinkHost {
     /// look an edge in the `.canvas` file. Decided in a mock, 2026-10-24 (docs/web-cards.md).
     private func openAsNewCard(_ url: URL, behind: Bool) {
         let address = url.absoluteString
+        if let open = currentBoard.opensNewTab { return open(address, !behind) }
         guard board.tiling?.position(of: node.id) != nil else {
             return board.addLinkCard(address, beside: node.id, joined: false)
         }
@@ -1735,6 +1822,14 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         if clicked, navigationAction.modifierFlags.contains(.command),
            let target = navigationAction.request.url, isWeb(target) {
             openAsNewCard(target, behind: navigationAction.modifierFlags.contains(.shift))
+            return decisionHandler(.cancel)
+        }
+
+        // ⇧-click in a space: the link in a preview over the page (`CanvasLinkPreview`), Arc's Peek.
+        if clicked, navigationAction.modifierFlags.intersection([.shift, .command, .option, .control]) == .shift,
+           let target = navigationAction.request.url, isWeb(target),
+           let open = currentBoard.opensNewTab {
+            CanvasLinkPreview.show(target, from: webView) { open($0, true) }
             return decisionHandler(.cancel)
         }
 
@@ -1880,6 +1975,7 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loadingSince = nil
+        CanvasHistory.record(webView.url, title: webView.title, profile: profile, counts: true)
         revealPage()
         board.pageStateChanged()
         adoptDeclaredIcon(from: webView)
@@ -1980,11 +2076,21 @@ extension CanvasLinkNodeView: WKUIDelegate {
         } else if CanvasWebPopup.wanted(by: navigationAction, features: windowFeatures) {
             return CanvasWebPopup.present(with: configuration, features: windowFeatures,
                                           userAgent: webView.customUserAgent, over: self, opener: self)
+        } else if let open = currentBoard.opensNewTab {
+            // In a space a new window is a new tab, as in any browser: a card in Today, in front.
+            open(url.absoluteString, true)
         } else {
             capturingTitle = false
             webView.load(URLRequest(url: url))
         }
         return nil
+    }
+
+    /// The board the page is in now. Pages are lent between panes, so it isn't always `board`.
+    private var currentBoard: CanvasBoardView {
+        var view: NSView? = web
+        while let next = view { if let found = next as? CanvasBoardView { return found }; view = next.superview }
+        return board
     }
 
     /// The pointer moved over something on the page — WebKit's private hover callback, the one Safari's
@@ -2004,7 +2110,8 @@ extension CanvasLinkNodeView: WKUIDelegate {
             || (value("isContentEditable") as? Bool ?? false)
             || value("absoluteImageURL") as? URL != nil
             || value("absoluteMediaURL") as? URL != nil
-        guard let text = CanvasLinkStatus.text(for: link, flags: flags) else {
+        guard let text = CanvasLinkStatus.text(for: link, flags: flags,
+                                               inSpace: currentBoard.opensNewTab != nil) else {
             linkStatus?.show(nil)
             return
         }

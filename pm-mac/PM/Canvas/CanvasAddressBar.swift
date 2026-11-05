@@ -263,7 +263,7 @@ struct CanvasAddressField: View {
 /// none of them reliably inside a hosting view floating over an AppKit board. A delegate answering
 /// `doCommandBy` can, which is the only place these keys are unambiguous — and the inline completion
 /// needs the field editor's selection, which SwiftUI does not expose at all.
-private struct CanvasAddressTextField: NSViewRepresentable {
+struct CanvasAddressTextField: NSViewRepresentable {
     @Binding var text: String
     var focusToken: Int
     var engine: CanvasSearchEngine
@@ -276,6 +276,8 @@ private struct CanvasAddressTextField: NSViewRepresentable {
     /// Where to go, or nil for nowhere.
     var onCommit: (String?) -> Void
     var onCancel: () -> Void
+    /// The field took the keyboard (a click, or the focus token).
+    var onBegin: () -> Void = {}
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
@@ -351,6 +353,8 @@ private struct CanvasAddressTextField: NSViewRepresentable {
             completion = nil
             hideSuggestions()
         }
+
+        func controlTextDidBeginEditing(_ notification: Notification) { parent.onBegin() }
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField,

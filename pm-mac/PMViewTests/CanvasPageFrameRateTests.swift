@@ -80,3 +80,46 @@ final class CanvasPageDeadSpaceTests: XCTestCase {
         XCTAssertFalse(page.dragsWindowFromDeadSpace())
     }
 }
+
+/// The speaker: WebKit's own "playing audio" flag, told as it changes (docs/spaces.md).
+@MainActor
+final class CanvasPageAudioTests: XCTestCase {
+    /// A second of a quiet 440Hz tone, as a WAV data URI.
+    private func tone() -> String {
+        let rate = 22050, samples = rate
+        var data = Data()
+        func le<T: FixedWidthInteger>(_ v: T) { withUnsafeBytes(of: v.littleEndian) { data.append(contentsOf: $0) } }
+        data.append(contentsOf: Array("RIFF".utf8)); le(UInt32(36 + samples * 2)); data.append(contentsOf: Array("WAVEfmt ".utf8))
+        le(UInt32(16)); le(UInt16(1)); le(UInt16(1)); le(UInt32(rate)); le(UInt32(rate * 2)); le(UInt16(2)); le(UInt16(16))
+        data.append(contentsOf: Array("data".utf8)); le(UInt32(samples * 2))
+        for i in 0..<samples { le(Int16(sin(Double(i) * 2 * .pi * 440 / Double(rate)) * 600)) }
+        return "data:audio/wav;base64," + data.base64EncodedString()
+    }
+
+    private func wait(_ seconds: TimeInterval, until done: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(seconds)
+        while Date() < end, !done() { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        return done()
+    }
+
+    func testThePageSaysWhenItPlaysAndWhenItStops() throws {
+        let configuration = WKWebViewConfiguration()
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        let window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: 300, height: 200),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        let page = CanvasPageView(frame: NSRect(x: 0, y: 0, width: 300, height: 200), configuration: configuration)
+        window.contentView?.addSubview(page)
+        window.orderBack(nil)
+        defer { window.orderOut(nil) }
+        var told = 0
+        let watch = NotificationCenter.default.addObserver(forName: CanvasPageView.audioChanged, object: page, queue: .main) { _ in told += 1 }
+        defer { NotificationCenter.default.removeObserver(watch) }
+        page.loadHTMLString("<audio id=a loop src='\(tone())'></audio>", baseURL: nil)
+        XCTAssertTrue(wait(5) { !page.isLoading })
+        page.evaluateJavaScript("document.getElementById('a').play()")
+        XCTAssertTrue(wait(5) { page.isPlayingAudio }, "playing")
+        XCTAssertGreaterThan(told, 0)
+        page.pauseAllMediaPlayback()
+        XCTAssertTrue(wait(5) { !page.isPlayingAudio }, "stopped")
+    }
+}

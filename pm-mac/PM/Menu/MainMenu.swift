@@ -35,6 +35,7 @@ enum MainMenu {
         mainMenu.addItem(formatMenuItem())
         mainMenu.addItem(viewMenuItem(target: target))
         mainMenu.addItem(goMenuItem(target: target))
+        mainMenu.addItem(HistoryMenu.shared.makeItem())
         mainMenu.addItem(canvasMenuItem())
         mainMenu.addItem(domainMenuItem(.task, title: "Task", target: target))
         mainMenu.addItem(domainMenuItem(.project, title: "Project", target: target))
@@ -143,6 +144,11 @@ enum MainMenu {
         closeAll.isAlternate = true
         add(menu, "Close Window", #selector(ProjectWindowController.closeProjectWindow(_:)),
             target: nil, key: "w", modifiers: [.command, .shift])
+        menu.addItem(.separator())
+        // The web page in front: the page you're in, or the focused tile's.
+        menu.addItem(withTitle: "Export as PDF\u{2026}", action: #selector(CanvasBoardView.pageExportPDF(_:)),
+                     keyEquivalent: "")
+        menu.addItem(withTitle: "Print\u{2026}", action: #selector(CanvasBoardView.pagePrint(_:)), keyEquivalent: "p")
 
         item.submenu = menu
         return item
@@ -375,6 +381,12 @@ enum MainMenu {
             target: nil, key: "\t", modifiers: [.control])
         add(menu, "Previous Tab", #selector(ProjectWindowController.selectPreviousProjectTab(_:)),
             target: nil, key: "\t", modifiers: [.control, .shift])
+        // Safari's second pair, ⇧⌘] and ⇧⌘[, kept out of sight under the first.
+        let next = add(menu, "Next Tab", #selector(ProjectWindowController.selectNextProjectTab(_:)),
+                       target: nil, key: "}", modifiers: [.command])
+        let previous = add(menu, "Previous Tab", #selector(ProjectWindowController.selectPreviousProjectTab(_:)),
+                           target: nil, key: "{", modifiers: [.command])
+        for entry in [next, previous] { entry.isHidden = true; entry.allowsKeyEquivalentWhenHidden = true }
         menu.addItem(.separator())
 
         // ⌃1…9 goes to a frame — somewhere on the canvas, fitted in the window. ⌃ rather than ⌘ is what
@@ -492,12 +504,18 @@ enum MainMenu {
         hardReload.isAlternate = true
         menu.addItem(withTitle: "Open Address\u{2026}", action: #selector(CanvasBoardView.pageOpenAddress(_:)),
                      keyEquivalent: "l")
+        let reader = menu.addItem(withTitle: "Show Reader", action: #selector(CanvasBoardView.pageToggleReader(_:)),
+                                  keyEquivalent: "r")
+        reader.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(withTitle: "Mute Page", action: #selector(CanvasBoardView.pageToggleMute(_:)), keyEquivalent: "")
 
         let more = NSMenu(title: "More Page Commands")
         // Back to the address the canvas saved for this card, which is not "what was I looking at before".
         more.addItem(withTitle: "Back to Card\u{2019}s Address", action: #selector(CanvasBoardView.pageHome(_:)),
                      keyEquivalent: "")
         more.addItem(withTitle: "Open in Browser", action: #selector(CanvasBoardView.pageOpenInBrowser(_:)),
+                     keyEquivalent: "")
+        more.addItem(withTitle: "Copy Address", action: #selector(CanvasBoardView.pageCopyAddress(_:)),
                      keyEquivalent: "")
         more.addItem(withTitle: "Open Page as New Card", action: #selector(CanvasBoardView.pageOpenAsNewCard(_:)),
                      keyEquivalent: "")
@@ -525,6 +543,10 @@ enum MainMenu {
         // The focus panel's key is the global shortcut, which is rebindable — `syncGlobalShortcuts()`.
         track(.toggleFocusPanel, add(menu, "Focus Panel", #selector(AppDelegate.toggleFocusPanel),
                                      target: target, key: ""))
+        let downloads = menu.addItem(withTitle: "Downloads", action: #selector(CanvasDownloadsWindow.show(_:)),
+                                     keyEquivalent: "l")
+        downloads.keyEquivalentModifierMask = [.command, .option]
+        downloads.target = CanvasDownloadsWindow.shared
         // ⌃⌘W: ⌥⌘W is Close All.
         add(menu, "Waiting", #selector(AppDelegate.toggleWaiting), target: target, key: "w",
             modifiers: [.command, .control])

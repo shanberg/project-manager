@@ -63,13 +63,19 @@ final class CanvasLinkStatus: NSView {
     }
 
     /// What the line says for a hover, or nil for no line: not a link, or not one that goes anywhere.
-    static func text(for link: URL?, flags: NSEvent.ModifierFlags) -> String? {
+    static func text(for link: URL?, flags: NSEvent.ModifierFlags, inSpace: Bool = false) -> String? {
         guard let link, let scheme = link.scheme?.lowercased() else { return nil }
         if scheme == "javascript" { return nil }
         let address = ["http", "https"].contains(scheme)
             ? link.absoluteString.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
             : link.absoluteString
         guard !address.isEmpty else { return nil }
+        if inSpace {
+            // A space is a browser: ⌘ is a new tab, ⇧ a preview over the page.
+            if flags.contains(.command) { return "Open in a new tab: " + address }
+            if flags.contains(.shift) { return "Preview: " + address }
+            return address
+        }
         return flags.contains(.command) ? "Open as a new card: " + address : address
     }
 

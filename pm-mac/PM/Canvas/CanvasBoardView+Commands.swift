@@ -2952,6 +2952,35 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     @objc func pageOpenInBrowser(_ sender: Any?) { pageTargets.forEach { $0.openInBrowser() } }
     @objc func pageOpenAsNewCard(_ sender: Any?) { _ = openPageAsNewCard() }
 
+    /// What Print and Export as PDF act on: the page you're in, else the focused tile's, else the one
+    /// selected card.
+    private var printTarget: CanvasLinkNodeView? {
+        if let engaged = engagedPageCard as? CanvasLinkNodeView { return engaged }
+        if isTiled, let tile = focusedTile, let card = nodeViews[tile] as? CanvasLinkNodeView { return card }
+        return selectedLinkCards.count == 1 ? selectedLinkCards[0] : nil
+    }
+
+    @objc func pagePrint(_ sender: Any?) { printTarget?.printPage() }
+    @objc func pageToggleReader(_ sender: Any?) { printTarget?.toggleReader() }
+    @objc func pageCopyAddress(_ sender: Any?) { printTarget?.copyAddress() }
+    @objc func pageToggleMute(_ sender: Any?) {
+        guard let card = printTarget else { return }
+        card.setMuted(!card.isMuted)
+    }
+
+    @objc func pageExportPDF(_ sender: Any?) {
+        guard let card = printTarget, let window else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        let name = (card.liveTitle ?? card.liveURL?.host() ?? "Page")
+            .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        panel.nameFieldStringValue = name + ".pdf"
+        panel.beginSheetModal(for: window) { [weak card] response in
+            guard response == .OK, let url = panel.url else { return }
+            card?.printPage(to: url)
+        }
+    }
+
     /// Open Page as New Card from a card's own menu: the card the menu is about, which is the
     /// selection rather than whichever page happens to be engaged.
     /// Move to Window: the page into a window of its own, still running. See `CanvasSatelliteWindow`.
@@ -3206,6 +3235,13 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             return pageTargets.contains { $0.hasWandered }
         case #selector(pageOpenInBrowser(_:)):
             return !pageTargets.isEmpty
+        case #selector(pagePrint(_:)), #selector(pageExportPDF(_:)):
+            return printTarget?.canPrint == true
+        case #selector(pageToggleReader(_:)), #selector(pageCopyAddress(_:)):
+            return printTarget?.canPrint == true
+        case #selector(pageToggleMute(_:)):
+            (item as? NSMenuItem)?.title = printTarget?.isMuted == true ? "Unmute Page" : "Mute Page"
+            return printTarget?.canPrint == true
         case #selector(pageOpenAsNewCard(_:)):
             return pageTargets.count == 1 && pageTargets[0].liveURL != nil
         case #selector(pageOpenAddress(_:)):

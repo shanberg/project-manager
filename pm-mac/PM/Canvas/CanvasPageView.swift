@@ -76,6 +76,44 @@ final class CanvasPageView: WKWebView {
     /// page's own menu and the middle button exactly as WebKit made them.
     weak var linkHost: CanvasPageLinkHost?
 
+    // MARK: Playing audio
+
+    /// Whether the page is making sound now, as WebKit itself says it — the flag Safari's tab speaker
+    /// reads (`_isPlayingAudio`), told the moment it changes rather than asked on a heartbeat. On the
+    /// page rather than the card because a running page moves between panes (`CanvasPageHandover`).
+    /// docs/spaces.md: the speaker in the sidebar, the switcher and the dock.
+    private(set) var isPlayingAudio = false
+
+    /// Posted with the page as the object when `isPlayingAudio` changes.
+    static let audioChanged = Notification.Name("PMCanvasPageAudioChanged")
+
+    private static let audioKey = "_isPlayingAudio"
+    private var watchingAudio = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard !watchingAudio, responds(to: NSSelectorFromString(Self.audioKey)) else { return }
+        watchingAudio = true
+        addObserver(self, forKeyPath: Self.audioKey, options: [.initial, .new], context: nil)
+    }
+
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?,
+                               change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
+        guard keyPath == Self.audioKey else {
+            return super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+        }
+        let playing = (value(forKey: Self.audioKey) as? Bool) ?? false
+        MainActor.assumeIsolated {
+            guard playing != isPlayingAudio else { return }
+            isPlayingAudio = playing
+            NotificationCenter.default.post(name: Self.audioChanged, object: self)
+        }
+    }
+
+    deinit {
+        if watchingAudio { removeObserver(self, forKeyPath: Self.audioKey) }
+    }
+
     // MARK: Dead space moves the window
 
     /// Arc's dead space (docs/spaces.md § The frame): in a space's layout, a press near the top of the

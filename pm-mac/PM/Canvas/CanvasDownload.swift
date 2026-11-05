@@ -25,6 +25,8 @@ final class CanvasDownload: NSObject, WKDownloadDelegate {
     /// What to say when it is over: the message, and the file to reveal if there is one.
     private let report: (String, URL?) -> Void
     private var destination: URL?
+    /// Its row in the Downloads list.
+    private var listed: UUID?
 
     /// Take this download over. The returned object is retained until it ends; the caller keeps
     /// nothing.
@@ -64,10 +66,12 @@ final class CanvasDownload: NSObject, WKDownloadDelegate {
         let name = suggestedFilename.isEmpty ? "download" : suggestedFilename
         let target = unique(name, in: folder)
         destination = target
+        listed = CanvasDownloads.shared.started(download, name: target.lastPathComponent, at: target)
         completionHandler(target)
     }
 
     func downloadDidFinish(_ download: WKDownload) {
+        if let listed { CanvasDownloads.shared.finished(listed, ok: true) }
         guard let destination else { return done("Downloaded.", nil) }
         done("Saved \u{201C}\(destination.lastPathComponent)\u{201D} to Downloads.", destination)
     }
@@ -77,6 +81,7 @@ final class CanvasDownload: NSObject, WKDownloadDelegate {
         // A half-written file is worse than none: it is the right name and the wrong contents, and it
         // will be opened one day by somebody who has forgotten this happened.
         if let destination { try? FileManager.default.removeItem(at: destination) }
+        if let listed { CanvasDownloads.shared.finished(listed, ok: false) }
         done("Download failed: \(error.localizedDescription)", nil)
     }
 

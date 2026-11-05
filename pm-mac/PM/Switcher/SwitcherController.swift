@@ -108,6 +108,11 @@ final class SwitcherController {
             let names = controller?.workspaceTabNames ?? group.workspaces.map(\.name)
             let canvas = controller?.workspaceCanvas ?? group.canvas
             card.entries = SwitcherModel.entries(workspaces: Self.workspaces(names, of: canvas))
+            let sounding = canvas.map { CanvasLinkNodeView.playingCards(onCanvas: $0) } ?? []
+            card.playing = !sounding.isEmpty
+            for index in card.entries.indices {
+                if case .tile(_, let id) = card.entries[index].target { card.entries[index].playing = sounding.contains(id) }
+            }
             return card
         }
     }
@@ -325,9 +330,15 @@ struct SwitcherView: View {
                 .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(card.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    HStack(spacing: 4) {
                     Text(card.isFocused ? "Focused" : card.isSpace ? "Space" : "Project")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(card.isFocused ? ink : .secondary)
+                    if card.playing {
+                        Image(systemName: "speaker.wave.2.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+                            .accessibilityLabel("Playing")
+                    }
+                    }
                 }
             }
             if card.session != nil || card.focusedTask != nil {
@@ -345,6 +356,10 @@ struct SwitcherView: View {
                     let on = picked && model.entry == row
                     HStack(spacing: 6) {
                         Text(entry.title).lineLimit(1)
+                        if entry.playing {
+                            Image(systemName: "speaker.wave.2.fill").font(.system(size: 9))
+                                .accessibilityLabel("Playing")
+                        }
                         Spacer(minLength: 4)
                         if entry.count > 0 {
                             Text(entry.count == 1 ? "1 tile" : "\(entry.count) tiles")

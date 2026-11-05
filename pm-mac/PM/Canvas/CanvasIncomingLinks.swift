@@ -18,6 +18,11 @@ enum CanvasIncomingLinks {
     }
 
     static func open(_ url: URL) {
+        // With a space anywhere, links go to the space in front or the one used last: that's the
+        // browser. Boards in project windows get links by ⌘-click and the quick bar.
+        if let space = Spaces.shared.forIncomingLinks {
+            return Spaces.shared.openIncoming(url, in: space)
+        }
         // A satellite in front is where you are working: the link is a tab in it, as a ⌘-click on one
         // of its pages is. Its project window may well be put away behind it.
         if let satellite = NSApp.orderedWindows.lazy.compactMap({ $0.windowController }).first

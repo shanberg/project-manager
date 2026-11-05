@@ -67,6 +67,8 @@ final class CanvasSatelliteDock: NSObject {
         var space: String?
         /// A space whose window isn't open: its mark is drawn dimmed.
         var isClosed = false
+        /// Something on its board is making sound: a dot under its mark.
+        var isPlaying = false
     }
 
     private(set) var groups: [Group] = []
@@ -92,9 +94,16 @@ final class CanvasSatelliteDock: NSObject {
     static let flyoutRadius: CGFloat = 16
     private var flyoutSize = NSSize.zero
 
+    /// A page starting or stopping sound: the dots under the marks, and the flyout's Now Playing.
+    private lazy var audioWatch: NSObjectProtocol = NotificationCenter.default.addObserver(
+        forName: CanvasPageView.audioChanged, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.refresh() }
+    }
+
     /// Satellites have come or gone, or changed what they show: rebuilt on the next turn, once for any
     /// number of asks in this one.
     func refresh() {
+        _ = audioWatch
         guard !refreshQueued else { return }
         refreshQueued = true
         DispatchQueue.main.async { [weak self] in
@@ -146,7 +155,11 @@ final class CanvasSatelliteDock: NSObject {
     }
 
     private func rebuild() {
-        groups = Self.withSpaces(Self.groups(projects: openProjects(), open: CanvasSatelliteWindow.open))
+        groups = Self.withSpaces(Self.groups(projects: openProjects(), open: CanvasSatelliteWindow.open)).map { group in
+            var group = group
+            group.isPlaying = group.canvas.map { !CanvasLinkNodeView.playingCards(onCanvas: $0).isEmpty } ?? false
+            return group
+        }
         guard !groups.isEmpty else {
             closeFlyout()
             panel?.orderOut(nil)
@@ -485,6 +498,13 @@ final class CanvasSatelliteDock: NSObject {
             }
             flyoutSize = size
             laidOut = container
+        } else if let spaceID = group.space,
+                  let card = SpaceDockCard.make(spaceID: spaceID, dismiss: { [weak self] in self?.closeFlyout() }) {
+            let host = NSHostingView(rootView: card)
+            let fitted = host.fittingSize
+            flyoutSize = NSSize(width: 300, height: min(max(fitted.height, 90), 560))
+            host.frame = NSRect(origin: .zero, size: flyoutSize)
+            laidOut = host
         } else {
             let name = NSTextField(labelWithString: group.title)
             name.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -701,6 +721,9 @@ private final class DockMark: NSView {
     var onHover: (Bool) -> Void = { _ in }
     var onClick: (String) -> Void = { _ in }
     var onMenu: (String, NSEvent, NSView) -> Void = { _, _, _ in }
+    /// Making sound: a dot under the icon, as the Mac's Dock marks a running app.
+    private var isPlaying = false
+
     /// The focused project's mark: a ring in its colour, the icon drawn smaller inside it.
     var isFocused = false { didSet { needsDisplay = true; updateLabel() } }
     private var label = ""
@@ -720,6 +743,7 @@ private final class DockMark: NSView {
         let side = CanvasSatelliteDock.markSize
         super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
         alphaValue = group.isClosed ? 0.45 : 1
+        isPlaying = group.isPlaying
         translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([widthAnchor.constraint(equalToConstant: side),
                                      heightAnchor.constraint(equalToConstant: side)])
@@ -791,6 +815,11 @@ private final class DockMark: NSView {
         NSColor.black.withAlphaComponent(0.18).setStroke()
         shape.stroke()
 
+        if isPlaying {
+            let dot = NSRect(x: bounds.midX - 2, y: bounds.maxY - 4, width: 4, height: 4)
+            NSColor.labelColor.withAlphaComponent(0.6).setFill()
+            NSBezierPath(ovalIn: dot).fill()
+        }
         if let glyph {
             let side: CGFloat = 26 * scale
             glyph.draw(in: NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side),

@@ -23,6 +23,9 @@ final class SpaceFrame {
         var favorite: Bool
         var showing: Bool
         var front: Bool
+        /// Making sound now (`CanvasPageView.isPlayingAudio`).
+        var playing = false
+        var muted = false
     }
 
     struct Folder: Identifiable, Equatable {
@@ -61,6 +64,12 @@ final class SpaceFrame {
     private(set) var addressRequests = 0
     /// What the address field is for while it has the keyboard: a new card (⌘T), or this page (⌘L).
     private(set) var editingFront = false
+    /// Which sidebar's field takes it: the floating one when the sidebar is folded away.
+    var addressInPeek = false
+    /// Asked before the field is wanted (the split shows the floating sidebar when the docked one is
+    /// away) and told when the field is done (and puts it away again).
+    @ObservationIgnored var presentAddress: () -> Void = {}
+    @ObservationIgnored var addressDone: () -> Void = {}
     /// The front card's address, for ⌘L to start from.
     private(set) var frontAddress = ""
 
@@ -74,10 +83,23 @@ final class SpaceFrame {
         self.store = store
         self.split = split
         store.addWatcher(self, changed: { [weak self] in self?.refresh() }, reloaded: { [weak self] in self?.refresh() })
+        audioWatch = NotificationCenter.default.addObserver(forName: CanvasPageView.audioChanged, object: nil,
+                                                            queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
         refresh()
     }
 
-    func stop() { store.removeWatcher(self) }
+    @ObservationIgnored private var audioWatch: NSObjectProtocol?
+
+    func stop() {
+        store.removeWatcher(self)
+        if let audioWatch { NotificationCenter.default.removeObserver(audioWatch) }
+        audioWatch = nil
+    }
+
+    /// The speaker on a row: stop that card's page.
+    func pause(_ id: String) { CanvasLinkNodeView.pause(card: id, onCanvas: canvas) }
 
     private var pane: CanvasPaneController? { split?.canvasPane }
     private var board: CanvasBoardView? { pane?.board }
@@ -90,6 +112,7 @@ final class SpaceFrame {
         let tiled = Set(board?.tiling?.ids ?? [])
         let front = board?.focusedTile ?? (tiled.count == 1 ? tiled.first : nil)
         let lookups = CanvasExistingCards.lookups(isFolder: { board?.isFolderPath($0) ?? false })
+        let sounding = CanvasLinkNodeView.playingCards(onCanvas: canvas)
         let sections = CanvasItems.sections(of: document, showing: [], lookups: lookups)
         func row(_ item: CanvasItem) -> Row? {
             guard let node = document.node(id: item.id) else { return nil }
@@ -102,7 +125,8 @@ final class SpaceFrame {
             let title = board?.describeCard(item.id)?.title ?? item.title
             return Row(id: item.id, title: title, host: host, symbol: symbol,
                        pinned: SpaceCardMarks.isPinned(node), favorite: SpaceCardMarks.isFavorite(node),
-                       showing: tiled.contains(item.id), front: item.id == front)
+                       showing: tiled.contains(item.id), front: item.id == front, playing: sounding.contains(item.id),
+                       muted: CanvasCardMedia.isMuted(node))
         }
         var favorites: [Row] = [], pinned = Group(), today = Group()
         for section in sections {
@@ -132,15 +156,165 @@ final class SpaceFrame {
             return Workspace(name: name, hosts: hosts, showing: current == name && (board?.isTiled ?? false))
         }
         boardShowing = !(board?.isTiled ?? false)
-        frontHost = front.flatMap { id in
-            if case .link(let url)? = document.node(id: id)?.content { return URL(string: url)?.host() }
+        // The page the focused tile is on now, not the address the card was saved with.
+        let frontURL: URL? = front.flatMap { id in
+            if let live = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL { return live }
+            if case .link(let url)? = document.node(id: id)?.content { return URL(string: url) }
             return nil
         }
+        frontHost = frontURL.map { CanvasAddressSuggestions.bare($0.absoluteString) }
         picked = picked.filter { document.node(id: $0) != nil }
+        let everyRow = favorites + pinned.loose + pinned.folders.flatMap(\.rows) + today.loose + today.folders.flatMap(\.rows)
+        // The mini player: a card making sound that isn't on screen, and one it paused, until shown.
+        heldInPlayer = heldInPlayer.filter { id in everyRow.contains { $0.id == id && !$0.showing } }
+        player = everyRow.first { $0.playing && !$0.showing } ?? everyRow.first { heldInPlayer.contains($0.id) }
+        noteSeen(everyRow.filter(\.showing).map(\.id), all: everyRow.map(\.id))
         let space = Spaces.shared.space(spaceID)
+        archiveAfter = space?.archiveAfter
+        otherSpaces = Spaces.shared.all.filter { $0.id != spaceID }.map { ($0.id, $0.title) }
         spaceTitle = space?.title ?? ""
         washColor = space.flatMap { ProjectColor(value: $0.color) }
         spaceColor = Color(nsColor: washColor?.nsColor ?? .systemGray)
+    }
+
+    /// The focused tile or its page changed. Many in a row (a load's progress) refresh once.
+    @ObservationIgnored private var frontRefreshQueued = false
+    func frontChanged() {
+        guard !frontRefreshQueued else { return }
+        frontRefreshQueued = true
+        DispatchQueue.main.async { [weak self] in
+            self?.frontRefreshQueued = false
+            self?.refresh()
+        }
+    }
+
+    // MARK: Today
+
+    /// What's in the mini player (sidebar foot), and the card it paused, kept there until it's shown.
+    private(set) var player: Row?
+    @ObservationIgnored private var heldInPlayer: Set<String> = []
+    private(set) var archiveAfter: Double?
+    private(set) var otherSpaces: [(id: String, title: String)] = []
+
+    static let archiveChoices: [(title: String, seconds: Double?)] = [
+        ("Never", nil), ("After 12 Hours", 12 * 3600), ("After a Day", 86_400),
+        ("After a Week", 7 * 86_400), ("After 30 Days", 30 * 86_400),
+    ]
+
+    func setArchiveAfter(_ seconds: Double?) {
+        Spaces.shared.change(spaceID) { $0.archiveAfter = seconds }
+        archiveIfDue(force: true)
+    }
+
+    /// Clear: every Today card off the board (⌘Z brings them back). Pinned and favourites stay.
+    func clearToday() {
+        let ids = (today.loose + today.folders.flatMap(\.rows)).map(\.id)
+        guard !ids.isEmpty else { return }
+        remove(Set(ids), actionName: "Clear Today")
+    }
+
+    private func remove(_ ids: Set<String>, actionName: String) {
+        for id in ids { noteClosed(id) }
+        store.change(actionName) { doc in
+            doc.nodes.removeAll { ids.contains($0.id) }
+            doc.edges.removeAll { ids.contains($0.fromNode) || ids.contains($0.toNode) }
+        }
+        refresh()
+    }
+
+    /// When each card was last on screen, by space and card. A card first seen now counts from now.
+    private static let seenKey = "PMSpaceCardSeen"
+    @ObservationIgnored private var lastSweep = Date.distantPast
+
+    private func noteSeen(_ showing: [String], all: [String]) {
+        var seen = UserDefaults.standard.dictionary(forKey: Self.seenKey) as? [String: Double] ?? [:]
+        let now = Date().timeIntervalSince1970
+        var changed = false
+        for id in all {
+            let key = spaceID + "/" + id
+            let stale = (seen[key] ?? 0) < now - 60
+            if seen[key] == nil || (showing.contains(id) && stale) { seen[key] = now; changed = true }
+        }
+        if changed { UserDefaults.standard.set(seen, forKey: Self.seenKey) }
+        if Date().timeIntervalSince(lastSweep) > 60 {
+            DispatchQueue.main.async { [weak self] in self?.archiveIfDue(force: false) }
+        }
+    }
+
+    /// Arc's archive: Today cards not on screen for `archiveAfter` go, checked at most once a minute.
+    private func archiveIfDue(force: Bool) {
+        guard force || Date().timeIntervalSince(lastSweep) > 60 else { return }
+        lastSweep = Date()
+        guard let after = Spaces.shared.space(spaceID)?.archiveAfter else { return }
+        let seen = UserDefaults.standard.dictionary(forKey: Self.seenKey) as? [String: Double] ?? [:]
+        let cutoff = Date().timeIntervalSince1970 - after
+        let due = (today.loose + today.folders.flatMap(\.rows))
+            .filter { !$0.showing && !$0.playing && (seen[spaceID + "/" + $0.id] ?? .infinity) < cutoff }
+            .map(\.id)
+        guard !due.isEmpty else { return }
+        Log.write("space \(spaceID): archived \(due.count) Today cards")
+        remove(Set(due), actionName: "Archive Today")
+    }
+
+    // MARK: The mini player, mute, and the rest of a row's menu
+
+    func playerToggle() {
+        guard let row = player, let card = CanvasLinkNodeView.card(row.id, onCanvas: canvas) else { return }
+        if row.playing {
+            heldInPlayer.insert(row.id)
+            card.pauseMedia()
+        } else {
+            card.resumeMedia()
+        }
+    }
+
+    func playerPictureInPicture() {
+        guard let row = player else { return }
+        CanvasLinkNodeView.card(row.id, onCanvas: canvas)?.togglePictureInPicture()
+    }
+
+    func playerDismiss() {
+        heldInPlayer = []
+        if let row = player, row.playing { CanvasLinkNodeView.card(row.id, onCanvas: canvas)?.pauseMedia() }
+        player = nil
+    }
+
+    func setMuted(_ id: String, _ on: Bool) {
+        store.change(on ? "Mute Card" : "Unmute Card") { doc in
+            if let index = doc.nodes.firstIndex(where: { $0.id == id }) { CanvasCardMedia.setMuted(on, on: &doc.nodes[index]) }
+        }
+        refresh()
+    }
+
+    func moveToSpace(_ id: String, _ target: String) {
+        Spaces.shared.move(id, from: spaceID, to: target)
+        refresh()
+    }
+
+    /// A second card on the page this one has got to, with its back list (`openPageAsNewCard`).
+    func duplicate(_ id: String) {
+        guard let board else { return }
+        if let card = board.nodeViews[id] as? CanvasLinkNodeView, board.openPageAsNewCard(from: card) {
+            if let added = board.selection.first { show(added) }
+            return
+        }
+        guard case .link(let address)? = store.document.node(id: id)?.content else { return }
+        openNewCard(address, showing: true)
+    }
+
+    func copyAddress(_ id: String) {
+        if let card = CanvasLinkNodeView.card(id, onCanvas: canvas) { return card.copyAddress() }
+        guard case .link(let address)? = store.document.node(id: id)?.content else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(address, forType: .string)
+    }
+
+    /// ⇧⌘C: the front page's address.
+    func copyFrontAddress() -> Bool {
+        guard let card = frontPage, let url = card.liveURL else { return false }
+        card.copyAddress()
+        board?.report("Copied \(url.host() ?? url.absoluteString).")
+        return true
     }
 
     // MARK: Showing
@@ -255,6 +429,7 @@ final class SpaceFrame {
         guard let node = store.document.node(id: id) else { return }
         if SpaceCardMarks.isPinned(node) { return setPinned(id, false) }
         guard let board else { return }
+        noteClosed(id)
         board.select([id])
         board.deleteSelection()
         refresh()
@@ -265,6 +440,7 @@ final class SpaceFrame {
     /// False with no tile focused, so the window closes instead.
     func closeFront() -> Bool {
         guard let board, board.isTiled, let id = board.focusedTile ?? board.tiling?.ids.first else { return false }
+        noteClosed(id)
         board.closeInTiling([id])
         refresh()
         return true
@@ -286,11 +462,33 @@ final class SpaceFrame {
         return true
     }
 
+    /// For ⇧⌘T: a web card's address and where it was.
+    private func noteClosed(_ id: String) {
+        guard let node = store.document.node(id: id), case .link(let address) = node.content else { return }
+        let live = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL?.absoluteString
+        CanvasHistory.didClose(live ?? address, card: id, inSpace: spaceID)
+    }
+
+    /// ⇧⌘T: the card if it's still on the board (⌘W leaves it there), else a new card on its address.
+    func reopen(_ closed: CanvasHistory.Closed) {
+        if store.document.node(id: closed.cardID) != nil { return show(closed.cardID) }
+        openNewCard(closed.address, showing: true)
+    }
+
+    /// ⌃⇥ and ⇧⌘]: the card after the one in front, round to the first.
+    func cycleCards(by step: Int) {
+        let cards = cardsInOrder
+        guard !cards.isEmpty else { return }
+        let at = cards.firstIndex(where: \.front) ?? (step > 0 ? -1 : 0)
+        show(cards[(at + step + cards.count) % cards.count].id)
+    }
+
     // MARK: New tab
 
     /// ⌘T: the address field, for a new card.
     func askForAddress() {
         editingFront = false
+        presentAddress()
         addressRequests += 1
     }
 
@@ -299,6 +497,7 @@ final class SpaceFrame {
         guard let card = frontPage else { return askForAddress() }
         frontAddress = card.url?.absoluteString ?? ""
         editingFront = true
+        presentAddress()
         addressRequests += 1
     }
 
@@ -309,24 +508,57 @@ final class SpaceFrame {
         return board.focusedTile.flatMap { board.nodeViews[$0] } as? CanvasLinkNodeView
     }
 
+    /// What the sidebar's field suggests: the same as the header's (`CanvasHistory.candidates`).
+    var addressCandidates: [CanvasAddressSuggestions.Candidate] {
+        CanvasHistory.candidates(board: store.document.nodes, back: frontPage?.backSteps ?? [])
+    }
+
+    /// The engine a space searches with: Settings', or DuckDuckGo when that's None (a browser has one).
+    static var engine: CanvasSearchEngine {
+        CanvasSearchEngine.current == .none ? .duckDuckGo : CanvasSearchEngine.current
+    }
+
     /// The address field gave up the keyboard without a line.
-    func addressCancelled() { editingFront = false }
+    func addressCancelled() {
+        editingFront = false
+        addressDone()
+    }
 
     /// The address field's line: the page in front sent there (⌘L), or a web card in Today, shown in
     /// the tile you're in (⌘T).
     func open(_ typed: String) {
-        let engine = CanvasSearchEngine.current == .none ? .duckDuckGo : CanvasSearchEngine.current
-        guard let board, let address = CanvasAddress.resolved(typed, engine: engine) else { return }
+        guard board != nil, let address = CanvasAddress.resolved(typed, engine: Self.engine) else { return }
+        defer { addressDone() }
         if editingFront, let card = frontPage {
             editingFront = false
             return card.go(to: address)
         }
         editingFront = false
+        openNewCard(address, showing: true)
+    }
+
+    /// A link from another app: the card on that address if the space has one, else a new card.
+    func openIncoming(_ address: String) {
+        guard let normalized = CanvasAddress.normalized(address) else { return }
+        let existing = store.document.nodes.first {
+            if case .link(let url) = $0.content { return CanvasAddress.normalized(url) == normalized }
+            return false
+        }
+        if let existing { return show(existing.id) }
+        openNewCard(normalized, showing: true)
+    }
+
+    /// A web card in Today, right of everything on the board, shown in the tile you're in when
+    /// `showing` (⌘T, a link that wants a new window) or left in the sidebar (⇧⌘-click).
+    @discardableResult
+    func openNewCard(_ address: String, showing: Bool) -> String? {
+        guard let board else { return nil }
         let right = store.document.nodes.map { $0.frame.x + $0.frame.width }.max() ?? 0
         let node = CanvasNode(content: .link(url: address),
                               frame: CanvasRect(x: right + 40, y: 0, width: 400, height: 400))
         let id = board.addCard(node, actionName: "New Tab")
-        show(id)
+        if showing { show(id) } else { refresh() }
+        return id
     }
 }
 
@@ -336,8 +568,15 @@ final class SpaceFrame {
 /// board's pinned cards, a rule, New Tab and today's cards, the space's name at the foot.
 struct SpaceFrameSidebar: View {
     @Bindable var frame: SpaceFrame
+    /// The floating copy over the content (sidebar folded away) rather than the docked one.
+    var inPeek = false
     @State private var address = ""
-    @FocusState private var addressFocused: Bool
+    @State private var addressFocused = false
+    @State private var focusToken = 0
+    @State private var candidates: [CanvasAddressSuggestions.Candidate] = []
+    @State private var fieldWidth: CGFloat = 220
+    @State private var ruleHover = false
+    @State private var sidebarHover = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -357,7 +596,7 @@ struct SpaceFrameSidebar: View {
                         .contextMenu { Button("Delete Workspace") { frame.deleteWorkspace(workspace.name) } }
                     }
                     group(frame.pinned)
-                    rule
+                    todayRule
                     SpaceSidebarRow(title: "New Tab", symbol: "plus", dim: true) { frame.askForAddress() }
                     group(frame.today)
                 }
@@ -373,6 +612,7 @@ struct SpaceFrameSidebar: View {
                     .controlSize(.small)
                     .frame(maxWidth: .infinity)
             }
+            if let row = frame.player { SpaceMiniPlayer(row: row, frame: frame) }
             footer
         }
         .padding(.horizontal, 10)
@@ -382,9 +622,12 @@ struct SpaceFrameSidebar: View {
         .background { WindowDragArea() }
         .background { SpaceWash(color: frame.washColor, tiled: !frame.boardShowing).ignoresSafeArea() }
         .ignoresSafeArea(edges: .top)
+        .onHover { sidebarHover = $0 }
         .onChange(of: frame.addressRequests) {
+            guard frame.addressInPeek == inPeek else { return }
             address = frame.editingFront ? frame.frontAddress : ""
-            addressFocused = true
+            candidates = frame.addressCandidates
+            focusToken &+= 1
         }
     }
 
@@ -392,20 +635,29 @@ struct SpaceFrameSidebar: View {
         HStack(spacing: 7) {
             Image(systemName: frame.frontHost == nil ? "magnifyingglass" : "lock.fill")
                 .font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
-            TextField(frame.frontHost ?? "Search or enter address", text: $address)
-                .textFieldStyle(.plain)
-                .focused($addressFocused)
-                .onSubmit {
-                    let typed = address.trimmingCharacters(in: .whitespaces)
-                    address = ""
-                    addressFocused = false
-                    if !typed.isEmpty { frame.open(typed) }
-                }
-                .onExitCommand { address = ""; addressFocused = false; frame.addressCancelled() }
+            CanvasAddressTextField(
+                text: $address, focusToken: focusToken, engine: SpaceFrame.engine, candidates: candidates,
+                originalAddress: frame.editingFront ? frame.frontAddress : "", boxWidth: fieldWidth,
+                placeholder: frame.frontHost ?? "Search or enter address"
+            ) { destination in
+                address = ""
+                addressFocused = false
+                if let destination { frame.open(destination) } else { frame.addressCancelled() }
+            } onCancel: {
+                address = ""
+                addressFocused = false
+                frame.addressCancelled()
+            } onBegin: {
+                addressFocused = true
+                // A click straight into the field: suggestions from now, a new card on Return.
+                if focusToken == 0 || candidates.isEmpty { candidates = frame.addressCandidates }
+            }
         }
         .font(.system(size: 13))
         .padding(.horizontal, 10)
         .frame(height: 34)
+        .background { GeometryReader { box in Color.clear.onAppear { fieldWidth = box.size.width }
+            .onChange(of: box.size.width) { _, width in fieldWidth = width } } }
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.06)))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
             .strokeBorder(addressFocused ? Color.accentColor.opacity(0.6) : .clear, lineWidth: 2))
@@ -420,10 +672,37 @@ struct SpaceFrameSidebar: View {
         }
     }
 
-    /// Between what's kept and what's today: a hairline, as Arc's.
-    private var rule: some View {
-        Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1)
-            .padding(.horizontal, 8).padding(.vertical, 8)
+    /// Between what's kept and what's today: a hairline, as Arc's, with Clear at its end while the
+    /// pointer is over it (or the sidebar). Its menu sets when Today's cards archive themselves.
+    private var todayRule: some View {
+        HStack(spacing: 6) {
+            Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 1)
+            if !frame.today.isEmpty && (ruleHover || sidebarHover) {
+                Button { frame.clearToday() } label: {
+                    Label("Clear", systemImage: "arrow.down").labelStyle(.titleAndIcon)
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Close every Today card (⌘Z brings them back)")
+            }
+        }
+        .frame(height: 18)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .contentShape(Rectangle())
+        .onHover { ruleHover = $0 }
+        .contextMenu { archiveMenu }
+    }
+
+    @ViewBuilder
+    private var archiveMenu: some View {
+        Button("Clear Today") { frame.clearToday() }.disabled(frame.today.isEmpty)
+        Picker("Archive Today\u{2019}s Cards", selection: Binding(
+            get: { frame.archiveAfter ?? -1 },
+            set: { frame.setArchiveAfter($0 < 0 ? nil : $0) })) {
+            ForEach(SpaceFrame.archiveChoices, id: \.title) { choice in
+                Text(choice.title).tag(choice.seconds ?? -1)
+            }
+        }
     }
 
     private var footer: some View {
@@ -431,8 +710,11 @@ struct SpaceFrameSidebar: View {
             Circle().fill(frame.spaceColor).frame(width: 8, height: 8)
             Text(frame.spaceTitle).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
+            if !CanvasDownloads.shared.items.isEmpty { SpaceDownloadsButton() }
         }
         .padding(.horizontal, 8)
+        .contentShape(Rectangle())
+        .contextMenu { archiveMenu }
     }
 
     @ViewBuilder
@@ -449,7 +731,8 @@ struct SpaceFrameSidebar: View {
 
     private func cardRow(_ row: SpaceFrame.Row, indent: Bool) -> some View {
         SpaceSidebarRow(row: row, indent: indent, picked: frame.picked.contains(row.id),
-                        close: { frame.close(row.id) }) { frame.click(row.id) }
+                        close: { frame.close(row.id) },
+                        pause: { row.muted ? frame.setMuted(row.id, false) : frame.pause(row.id) }) { frame.click(row.id) }
             .contextMenu { menu(for: row) }
     }
 
@@ -458,6 +741,19 @@ struct SpaceFrameSidebar: View {
         Button(row.pinned ? "Unpin" : "Pin") { frame.setPinned(row.id, !row.pinned) }
         Button(row.favorite ? "Remove from Favourites" : "Add to Favourites") { frame.setFavorite(row.id, !row.favorite) }
         Button("Open in a Tile Beside") { frame.tileBeside(row.id) }
+        Divider()
+        if row.host != nil {
+            Button("Copy Address") { frame.copyAddress(row.id) }
+            Button("Duplicate") { frame.duplicate(row.id) }
+            Button(row.muted ? "Unmute" : "Mute") { frame.setMuted(row.id, !row.muted) }
+        }
+        if !frame.otherSpaces.isEmpty {
+            Menu("Move to Space") {
+                ForEach(frame.otherSpaces, id: \.id) { space in
+                    Button(space.title) { frame.moveToSpace(row.id, space.id) }
+                }
+            }
+        }
         Divider()
         Button(row.pinned ? "Unpin" : "Close") { frame.close(row.id) }
     }
@@ -500,6 +796,13 @@ struct SpaceFavoriteTile: View {
         Button(action: tap) {
             SpaceRowGlyph(row: row, size: 20)
                 .frame(maxWidth: .infinity).frame(height: 42)
+                .overlay(alignment: .topTrailing) {
+                    if row.playing {
+                        Image(systemName: "speaker.wave.2.fill").font(.system(size: 8.5, weight: .semibold))
+                            .foregroundStyle(.secondary).padding(5)
+                            .accessibilityLabel("Playing")
+                    }
+                }
                 .background {
                     if row.front { SpaceSelectedFill(radius: 11) }
                     else { RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.primary.opacity(hover ? 0.1 : 0.06)) }
@@ -536,9 +839,16 @@ struct SpaceSidebarRow: View {
         self.on = on; self.front = on; self.dim = dim; self.disclosure = disclosure; self.tap = tap
     }
 
-    init(row: SpaceFrame.Row, indent: Bool, picked: Bool, close: @escaping () -> Void, tap: @escaping () -> Void) {
+    var playing = false
+    var muted = false
+    var pause: (() -> Void)?
+
+    init(row: SpaceFrame.Row, indent: Bool, picked: Bool, close: @escaping () -> Void,
+         pause: (() -> Void)? = nil, tap: @escaping () -> Void) {
         title = row.title; symbol = row.symbol; host = row.host; on = row.showing; front = row.front
-        self.indent = indent; self.picked = picked; self.close = close; self.tap = tap
+        playing = row.playing || row.muted
+        muted = row.muted
+        self.indent = indent; self.picked = picked; self.close = close; self.pause = pause; self.tap = tap
     }
 
     var body: some View {
@@ -563,6 +873,17 @@ struct SpaceSidebarRow: View {
                 .foregroundStyle(dim && !front ? .secondary : .primary)
             Spacer(minLength: 2)
             if let trailing, !hover { Text(trailing).font(.system(size: 11)).foregroundStyle(.tertiary).monospacedDigit() }
+            if playing {
+                // Arc's speaker: says the tab is making sound, and stops it.
+                Button { pause?() } label: {
+                    Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.plain)
+                .help(muted ? "Unmute" : "Pause")
+                .accessibilityLabel(muted ? "Muted. Unmute" : "Playing. Pause")
+            }
             if hover || front, let close {
                 Button(action: close) {
                     Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
@@ -620,5 +941,68 @@ struct SpaceRowGlyph: View {
                 .background(RoundedRectangle(cornerRadius: size * 0.25, style: .continuous).fill(Color(nsColor: .systemGray)))
                 .onAppear { if let host { FaviconLoader.shared.warm(hosts: [host]) } }
         }
+    }
+}
+
+/// Arc's mini player, at the sidebar's foot: a card making sound that isn't on screen. Click to go to
+/// it; play/pause, picture-in-picture, and dismiss (which pauses).
+struct SpaceMiniPlayer: View {
+    let row: SpaceFrame.Row
+    let frame: SpaceFrame
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            SpaceRowGlyph(row: row, size: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.title).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                Text(row.playing ? "Playing" : "Paused").font(.system(size: 10.5)).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 2)
+            button(row.playing ? "pause.fill" : "play.fill", row.playing ? "Pause" : "Play") { frame.playerToggle() }
+            button("pip.enter", "Picture in Picture") { frame.playerPictureInPicture() }
+            if hover { button("xmark", "Dismiss") { frame.playerDismiss() } }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(hover ? 0.09 : 0.06)))
+        .contentShape(Rectangle())
+        .onHover { hover = $0 }
+        .onTapGesture { frame.show(row.id) }
+        .help("Go to \(row.title)")
+    }
+
+    private func button(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                .frame(width: 22, height: 22).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+}
+
+/// The sidebar foot's downloads arrow (Arc's): a ring while one runs, a dot once one finishes unseen.
+struct SpaceDownloadsButton: View {
+    var downloads = CanvasDownloads.shared
+    @State private var open = false
+    @State private var seen = 0
+
+    var body: some View {
+        Button { open.toggle(); seen = downloads.finishedCount } label: {
+            Image(systemName: downloads.running ? "arrow.down.circle.dotted" : "arrow.down.circle")
+                .font(.system(size: 13)).foregroundStyle(.secondary)
+                .overlay(alignment: .topTrailing) {
+                    if downloads.finishedCount > seen {
+                        Circle().fill(Color.accentColor).frame(width: 6, height: 6).offset(x: 2, y: -2)
+                    }
+                }
+                .frame(width: 22, height: 22).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Downloads (⌥⌘L)")
+        .popover(isPresented: $open, arrowEdge: .top) {
+            CanvasDownloadsList().frame(width: 340, height: 360)
+        }
+        .onAppear { seen = downloads.finishedCount }
     }
 }

@@ -623,8 +623,15 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         split.openTab(renderer == .canvas ? .notes : .board(.whole))
     }
 
-    @objc func selectNextProjectTab(_ sender: Any?) { split.cycleTabs(by: 1) }
-    @objc func selectPreviousProjectTab(_ sender: Any?) { split.cycleTabs(by: -1) }
+    /// ⌃⇥ ⌃⇧⇥, and ⇧⌘] ⇧⌘[: the next tab. In a space, the next card in the sidebar's order.
+    @objc func selectNextProjectTab(_ sender: Any?) {
+        if let frame = split.spaceFrame { return frame.cycleCards(by: 1) }
+        split.cycleTabs(by: 1)
+    }
+    @objc func selectPreviousProjectTab(_ sender: Any?) {
+        if let frame = split.spaceFrame { return frame.cycleCards(by: -1) }
+        split.cycleTabs(by: -1)
+    }
 
     /// ⌘1…⌘9. Go to a tab by position, with ⌘9 meaning the last one however many there are.
     ///
@@ -701,6 +708,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func windowDidBecomeMain(_ notification: Notification) {
         Log.write("window \(WindowManager.name(self)) became main: \(projectKey ?? "no project")")
         pushFocusToDisk()
+        if let frame = spaceFrame { Spaces.shared.lastUsed = frame.spaceID }
         // Joining or leaving a tab group moves the content area without resizing the window, and there
         // is no delegate callback for it. Becoming main is the moment that always follows.
         measureTitlebarButtons()
@@ -805,6 +813,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             return store.projectName != nil || split.spaceFrame != nil
         case #selector(selectNextProjectTab(_:)), #selector(selectPreviousProjectTab(_:)):
             // Dim at one tab, where there is nothing to cycle between.
+            if let frame = split.spaceFrame { return frame.cardsInOrder.count > 1 }
             return split.tabs.tabs.count > 1
         case #selector(closeProjectWindow(_:)):
             return true
@@ -875,6 +884,23 @@ final class TextFocusWindow: NSWindow {
     /// Here rather than on a second menu item with the same key equivalent: the main menu is searched
     /// in order, File comes before View, and its Close would have won every time. ⇧⌘W is the window,
     /// through `performCloseIgnoringTabs`.
+    /// ⌘S in a space: the sidebar, as Arc's (⌃⌘S, View ▸ Show Sidebar, works everywhere).
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers == "s",
+           let controller = windowController as? ProjectWindowController, controller.spaceFrame != nil {
+            controller.toggleSidebar()
+            return true
+        }
+        // ⇧⌘C in a space: the page's address, as Arc's (elsewhere it's Canvas in New Window).
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [.command, .shift],
+           event.charactersIgnoringModifiers?.lowercased() == "c",
+           let frame = (windowController as? ProjectWindowController)?.spaceFrame, frame.copyFrontAddress() {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func performClose(_ sender: Any?) {
         guard let controller = windowController as? ProjectWindowController,
               controller.closeSelectedProjectTab()

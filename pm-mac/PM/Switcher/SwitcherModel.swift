@@ -16,6 +16,8 @@ struct SwitcherModel: Equatable {
         var target: Target
         /// Tiles in a workspace, for its row's trailing count.
         var count: Int = 0
+        /// A tile making sound.
+        var playing = false
         var isTile: Bool { if case .tile = target { return true } else { return false } }
     }
 
@@ -26,6 +28,8 @@ struct SwitcherModel: Equatable {
         var isFocused = false
         /// A space: after the projects, past a divider, and never focused.
         var isSpace = false
+        /// Something on its board is making sound.
+        var playing = false
         /// The latest session: its label and when.
         var session: String?
         /// The focused task's text.

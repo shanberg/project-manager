@@ -328,6 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         AttentionKeeper.shared.stop()
         Spaces.shared.flush()
+        CanvasHistory.flush()
     }
 
     /// File ▸ New Space…. docs/spaces.md.
