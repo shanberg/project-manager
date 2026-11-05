@@ -418,9 +418,14 @@ final class ProjectIndex {
 
     /// One project's notes as the sidebar needs them, plus its icon. The icon lives in frontmatter,
     /// which `notesShow` doesn't report, so the raw text is read once here and handed to both.
+    ///
+    /// Nil for notes that are only in the cloud: reading them downloads them, every project's at each
+    /// launch, and a stalled provider holds the read — and the rest of the scan — indefinitely. The
+    /// project is listed by name until a scan after the file is on this Mac.
     private nonisolated static func readDetails(of name: String)
         -> (output: NotesShowOutput, icon: ProjectIcon?, color: ProjectColor?, partOf: String?)? {
         guard let handle = try? resolveNotesHandle(project: name),
+              !CloudFile.isCloudOnly(URL(fileURLWithPath: handle.notesPath)),
               let raw = try? handle.io.readContent(path: handle.notesPath),
               let output = try? notesShow(rawText: raw) else { return nil }
         return (output, projectIcon(rawText: raw, notesPath: handle.notesPath), projectColor(rawText: raw), projectPartOf(rawText: raw))

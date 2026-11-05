@@ -1050,7 +1050,10 @@ enum CanvasFolderIcons {
     /// alias keeps its icon, which carries the arrow; a folder is its icon.
     static func icon(for entry: CanvasFolderEntry, side: CGFloat, previews: Bool,
                      arrived: @escaping (NSImage) -> Void) -> NSImage {
-        let plain = NSWorkspace.shared.icon(forFile: entry.url.path)
+        // An online-only file's icon by its type: the file itself isn't on this Mac to be asked.
+        let plain = entry.sync == .onlineOnly
+            ? NSWorkspace.shared.icon(for: entry.type ?? .data)
+            : NSWorkspace.shared.icon(forFile: entry.url.path)
         guard previews, !entry.isFolder, !entry.isAlias, entry.sync != .onlineOnly else { return plain }
         if let cached = CanvasFolderThumbnails.shared.cached(for: entry, side: side) { return cached }
         Task { @MainActor in

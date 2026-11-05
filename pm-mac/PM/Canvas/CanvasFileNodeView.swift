@@ -297,7 +297,7 @@ final class CanvasFileNodeView: CanvasNodeView {
                         .canvasLinkZones(linkZones))
             }
             if let document { return documentEditor(document, url: url) }
-            if CloudFile.isCloudOnly(url) { return cloudOnlyView(url) }
+            if CloudFile.isCloudOnly(url) { return cloudOnlyView(url, downloading: opening == url) }
             guard let read = contents(of: url) else { return NSView() }
             let text = read.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             let shown = subpath.flatMap { section(named: $0, in: text) } ?? text
@@ -378,7 +378,7 @@ final class CanvasFileNodeView: CanvasNodeView {
     }
 
     override func engagementChanged() {
-        if document != nil || (isEngaged && writesInPlace) { return documentEngagementChanged() }
+        if document != nil || opening != nil || (isEngaged && writesInPlace) { return documentEngagementChanged() }
         engagement.isEngaged = isEngaged
         if isEngaged, let folderBrowser {
             folderBrowser.focus()
@@ -438,10 +438,12 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// The bytes of `url`. Nil until the first read lands, which rebuilds the card; a file changed since
     /// its last read is read again and drawn as it was meanwhile. The inner nil is a file that couldn't
     /// be read.
-    private func contents(of url: URL) -> Data?? {
+    /// With `reading` false, only what is already read and current — nothing is asked for.
+    private func contents(of url: URL, reading: Bool = true) -> Data?? {
         let stamp = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         let had = loaded.flatMap { $0.url == url ? Optional($0.data) : nil }
         if let loaded, loaded.url == url, loaded.stamp == stamp { return .some(loaded.data) }
+        guard reading else { return nil }
         guard loading != url else { return had }
         loading = url
         BackgroundFileRead.read(url) { [weak self] data in
@@ -455,7 +457,7 @@ final class CanvasFileNodeView: CanvasNodeView {
 
     /// A file that is in the cloud and not on this Mac. Not read: reading downloads it, and a card
     /// coming into view isn't asking for that. Opening it is.
-    private func cloudOnlyView(_ url: URL) -> NSView {
+    private func cloudOnlyView(_ url: URL, downloading: Bool = false) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.spacing = 4
@@ -472,7 +474,8 @@ final class CanvasFileNodeView: CanvasNodeView {
         name.alignment = .center
         name.lineBreakMode = .byTruncatingMiddle
 
-        let note = NSTextField(labelWithString: "Online only. Downloads when you open it.")
+        let note = NSTextField(labelWithString: downloading ? "Downloading…"
+                                                            : "Online only. Downloads when you open it.")
         note.font = .systemFont(ofSize: 10.5)
         note.textColor = .tertiaryLabelColor
         note.alignment = .center
@@ -553,17 +556,40 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// Whether this card has an editor open on its file.
     var isWritingDocument: Bool { document != nil }
 
+    /// The file an editor is waiting on: stepped into, its bytes not read yet. Read off main, since a
+    /// file only in the cloud downloads as it is read and a stalled provider holds that read.
+    private var opening: URL?
+
     private func documentEngagementChanged() {
         if isEngaged {
-            guard let url = location.url else { return }
-            let session = CanvasDocSession(url: url)
-            session.onWrite = { [weak self] in
-                guard let self else { return }
-                CanvasFileWatch.shared.acknowledge(self)
+            guard document == nil, let url = location.url else { return }
+            // Already read and unchanged since: the editor opens at once.
+            if let read = contents(of: url, reading: false), let data = read,
+               let text = String(data: data, encoding: .utf8) {
+                return startWriting(url, text)
             }
-            document = session
+            guard opening != url else { return }
+            opening = url
             contentChanged()
+            BackgroundFileRead.read(url) { [weak self] data in
+                guard let self, opening == url else { return }
+                opening = nil
+                guard isEngaged, location.url == url else { return contentChanged() }
+                // Unreadable — a download that failed, say. Not an empty editor, whose first write
+                // would put nothing over the file.
+                guard let data, let text = String(data: data, encoding: .utf8) else {
+                    Log.write("\(url.lastPathComponent) couldn't be read to write in")
+                    NSSound.beep()
+                    contentChanged()
+                    return engage(false)
+                }
+                startWriting(url, text)
+            }
             return
+        }
+        if opening != nil {
+            opening = nil
+            contentChanged()
         }
         guard let session = document else { return }
         // What the editor says now, not what it last reported: SwiftUI hands a change on a turn later,
@@ -575,6 +601,16 @@ final class CanvasFileNodeView: CanvasNodeView {
         resumeAt = nil
         session.flush()
         finish(session)
+        contentChanged()
+    }
+
+    private func startWriting(_ url: URL, _ text: String) {
+        let session = CanvasDocSession(url: url, text: text)
+        session.onWrite = { [weak self] in
+            guard let self else { return }
+            CanvasFileWatch.shared.acknowledge(self)
+        }
+        document = session
         contentChanged()
     }
 
@@ -758,9 +794,9 @@ final class CanvasDocSession {
     /// `CanvasFileWatch.acknowledge`.
     var onWrite: (() -> Void)?
 
-    init(url: URL) {
+    /// `text` is the file as just read — off main, by the card. See `CanvasFileNodeView.opening`.
+    init(url: URL, text read: String) {
         self.url = url
-        let read = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         opening = read
         text = read
         synced = read

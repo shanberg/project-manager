@@ -371,6 +371,7 @@ final class CanvasFolderCardTests: XCTestCase {
         let deadline = Date().addingTimeInterval(3)
         while model.isInside, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
         XCTAssertFalse(model.isInside)
+        model.waitForReads()
         XCTAssertEqual(model.listing.entries.map(\.name), ["top.md"])
     }
 
