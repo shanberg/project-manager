@@ -363,6 +363,8 @@ enum QuickBarAction: Equatable {
     case newProject
     /// Put back the line the last summon was closed on. See `QuickBarModel.restorable`.
     case restore(String)
+    /// Capture with nothing focused: add the line to the end of this project's current session.
+    case captureTo(CaptureTarget)
 
     var id: String {
         switch self {
@@ -370,6 +372,7 @@ enum QuickBarAction: Equatable {
         case .captureHere: return "action:captureHere"
         case .newProject: return "action:newProject"
         case .restore: return "action:restore"
+        case .captureTo(let target): return "action:captureTo:\(target.key)"
         }
     }
 
@@ -379,6 +382,7 @@ enum QuickBarAction: Equatable {
         case .captureHere(let text): return "Add “\(QuickBarModel.truncate(text, 38))” as a task"
         case .newProject: return "New Project…"
         case .restore(let text): return "Pick up “\(QuickBarModel.truncate(text, 38))”"
+        case .captureTo(let target): return "Add to \(target.displayName)"
         }
     }
 
@@ -388,6 +392,7 @@ enum QuickBarAction: Equatable {
         case .captureHere: return nil
         case .newProject: return nil
         case .restore: return "What you were typing last time"
+        case .captureTo: return "End of its current session"
         }
     }
 
@@ -397,6 +402,7 @@ enum QuickBarAction: Equatable {
         case .captureHere: return "plus.circle"
         case .newProject: return "plus.square"
         case .restore: return "arrow.uturn.backward"
+        case .captureTo: return "plus"
         }
     }
 }
@@ -1026,7 +1032,17 @@ final class QuickBarModel {
             // Somewhere to put it: the project you're in, or the one the line named. With neither,
             // the only useful thing the bar can offer is a way to get one.
             guard reading.target != nil || focusedProjectName != nil else {
-                return RowSet(rows: [.action(.findProject), .action(.newProject)])
+                // Nothing focused (docs/spaces.md): with a line typed, ask where it goes — the recent
+                // projects first, then the search for any other.
+                guard !reading.text.isEmpty else {
+                    return RowSet(rows: [.action(.findProject), .action(.newProject)])
+                }
+                let targets = recents.prefix(4).map { recent in
+                    CaptureTarget(key: recent.projectKey, name: recent.name,
+                                  shortName: allProjects.first { $0.projectKey == recent.projectKey }?.shortName
+                                      ?? recent.name)
+                }
+                return RowSet(rows: targets.map { .action(.captureTo($0)) } + [.action(.findProject)])
             }
             // The line the last summon was closed on, before it's been typed over. Only on an empty
             // field: once there's a line in the bar, the old one is not what you're doing.

@@ -582,6 +582,24 @@ final class PMStore {
         }
     }
 
+    /// Leave no project focused. `focused.json` is written empty rather than deleted, as
+    /// `PMFiles.clearFocusedProject` says, and the app re-reads it at once rather than waiting on the
+    /// watcher — the attention span ends there (`AttentionKeeper.focusMoved(to: nil)`).
+    ///
+    /// It lasts until something focuses a project again: a project window or satellite becoming key,
+    /// Switch Project, the CLI. docs/spaces.md.
+    static func clearGlobalFocus() {
+        focusQueue.async {
+            try? PMFiles.clearFocusedProject()
+            Task { @MainActor in focusWritten?() }
+        }
+    }
+
+    /// Run on the main actor after `clearGlobalFocus` writes. Set by `AppDelegate` to re-read the
+    /// focus; a hook rather than a call so this file needn't know the app delegate (PMViewTests
+    /// compiles it without one).
+    @MainActor static var focusWritten: (() -> Void)?
+
     /// Serial queue for focus writes, so two windows becoming main in quick succession can't interleave.
     private static let focusQueue = DispatchQueue(label: "com.stuarthanberg.pm.focus")
 

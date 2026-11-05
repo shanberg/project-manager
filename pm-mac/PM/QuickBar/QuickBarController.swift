@@ -675,6 +675,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .newProject:
             hide(restoringFocus: false)
             ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
+        case .captureTo(let target):
+            guard !isRunning, !model.reading.text.isEmpty else { return }
+            isRunning = true
+            captureToTarget(target, placement: .sessionEnd, text: model.reading.text, due: model.reading.due,
+                            reveal: false)
         }
     }
 
@@ -1211,6 +1216,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             guard let receipt, moved else { break }
             confirm(.done(receipt))
             return
+        case .unfocus:
+            PMStore.clearGlobalFocus()
         case .newProject:
             ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
         case .settings:

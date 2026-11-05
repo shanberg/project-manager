@@ -22,6 +22,8 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
     case undoLastCompletion
     case diveIn
     case revealProjectInFinder
+    /// The ⌥Tab switcher. See `SwitcherController`.
+    case showSwitcher
 
     var id: String { rawValue }
 
@@ -39,6 +41,7 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
         case .undoLastCompletion: return "Undo Last Completion"
         case .diveIn: return "Dive In"
         case .revealProjectInFinder: return "Reveal Project in Finder"
+        case .showSwitcher: return "Switch Between Projects"
         }
     }
 
@@ -72,6 +75,10 @@ enum HotKeyAction: String, CaseIterable, Codable, Identifiable {
         // ⌃⌥P, the panel's summon shortcut since the Tauri build.
         case .toggleFocusPanel:
             return KeyCombo(keyCode: UInt32(kVK_ANSI_P), carbonModifiers: UInt32(controlKey | optionKey))
+        // ⌥Tab: ⌘Tab's gesture, one modifier over. macOS keeps ⌘Tab and ⌘`; nothing system-wide holds
+        // ⌥Tab. Held, like ⌘Tab: letting go of ⌥ is what jumps (docs/spaces.md).
+        case .showSwitcher:
+            return KeyCombo(keyCode: UInt32(kVK_Tab), carbonModifiers: UInt32(optionKey))
         default: return nil
         }
     }

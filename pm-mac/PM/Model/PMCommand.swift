@@ -46,6 +46,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
     case showEvents
     case archiveProject
     case unarchiveProject
+    /// Leave no project focused: timing stops, and capture asks where a line goes. docs/spaces.md.
+    case unfocus
 
     // The app. Placed in the File menu by hand — see `menuSection` — but named here so the quick bar
     // and the menu bar can't come to call them different things.
@@ -90,6 +92,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .showEvents: return "Show Events From…"
         case .archiveProject: return "Archive Project"
         case .unarchiveProject: return "Unarchive Project"
+        case .unfocus: return "Unfocus Project"
         case .newProject: return "New Project…"
         case .settings: return "Settings…"
         }
@@ -136,6 +139,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .showEvents: return "calendar"
         case .archiveProject: return "archivebox"
         case .unarchiveProject: return "arrow.up.bin"
+        case .unfocus: return "circle.slash"
         case .newProject: return "plus.square"
         case .settings: return "gearshape"
         }
@@ -158,7 +162,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
              .editTask, .setDue, .wrapTask:
             return .task
         case .openInFinder, .openInObsidian, .openInEditor,
-             .editDetails, .addLink, .projectSettings, .showEvents, .archiveProject, .unarchiveProject:
+             .editDetails, .addLink, .projectSettings, .showEvents, .archiveProject, .unarchiveProject,
+             .unfocus:
             return .project
         // Placed by hand or not in the bar: Open Project Window is Go's, the session is File ▸ New
         // Session and Project ▸ Write Session Note…, and Edit ▸ Undo already names Undo Complete Task.
@@ -212,7 +217,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
         // Complete, Undo Last and Dive In sit inline at the top of the dropdown rather than in a
         // submenu — they're the reason the menu gets opened. The menu builds those itself. Drop isn't
         // one of those reasons: it's a decision made in a list, not a glance at the menubar.
-        case .complete, .drop, .undoLast, .diveIn, .newProject, .settings, .takeMeetingNotes:
+        // Unfocus sits beside Switch Project, at the top level, placed by the menu itself.
+        case .complete, .drop, .undoLast, .diveIn, .newProject, .settings, .takeMeetingNotes, .unfocus:
             return nil
         }
     }
@@ -297,6 +303,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .showEvents: return ["calendar", "events", "meetings", "schedule"]
         case .archiveProject: return ["archive", "shelve", "done"]
         case .unarchiveProject: return ["unarchive", "restore", "reopen"]
+        case .unfocus: return ["unfocus", "clear", "stop", "none", "nothing", "break", "off"]
         case .newProject: return ["create", "start"]
         case .settings: return ["preferences", "config", "shortcuts"]
         }

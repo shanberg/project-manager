@@ -50,6 +50,23 @@ final class AttentionKeeperTests: XCTestCase {
         XCTAssertEqual(log.map(\.event), [.began])
     }
 
+    // MARK: Unfocusing
+
+    /// docs/spaces.md: no focused project ends the span, says why, and starts nothing.
+    func testUnfocusingEndsTheSpanAndStartsNothing() {
+        working()
+        wait(minutes(5)); touch()
+        let hands = now
+        wait(30)
+        keeper.focusMoved(to: nil)
+        XCTAssertEqual(log.map(\.event), [.began, .ended])
+        XCTAssertEqual(last?.why, "unfocused")
+        XCTAssertEqual(at(last), hands, "back-dated to the last input")
+        wait(minutes(20))
+        keeper.check()
+        XCTAssertEqual(log.count, 2, "nothing is timed while nothing is focused")
+    }
+
     // MARK: Pauses and returns
 
     func testTenQuietMinutesEndTheSpanAtTheLastInput() {

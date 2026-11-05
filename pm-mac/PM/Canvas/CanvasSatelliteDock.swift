@@ -148,8 +148,11 @@ final class CanvasSatelliteDock: NSObject {
         }
         let panel = self.panel ?? makePanel()
         column.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let focusedKey = PMFiles.focusedProjectKey()
         for group in groups {
             let mark = DockMark(group: group)
+            mark.isFocused = group.projectKey != nil && group.projectKey == focusedKey
+            mark.onMenu = { [weak self] key, event, view in self?.showMenu(for: key, with: event, in: view) }
             mark.onHover = { [weak self, weak mark] over in
                 guard let self, let mark else { return }
                 over ? openFlyout(for: mark.groupKey, beside: mark) : scheduleFlyoutHide()
@@ -168,6 +171,28 @@ final class CanvasSatelliteDock: NSObject {
     }
 
     private func group(_ key: String) -> Group? { groups.first { $0.key == key } }
+
+    // MARK: A mark's menu
+
+    /// Right-click on a mark: Show Window, then Focus or Unfocus for a project's mark.
+    private func showMenu(for key: String, with event: NSEvent, in view: NSView) {
+        guard let found = group(key) else { return }
+        closeFlyout()
+        let menu = NSMenu()
+        let show = MarkMenuItem(title: "Show Window") { [weak self] in self?.show(found) }
+        menu.addItem(show)
+        if let projectKey = found.projectKey {
+            menu.addItem(.separator())
+            if PMFiles.focusedProjectKey() == projectKey {
+                menu.addItem(MarkMenuItem(title: "Unfocus \(found.title)") { PMStore.clearGlobalFocus() })
+            } else {
+                menu.addItem(MarkMenuItem(title: "Focus \(found.title)") {
+                    PMStore.setGlobalFocus(key: projectKey) { PMStore.focusWritten?() }
+                })
+            }
+        }
+        NSMenu.popUpContextMenu(menu, with: event, for: view)
+    }
 
     // MARK: The column
 
@@ -615,6 +640,10 @@ private final class DockMark: NSView {
     let groupKey: String
     var onHover: (Bool) -> Void = { _ in }
     var onClick: (String) -> Void = { _ in }
+    var onMenu: (String, NSEvent, NSView) -> Void = { _, _, _ in }
+    /// The focused project's mark: a ring in its colour, the icon drawn smaller inside it.
+    var isFocused = false { didSet { needsDisplay = true; updateLabel() } }
+    private var label = ""
     private let color: NSColor
     private let glyph: NSImage?
     private let initial: String
@@ -636,9 +665,12 @@ private final class DockMark: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         let count = group.windowCount
-        setAccessibilityLabel(count == 0 ? group.title
-            : "\(group.title), \(count) \(count == 1 ? "window" : "windows") out")
+        label = count == 0 ? group.title
+            : "\(group.title), \(count) \(count == 1 ? "window" : "windows") out"
+        updateLabel()
     }
+
+    private func updateLabel() { setAccessibilityLabel(isFocused ? "\(label), focused" : label) }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -652,9 +684,23 @@ private final class DockMark: NSView {
 
     override var isFlipped: Bool { true }
 
+    /// How far in the focused mark's icon sits: room for a 2-point ring and a 1.5-point gap.
+    static let focusedInset: CGFloat = 4.5
+
     override func draw(_ dirty: NSRect) {
-        let tile = bounds.insetBy(dx: 2, dy: 2)
-        let radius = Self.cornerRadius
+        let inset = isFocused ? Self.focusedInset : 2
+        let tile = bounds.insetBy(dx: inset, dy: inset)
+        let scale = tile.width / (bounds.width - 4)
+        let radius = Self.cornerRadius * scale
+        if isFocused {
+            // Concentric with the icon: its corner plus the distance out to the ring's centre line.
+            let ringRect = bounds.insetBy(dx: 1, dy: 1)
+            let ring = NSBezierPath(roundedRect: ringRect, xRadius: radius + (inset - 1),
+                                    yRadius: radius + (inset - 1))
+            ring.lineWidth = 2
+            color.setStroke()
+            ring.stroke()
+        }
         let shape = NSBezierPath(roundedRect: tile, xRadius: radius, yRadius: radius)
 
         NSGraphicsContext.saveGraphicsState()
@@ -685,12 +731,13 @@ private final class DockMark: NSView {
         shape.stroke()
 
         if let glyph {
-            let side: CGFloat = 26
+            let side: CGFloat = 26 * scale
             glyph.draw(in: NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side),
                        from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         } else {
-            let base = NSFont.systemFont(ofSize: 19, weight: .bold)
-            let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 19) } ?? base
+            let points = 19 * scale
+            let base = NSFont.systemFont(ofSize: points, weight: .bold)
+            let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: points) } ?? base
             let text = NSAttributedString(string: initial, attributes: [.font: font, .foregroundColor: NSColor.white])
             let size = text.size()
             text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2))
@@ -722,6 +769,8 @@ private final class DockMark: NSView {
     private var dragging = false
 
     override func mouseDown(with event: NSEvent) {
+        // ⌃-click is a right-click, as anywhere on the Mac.
+        if event.modifierFlags.contains(.control) { return onMenu(groupKey, event, self) }
         press = event
         dragging = false
     }
@@ -737,8 +786,23 @@ private final class DockMark: NSView {
 
     override func mouseUp(with event: NSEvent) {
         defer { press = nil }
-        if !dragging, bounds.contains(convert(event.locationInWindow, from: nil)) { onClick(groupKey) }
+        if press != nil, !dragging, bounds.contains(convert(event.locationInWindow, from: nil)) { onClick(groupKey) }
     }
+
+    override func rightMouseDown(with event: NSEvent) { onMenu(groupKey, event, self) }
+}
+
+/// A menu item that runs a closure: the dock's panel has no responder chain worth aiming at.
+@MainActor
+private final class MarkMenuItem: NSMenuItem {
+    private let run: () -> Void
+    init(title: String, run: @escaping () -> Void) {
+        self.run = run
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+    required init(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    @objc private func fire() { run() }
 }
 
 /// A tooltip for the dock's buttons, drawn by the dock: its panel never makes Folio the active app, and

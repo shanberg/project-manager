@@ -310,6 +310,27 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     var isVisible: Bool { window?.isVisible ?? false }
 
+    // MARK: The switcher (docs/spaces.md)
+
+    /// The workspaces in this window's tab row, in row order.
+    var workspaceTabNames: [String] { split.tabs.tabs.compactMap(\.view.workspaceName) }
+
+    /// The canvas this window's workspaces are kept against.
+    var workspaceCanvas: URL? { openedCanvas ?? store.canvasPath.map { URL(fileURLWithPath: $0) } }
+
+    /// Show the window at its Notes, or at a workspace — and, given a card, with that tile picked.
+    func show(workspace: String?, tile: String? = nil) {
+        if let workspace {
+            split.openTab(.board(.workspace(workspace)))
+            if let tile, let pane = split.canvasPane {
+                pane.whenInWorkspace(workspace) { [weak pane] in pane?.board.showTab(tile) }
+            }
+        } else {
+            split.openTab(.notes)
+        }
+        show()
+    }
+
     /// A window never shown, opened at launch only to bring a closed window's satellites back out and
     /// closed again once it has (`CanvasSatelliteKeeper.restoreKept`). Not remembered as open.
     var isCarrier = false

@@ -119,6 +119,11 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Focus moving on its own skips waiting tasks. Focusing a task yourself doesn't.
 - `task.diveIn` focuses the first open leaf under the focused task. A new task takes focus.
 - `project.focus` also starts timing that project. See [Time](#time).
+- No focused project is a state of its own ([spaces.md](spaces.md)). Unfocus Project: the menu bar item's menu, a dock mark's right-click menu, the quick bar's `>`, the Project menu. `focused.json` is written with no key.
+- Unfocusing ends the attention span with why `unfocused`; nothing is timed until a project is focused again.
+- Anything that focuses a project ends it: a project window or satellite becoming key, Switch Project, the CLI.
+- Capture with nothing focused and a line typed: "Add to <project>" for up to 4 recent projects (end of the current session), then Go to a project…
+- The dock rings the focused project's mark in its colour; the icon is drawn smaller inside the ring.
 
 ## Windows
 

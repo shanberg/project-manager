@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Before any project's notes are read: a project's links are kept in step from the first read.
         ProjectLinksSync.install()
         FolioServices.install()
+        PMStore.focusWritten = { [weak self] in self?.syncFocusedStore() }
         // Off the critical path, and once ever: web cards moved from the app's default store to one of
         // their own, and the sessions you were already signed in to should come with them.
         Task { @MainActor in await CanvasWebSession.migrateOldSessions() }
@@ -113,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .undoLastCompletion: { [weak self] in self?.undoLastCompletion() },
             .diveIn: { [weak self] in self?.diveInCommand() },
             .revealProjectInFinder: { [weak self] in self?.revealProject() },
+            .showSwitcher: { SwitcherController.shared.trigger() },
         ])
 
         // Watch the config dir (+ every open project's notes file) for CLI/Raycast/Obsidian edits.
@@ -259,6 +261,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Where the time goes follows the focus, and this is the one place the app learns it moved —
         // whoever moved it, including the CLI writing `focused.json` under us (docs/time-tracking.md D4).
         AttentionKeeper.shared.focusMoved(to: key)
+        // The dock rings the focused project's mark.
+        CanvasSatelliteDock.shared.refresh()
         // The focus panel reads the focused project too — same store, so the two can't disagree about
         // what's current or diverge on undo history.
         FocusPanelController.shared.syncToFocusedProject()

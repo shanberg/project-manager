@@ -182,7 +182,8 @@ final class AttentionKeeper {
         let now = clock()
         // End the outgoing span at the last input rather than at this moment: switching projects after
         // twenty minutes away is twenty minutes that weren't spent on either of them.
-        end(why: "switched", at: lastAlive(now))
+        // No key is an unfocus (docs/spaces.md): attention left every project rather than moving to one.
+        end(why: key == nil ? "unfocused" : "switched", at: lastAlive(now))
         guard let key, let project = PMFiles.projectName(fromKey: key) else { return }
         open = (key, project)
         paused = false

@@ -85,6 +85,9 @@ enum PMCommandRunner {
                                          ? "Couldn't archive “\(name)”" : "Couldn't unarchive “\(name)”")
             }
 
+        case .unfocus:
+            PMStore.clearGlobalFocus()
+
         // The app.
         case .newProject:
             ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }

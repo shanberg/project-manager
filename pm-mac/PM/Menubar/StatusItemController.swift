@@ -282,6 +282,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(switchProjectMenuItem())
+        menu.addItem(actionItem(PMCommand.unfocus.title, #selector(unfocus), symbol: PMCommand.unfocus.symbol))
         // ⌃⌥P is the focus panel's global shortcut, shown here so the menu teaches it. Opening a window has
         // no single key of its own — it's the Dock icon, ⌥⌘N, and this.
         menu.addItem(actionItem("Show Focus Panel", #selector(togglePanel), symbol: "scope", key: "p",
@@ -605,6 +606,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func undoLast() { PMCommandRunner.run(.undoLast, store: store) }
     @objc private func focusTask(_ sender: NSMenuItem) { if let t = sender.representedObject as? Todo { store.focus(t) } }
     @objc private func switchProject(_ sender: NSMenuItem) { if let k = sender.representedObject as? String { store.setFocusedProject(key: k) } }
+    @objc private func unfocus() { PMCommandRunner.run(.unfocus, store: store) }
     @objc private func showPanel() { onShowPanel() }
     @objc private func togglePanel() { onTogglePanel() }
     /// Straight to the window rather than through a closure like the panel above: this menu is bound
