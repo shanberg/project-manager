@@ -1380,6 +1380,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     func pageStateChanged() {
         onFrontPageChanged?()
+        if CanvasTileControls.shared.tile != nil { CanvasTileControls.shared.refresh() }
         // Whatever find is about to search, said in the field rather than assumed. Kept here because
         // this runs whenever you step into or out of a card, which is exactly when the answer changes.
         header.find.scope = findScope

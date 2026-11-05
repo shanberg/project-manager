@@ -475,6 +475,14 @@ final class SpaceFrame {
         openNewCard(closed.address, showing: true)
     }
 
+    /// The grip's ✕: this tile out of the layout, as ⌘W on it.
+    func closeTile(_ id: String) {
+        guard let board, board.isTiled, board.tiling?.ids.contains(id) == true else { return }
+        noteClosed(id)
+        board.closeInTiling([id])
+        refresh()
+    }
+
     /// ⌃⇥ and ⇧⌘]: the card after the one in front, round to the first.
     func cycleCards(by step: Int) {
         let cards = cardsInOrder

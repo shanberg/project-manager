@@ -530,6 +530,7 @@ final class CanvasTileGripView: NSView {
     }
 
     override func draw(_ dirty: NSRect) {
+        if let board { CanvasTileControls.shared.follow(board) }
         guard let board, let tiling = board.tiling else { return placeCatcher(nil) }
         placeCatcher(board)
         let scale = board.liveScale
@@ -580,13 +581,53 @@ final class CanvasTileGripView: NSView {
 
     /// Takes a press on a grip for the board. Out of the window drag, since the top of a top-row tile is
     /// inside the transparent titlebar's band (see `CanvasTileHandleView.stripExcluders`).
+    ///
+    /// In a space it also opens the tile's controls: resting on it, or a click (`CanvasTileControls`).
     final class Catcher: WindowDragBlocker {
         weak var board: CanvasBoardView?
+        private var pressedAt: NSPoint?
+        private var tracking: NSTrackingArea?
+
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
-        override func mouseDown(with event: NSEvent) { board?.mouseDown(with: event) }
-        override func mouseDragged(with event: NSEvent) { board?.mouseDragged(with: event) }
-        override func mouseUp(with event: NSEvent) { board?.mouseUp(with: event) }
+
+        /// A lone tile has nowhere to be dragged: its grip is only the controls' button.
+        private var forwards: Bool { (board?.tiling?.ids.count ?? 0) > 1 }
+
+        override func mouseDown(with event: NSEvent) {
+            pressedAt = event.locationInWindow
+            if forwards { board?.mouseDown(with: event) }
+        }
+        override func mouseDragged(with event: NSEvent) {
+            // A real drag of the tile: its controls go, and the grip hides with the rest while it moves.
+            if let start = pressedAt, hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y) >= 4,
+               CanvasTileControls.shared.tile != nil {
+                CanvasTileControls.shared.close()
+            }
+            if forwards { board?.mouseDragged(with: event) }
+        }
+        override func mouseUp(with event: NSEvent) {
+            if forwards { board?.mouseUp(with: event) }
+            defer { pressedAt = nil }
+            guard event.clickCount == 1, let start = pressedAt, let board, let tile = board.gripTile,
+                  hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y) < 4 else { return }
+            CanvasTileControls.shared.gripClicked(board, tile: tile)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if tracking == nil {
+                let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                          owner: self)
+                addTrackingArea(area)
+                tracking = area
+            }
+        }
+        override func mouseEntered(with event: NSEvent) {
+            guard let board, let tile = board.gripTile else { return }
+            CanvasTileControls.shared.gripEntered(board, tile: tile)
+        }
+        override func mouseExited(with event: NSEvent) { CanvasTileControls.shared.gripExited() }
         override func rightMouseDown(with event: NSEvent) { board?.rightMouseDown(with: event) }
     }
 }

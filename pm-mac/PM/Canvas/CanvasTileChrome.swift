@@ -56,7 +56,9 @@ extension CanvasBoardView {
         // dragged along, so a press on it carries nothing (`tiledMouseDown`). The header's Restore
         // (`HeaderRestoreButton`) is the way out that is always showing; this is the one that is where
         // the pointer already is.
-        guard let tiling, !isPicking, tiling.maximized == nil || tiling.maximized == id, tiling.ids.count > 1,
+        // One tile has nothing to be dragged among, but its grip still opens its controls.
+        guard let tiling, !isPicking, tiling.maximized == nil || tiling.maximized == id,
+              tiling.ids.count > 1 || gripOpensControls,
               !tiling.hasTabs(id) || tiling.tabsOnSide(id), let frame = tiling.layout.frames[id] else { return nil }
         let scale = liveScale
         let bar = CanvasRect(x: frame.midX - Self.gripLength / 2 / scale, y: frame.minY + Self.gripInset / scale,
@@ -81,11 +83,17 @@ extension CanvasBoardView {
     /// Whether this tile is showing its grip: the pointer is near its top centre, and no tile is being
     /// carried — the grips belong to where tiles are, and a drag's preview is drawing where they would be.
     func showsTileHandle(_ id: String) -> Bool {
+        // Up while its controls are open under it, even through a press on it: a press starts a tile
+        // drag in case it becomes one, and only an actual drag closes the controls (and so hides it).
+        if CanvasTileControls.shared.isOpen(on: self, tile: id) { return tileHandle(id) != nil }
         if case .placeTile? = gesture { return false }
         // Focus mode puts the grips away: the top of a tile is where a hand reaching for the window lands.
         if tileGripsHeld { return false }
         return gripTile == id && tileHandle(id) != nil
     }
+
+    /// A grip opens the tile's controls (`CanvasTileControls`), on any board in a window.
+    var gripOpensControls: Bool { window != nil }
 
     /// Tell the grips which tile they belong on now. They fade between there and wherever they were.
     ///
