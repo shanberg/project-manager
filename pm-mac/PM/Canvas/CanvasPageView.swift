@@ -76,6 +76,23 @@ final class CanvasPageView: WKWebView {
     /// page's own menu and the middle button exactly as WebKit made them.
     weak var linkHost: CanvasPageLinkHost?
 
+    override init(frame: NSRect, configuration: WKWebViewConfiguration) {
+        super.init(frame: frame, configuration: configuration)
+        // **No under-page colour, so a dark page has no white hairline at its sides.** WebKit keeps an
+        // "overhang areas" layer the size of the page directly under it, filled with this colour —
+        // which it takes from the page's background, and for a page that sets none (Figma) is white.
+        // A tile's width is rarely a whole number of device pixels, so its left and right edges land
+        // mid-pixel and both layers are antialiased there: the white one bleeds through the page's
+        // edge as a fine light line, in dark appearance only. Clear leaves the web view's own
+        // background behind it, which follows the appearance. Measured on WebKit's layer tree, 2026-11-05.
+        //
+        // The same colour fills a rubber-band overscroll, so a white page with no background, in dark
+        // appearance, now bounces against dark rather than white. Brief, and only while bouncing.
+        underPageBackgroundColor = .clear
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
     // MARK: Playing audio
 
     /// Whether the page is making sound now, as WebKit itself says it — the flag Safari's tab speaker
