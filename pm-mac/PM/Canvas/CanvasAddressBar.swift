@@ -280,7 +280,10 @@ struct CanvasAddressTextField: NSViewRepresentable {
     var onBegin: () -> Void = {}
 
     func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
+        let field = FocusReportingField()
+        // On taking the keyboard, not on the first keystroke (`controlTextDidBeginEditing`): ⌘T and
+        // New Tab focus an empty field, and a ring that waited for typing left them looking dead.
+        field.onFocus = { [weak coordinator = context.coordinator] in coordinator?.parent.onBegin() }
         field.delegate = context.coordinator
         field.isBordered = false
         field.drawsBackground = false
@@ -353,8 +356,6 @@ struct CanvasAddressTextField: NSViewRepresentable {
             completion = nil
             hideSuggestions()
         }
-
-        func controlTextDidBeginEditing(_ notification: Notification) { parent.onBegin() }
 
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField,
@@ -476,6 +477,18 @@ struct CanvasAddressTextField: NSViewRepresentable {
             list.show([], selecting: nil)
             panel.dismiss()
         }
+    }
+}
+
+/// An address field that says when it takes the keyboard — a click into it or a focus token — rather
+/// than waiting for the first keystroke, which is all `controlTextDidBeginEditing` reports.
+private final class FocusReportingField: NSTextField {
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        guard super.becomeFirstResponder() else { return false }
+        onFocus?()
+        return true
     }
 }
 
