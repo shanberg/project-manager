@@ -84,6 +84,9 @@ final class CanvasBoardView: NSView {
     /// fact about where this board is mounted and nothing else here knows that.
     var topClearance: Double = CanvasBoardView.headerClearance
 
+    /// A press on the ground around the tiles moves the window. Set in a space's window.
+    var dragsWindowFromGround = false
+
     /// Room at the top for the floating header, and nothing else.
     ///
     /// This used to add 18pt on three sides as well, which `CanvasTiling.frames` then inset again — two

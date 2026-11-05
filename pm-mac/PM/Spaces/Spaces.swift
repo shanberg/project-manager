@@ -71,6 +71,7 @@ final class Spaces {
         edit(&file.spaces[index])
         guard file.spaces[index] != before else { return }
         window(of: id)?.applyTitle()
+        window(of: id)?.spaceFrame?.refresh()
         CanvasSatelliteDock.shared.refresh()
         save()
     }

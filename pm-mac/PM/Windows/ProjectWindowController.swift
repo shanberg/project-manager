@@ -169,6 +169,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         split.replaceCanvas = { [weak self] in self?.replaceUnreadableProjectCanvas() }
         watchCanvasPath()
         watchColor()
+        if let space = Spaces.shared.space(forCanvas: canvas) { split.useSpaceFrame(space.id) }
         split.onRendererChanged = { [weak self] in
             guard let self else { return }
             renderer = split.renderer
@@ -309,6 +310,9 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     var isVisible: Bool { window?.isVisible ?? false }
+
+    /// The space's frame, when this window is a space's.
+    var spaceFrame: SpaceFrame? { split.spaceFrame }
 
     // MARK: The switcher (docs/spaces.md)
 
@@ -614,6 +618,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// are on a board, the board if you are on the notes, which is the tab you most likely wanted and
     /// the one you can change with the switch if it wasn't.
     @objc func newProjectTab(_ sender: Any?) {
+        // ⌘T in a space: the address, for a new web card in Today.
+        if let frame = split.spaceFrame { return frame.askForAddress() }
         split.openTab(renderer == .canvas ? .notes : .board(.whole))
     }
 
@@ -636,6 +642,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// somewhere on the board, a workspace is a way of looking at it.
     @objc func selectProjectTabByIndex(_ sender: Any?) {
         guard let slot = (sender as? NSMenuItem)?.tag else { return }
+        if let frame = split.spaceFrame { return _ = frame.showCard(at: slot) }
         split.selectTab(at: slot == 8 ? .max : slot)
     }
 
@@ -659,6 +666,8 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     ///
     /// - Returns: whether the key was spent here. False sends it on to `NSWindow.performClose`.
     func closeSelectedProjectTab() -> Bool {
+        // ⌘W in a space: the card in front (unpinned, or off the board); the window when there's none.
+        if let frame = split.spaceFrame { return frame.closeFront() }
         let selected = split.tabs.selected
         if split.tabs.closable(selected) {
             split.tabModel.close(selected.id)
@@ -792,11 +801,24 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             item.state = split.tabs.selected.view.isCanvas ? .on : .off
             return store.projectName != nil
         case #selector(newProjectTab(_:)):
-            return store.projectName != nil
+            // A space has no project, and New Tab is its address field (docs/spaces.md).
+            return store.projectName != nil || split.spaceFrame != nil
         case #selector(selectNextProjectTab(_:)), #selector(selectPreviousProjectTab(_:)):
             // Dim at one tab, where there is nothing to cycle between.
             return split.tabs.tabs.count > 1
         case #selector(closeProjectWindow(_:)):
+            return true
+        case #selector(selectProjectTabByIndex(_:)) where split.spaceFrame != nil:
+            // In a space ⌘1…⌘9 are the sidebar's cards, as Arc's tabs.
+            guard let entry = item as? NSMenuItem, let frame = split.spaceFrame else { return false }
+            let cards = frame.cardsInOrder
+            let index = entry.tag == 8 ? cards.count - 1 : entry.tag
+            guard cards.indices.contains(index) else {
+                entry.title = entry.tag == 8 ? "Last Tab" : "Tab \(entry.tag + 1)"
+                return false
+            }
+            entry.title = cards[index].title
+            entry.state = cards[index].front ? .on : .off
             return true
         case #selector(selectProjectTabByIndex(_:)):
             // Nine slots retitled on validation, exactly as Go to Frame does it — a menu bar is built

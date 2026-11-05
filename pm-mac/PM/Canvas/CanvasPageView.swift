@@ -76,6 +76,46 @@ final class CanvasPageView: WKWebView {
     /// page's own menu and the middle button exactly as WebKit made them.
     weak var linkHost: CanvasPageLinkHost?
 
+    // MARK: Dead space moves the window
+
+    /// Arc's dead space (docs/spaces.md § The frame): in a space's layout, a press near the top of the
+    /// page on nothing you can use — a header's blank background — moves the window, as a title bar
+    /// does. Asked of the card, which knows whether it is a tile in a space.
+    var dragsWindowFromDeadSpace: () -> Bool = { false }
+
+    /// How far down from the page's top a press can be and still count: where a site's header sits.
+    /// 96pt: Apple Music's blank header beside its "Home" heading is 60–80pt down (2026-11-05); 56pt
+    /// caught Google's and not that.
+    static let deadSpaceBand: CGFloat = 96
+
+    /// Whether WebKit last reported something usable under the pointer: a link, an image, media, or a
+    /// field to type in. Set by the card from its hover callback (`mouseDidMoveOverElement`).
+    var hoverIsInteractive = false
+
+    /// The rule, alone so it can be tested: nothing usable under the pointer, and the plain arrow —
+    /// which is what WebKit shows over dead space; a hand over anything clickable (`cursor: pointer`),
+    /// an I-beam over text you could select.
+    static func isDeadSpace(cursor: NSCursor?, interactive: Bool) -> Bool {
+        !interactive && cursor == NSCursor.arrow
+    }
+
+    /// Whether `point` (in this view) is within the band at the page's top.
+    func isInDeadSpaceBand(_ point: NSPoint) -> Bool {
+        let fromTop = isFlipped ? point.y : bounds.height - point.y
+        return fromTop >= 0 && fromTop <= Self.deadSpaceBand && bounds.contains(point)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if dragsWindowFromDeadSpace(), let window,
+           isInDeadSpaceBand(convert(event.locationInWindow, from: nil)),
+           Self.isDeadSpace(cursor: NSCursor.current, interactive: hoverIsInteractive) {
+            if event.clickCount == 2 { return WindowDragView.titleBarDoubleClick(window) }
+            Log.write("window drag from page dead space: \(url?.host() ?? "?")")
+            return window.performDrag(with: event)
+        }
+        super.mouseDown(with: event)
+    }
+
     /// Which side is holding the drag right now.
     private enum Holder { case page, fallback, load }
     private var holder: Holder?
@@ -306,6 +346,37 @@ final class CanvasPageView: WKWebView {
         guard on != fullFrameRate else { return }
         fullFrameRate = on
         Self.setFullFrameRate(on, in: configuration.preferences)
+        pulseWhenReleased()
+    }
+
+    /// The frame of "hidden" that makes WebKit read the new rate — but never under a held button.
+    ///
+    /// Stepping into a tile happens on the press (`CanvasBoardView.tileClicked`, which listens before
+    /// the press is delivered), so a pulse then hid the page for exactly the frame the press arrived
+    /// in, and WebKit dropped it: the first click on a tile in a layout did nothing but focus it. The
+    /// rate itself is set at once; the pulse waits for the button to come up.
+    private func pulseWhenReleased() {
+        pulseWait?.invalidate()
+        pulseWait = nil
+        guard Self.buttonHeld() else { return pulse() }
+        let wait = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard !Self.buttonHeld() else { return }
+                timer.invalidate()
+                self?.pulseWait = nil
+                self?.pulse()
+            }
+        }
+        RunLoop.main.add(wait, forMode: .common)
+        pulseWait = wait
+    }
+
+    private var pulseWait: Timer?
+
+    /// Whether the left button is down. Read from the hardware, so tests stand in for it.
+    static var buttonHeld: () -> Bool = { NSEvent.pressedMouseButtons & 0x1 != 0 }
+
+    private func pulse() {
         guard window != nil, !super.isHiddenOrHasHiddenAncestor, !reportsHidden else { return }
         reportsHidden = true
         viewDidHide()

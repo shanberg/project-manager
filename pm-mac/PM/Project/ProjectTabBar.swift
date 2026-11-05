@@ -505,7 +505,9 @@ final class ProjectTabModel {
     var selectedID: String = ""
 
     /// One tab is no tabs — see `ProjectTabSet.showsBar`.
-    var showsBar: Bool { items.count > 1 }
+    var showsBar: Bool { !hidesBar && items.count > 1 }
+    /// A space's window lists what's open in its sidebar instead (docs/spaces.md § The frame).
+    var hidesBar = false
 
     @ObservationIgnored
     var select: (String) -> Void = { _ in }

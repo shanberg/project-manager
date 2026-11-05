@@ -1,6 +1,7 @@
 import AppKit
 import QuartzCore
 import SwiftUI
+import PmLib
 
 /// A project window's content: the project sidebar beside the task column, as a real
 /// `NSSplitViewController`.
@@ -22,7 +23,12 @@ final class ProjectSplitViewController: NSSplitViewController {
 
     private var sidebarItem: NSSplitViewItem!
     private var contentItem: NSSplitViewItem!
-    private var sidebarHosting: NSHostingController<ProjectSidebar>!
+    /// The project list, or — in a space's window — the space's frame (`SpaceFrameSidebar`).
+    private var sidebarHosting: NSHostingController<AnyView>!
+    private var bottomBarView: NSView?
+    /// The Arc-style frame, for a space's window. docs/spaces.md § The frame.
+    private(set) var spaceFrame: SpaceFrame?
+    private var spaceFrameStore: CanvasDocumentStore?
     /// The container the content column's two renderers take turns in — see
     /// `ProjectContentPaneController`.
     private let contentPane = ProjectContentPaneController()
@@ -41,6 +47,15 @@ final class ProjectSplitViewController: NSSplitViewController {
         self.state = state
         self.startsWithSidebar = startsWithSidebar
         super.init(nibName: nil, bundle: nil)
+        // Configured as the controller's own would be: it lays out its items' views only (not every
+        // subview), side by side. A bare split view arranges every subview and is horizontal, and
+        // AppKit's constraint pass reads its first arranged view before there is one — the launch
+        // crash of 2026-11-04 (`-[NSSplitView _updateStackConstraints]`, index 0 of an empty array).
+        let split = ProjectSplitView()
+        split.arrangesAllSubviews = false
+        split.isVertical = true
+        split.dividerStyle = .thin
+        splitView = split
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
@@ -48,7 +63,7 @@ final class ProjectSplitViewController: NSSplitViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        sidebarHosting = NSHostingController(rootView: ProjectSidebar(store: store, state: state))
+        sidebarHosting = NSHostingController(rootView: AnyView(ProjectSidebar(store: store, state: state)))
         wireTabModel()
         // The sidebar keeps `.minSize`, and this is the whole reason its collapse animation looks like
         // a sidebar rather than a glitch: while a split item animates, AppKit sizes the pane's content
@@ -120,6 +135,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         bottomBar.addChild(bottomBarHosting)
         bottomBar.view = bottomBarHosting.view
         sidebarItem.addBottomAlignedAccessoryViewController(bottomBar)
+        bottomBarView = bottomBar.view
 
         addSplitViewItem(sidebarItem)
         addSplitViewItem(contentItem)
@@ -431,6 +447,66 @@ final class ProjectSplitViewController: NSSplitViewController {
         openTab(.notes)
     }
 
+    // MARK: A space's frame
+
+    /// Put the space's frame in the sidebar slot, in place of the project list, and the tab row away:
+    /// the sidebar is the list of what's open. Shown, so the window opens as the frame.
+    func useSpaceFrame(_ spaceID: String) {
+        guard spaceFrame == nil, let url = canvasSource().url,
+              let store = try? CanvasStoreRegistry.store(for: url) else { return }
+        spaceFrameStore = store
+        let frame = SpaceFrame(spaceID: spaceID, canvas: url, store: store, split: self)
+        spaceFrame = frame
+        sidebarHosting.rootView = AnyView(SpaceFrameSidebar(frame: frame))
+        bottomBarView?.isHidden = true
+        useBareSidebar()
+        tabModel.hidesBar = true
+        if sidebarItem.isCollapsed { sidebarItem.isCollapsed = false }
+        for case let pane as CanvasPaneController in contentPane.allContent { pane.hidesHeader = true }
+    }
+
+    /// Arc's sidebar is the window's own ground, not a plate over it: in a space the sidebar is a
+    /// plain pane (no glass) and paints the content's wash itself (`SpaceFrameSidebar`). The same
+    /// controller, width and collapse rules; only the item's kind changes.
+    private func useBareSidebar() {
+        let old = sidebarItem!
+        let wasCollapsed = old.isCollapsed
+        collapseObservation?.invalidate()
+        removeSplitViewItem(old)
+        let bare = NSSplitViewItem(viewController: sidebarHosting)
+        bare.minimumThickness = ProjectWindow.sidebarMinWidth
+        bare.maximumThickness = ProjectWindow.sidebarMaxWidth
+        bare.canCollapse = true
+        bare.holdingPriority = .defaultLow + 1
+        bare.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+        bare.allowsFullHeightLayout = true
+        bare.titlebarSeparatorStyle = .none
+        insertSplitViewItem(bare, at: 0)
+        sidebarItem = bare
+        bare.isCollapsed = wasCollapsed
+        splitView.dividerStyle = .thin
+        // One ground, as Arc's: no line between the sidebar and the frame round the tiles.
+        (splitView as? ProjectSplitView)?.hidesDivider = true
+        collapseObservation = bare.observe(\.isCollapsed, options: [.new]) { [weak self] item, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.state.sidebarVisible = !item.isCollapsed
+                self.canvasPane?.titlebarDidChange()
+            }
+        }
+    }
+
+    func endSpaceFrame() {
+        guard let frame = spaceFrame else { return }
+        frame.stop()
+        spaceFrame = nil
+        if let store = spaceFrameStore { CanvasStoreRegistry.release(store) }
+        spaceFrameStore = nil
+        bottomBarView?.isHidden = false
+        tabModel.hidesBar = false
+        for case let pane as CanvasPaneController in contentPane.allContent { pane.hidesHeader = false }
+    }
+
     /// ⌃⇥ / ⌃⇧⇥.
     func cycleTabs(by step: Int) {
         guard tabs.tabs.count > 1 else { return }
@@ -571,7 +647,18 @@ final class ProjectSplitViewController: NSSplitViewController {
         pane.projectTexture = appearance.texture
         pane.trafficLightsAreElsewhere = { [weak self] in self?.sidebarItem.isCollapsed == false }
         pane.focus = focus
-        pane.onTilingChanged = { [weak self] in self?.refreshTabModel() }
+        pane.sidebarWidth = { [weak self] in self?.sidebarItem.viewController.view.frame.width ?? 0 }
+        pane.setSidebarWidth = { [weak self] width in
+            guard let self else { return }
+            let clamped = min(max(width, ProjectWindow.sidebarMinWidth), ProjectWindow.sidebarMaxWidth)
+            splitView.setPosition(clamped, ofDividerAt: 0)
+        }
+        pane.focusSpaceAddress = { [weak self] in self?.spaceFrame?.editFrontAddress() }
+        pane.hidesHeader = spaceFrame != nil
+        pane.onTilingChanged = { [weak self] in
+            self?.refreshTabModel()
+            self?.spaceFrame?.refresh()
+        }
         // The away chip: answered against this window's project, read when the menu opens, since a
         // retarget swaps the store under the pane.
         pane.header.showAwayMenu = { [weak self] away, view in
@@ -901,8 +988,10 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// `ProjectAppearancePreview`), and otherwise what the store read. A saved choice is let go here,
     /// once the store says the same thing.
     private var appearance: ProjectAppearancePreview.Appearance {
+        // A space's window wears the space's colour, as a project's wears the project's.
+        let spaceColor = Spaces.shared.space(forCanvas: canvasSource().url).flatMap { ProjectColor(value: $0.color) }
         let saved = ProjectAppearancePreview.Appearance(
-            color: store.color,
+            color: spaceColor ?? store.color,
             texture: CanvasTexture.spec(for: store.texture, style: store.textureStyle, notesPath: store.notesPath))
         guard let name = store.projectName, let preview = ProjectAppearancePreview.shared.byProject[name] else {
             return saved
@@ -949,7 +1038,9 @@ final class ProjectSplitViewController: NSSplitViewController {
     func retarget(to newStore: PMStore, projectKey: String?) {
         guard newStore !== store else { return }
         store = newStore
-        sidebarHosting.rootView = ProjectSidebar(store: newStore, state: state)
+        // A window taking a project is a project's window, whatever file it was opened on.
+        endSpaceFrame()
+        sidebarHosting.rootView = AnyView(ProjectSidebar(store: newStore, state: state))
         // A switch is a change of place, and a short fade says so: cut straight across, one project's
         // card replacing another's in the same frame read as the card flickering, not as going
         // somewhere. Short enough that walking the sidebar with the arrow keys never waits on it.
@@ -1075,6 +1166,7 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// Release the scan retain when the window closes; the split view controller outlives its window
     /// only briefly, but the retain has to be balanced either way.
     func prepareForClose() {
+        endSpaceFrame()
         // Before the release, so a collapse on the way down can't hand the retain straight back.
         collapseObservation?.invalidate()
         collapseObservation = nil
@@ -1090,4 +1182,16 @@ final class ProjectSplitViewController: NSSplitViewController {
             ProjectIndex.shared.release()
         }
     }
+}
+
+/// The project window's split view, which can draw its divider as nothing — a space's window, where
+/// the sidebar and the content are one ground (docs/spaces.md § The frame).
+final class ProjectSplitView: NSSplitView {
+    var hidesDivider = false { didSet { needsDisplay = true; adjustSubviews() } }
+    override var dividerColor: NSColor { hidesDivider ? .clear : super.dividerColor }
+    /// No width at all when hidden: a 1pt divider that draws nothing shows the window's plain
+    /// background between two washes, which reads as a line. Nothing to grab either — the tiles'
+    /// leading gutter is the sidebar's edge (`SidebarEdgeHandle`), which is what makes a divider
+    /// unnecessary.
+    override var dividerThickness: CGFloat { hidesDivider ? 0 : super.dividerThickness }
 }

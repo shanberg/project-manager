@@ -184,6 +184,15 @@ extension CanvasBoardView {
             gesture = .swap(from: id, over: nil)
         case .edge, .board:
             selection = []
+            // A space's frame, as Arc's: the ground around the tiles is the window's to drag, and a
+            // double-click there zooms it, as a title bar's does (docs/spaces.md § The frame).
+            if dragsWindowFromGround, let event = NSApp.currentEvent {
+                // The press is the window's now, and its mouse-up never comes here: end it first, or
+                // the board stays "pressed" and the pane holds every update waiting for a release.
+                isPressed = false
+                onPressEnded?()
+                if clicks == 2 { if let window { WindowDragView.titleBarDoubleClick(window) } } else { window?.performDrag(with: event) }
+            }
         }
     }
 

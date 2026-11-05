@@ -28,6 +28,133 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     private var pill: NSHostingView<CanvasTitlePill>!
     private var capsule: NSHostingView<CanvasHeaderTrailingChrome>!
     private var tabBar: NSHostingView<CanvasTabBar>!
+
+    /// A space's window: no header at all — the sidebar holds what it said (docs/spaces.md § The frame).
+    /// Tiles start just under the window's drag band, which is all the room the window's buttons need.
+    var hidesHeader = false { didSet { applyHeaderHidden() } }
+
+    /// The window's titlebar band, where a press moves the window.
+    static let titlebarBand: Double = 28
+
+    /// The clearance the header wants when it's shown. In a space, as in Arc, the tiles run up to the
+    /// top with the same small gap as everywhere else — unless the sidebar is folded away and the
+    /// window's buttons are over the content, when they stay clear of the band.
+    private var headerClearance: Double {
+        // In a space the frame is even all round, as Arc's, sidebar or not: with the sidebar folded the
+        // window's buttons go away rather than taking a band of their own (`lightsReveal`).
+        hidesHeader ? 0 : CanvasBoardView.headerClearance
+    }
+
+    /// With a space's sidebar folded away: the window's buttons hidden until the pointer comes to the
+    /// window's top-left corner, where they fade in over the page — Arc's arrangement.
+    private lazy var lightsReveal = CornerReveal { [weak self] near in self?.setWindowButtons(shown: near) }
+
+    private var windowButtons: [NSButton] {
+        [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap { container.window?.standardWindowButton($0) }
+    }
+
+    private func setWindowButtons(shown: Bool) {
+        let buttons = windowButtons
+        if shown { buttons.forEach { $0.isHidden = false } }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = Motion.isReduced ? 0 : 0.18
+            for button in buttons { button.animator().alphaValue = shown ? 1 : 0 }
+        }, completionHandler: {
+            MainActor.assumeIsolated { if !shown { buttons.forEach { $0.isHidden = true } } }
+        })
+    }
+
+    private func applyWindowButtons() {
+        let away = hidesHeader && !trafficLightsAreElsewhere()
+        lightsReveal.watch(away ? container : nil)
+        if away {
+            setWindowButtons(shown: lightsReveal.isNear)
+        } else {
+            windowButtons.forEach { $0.isHidden = false; $0.alphaValue = 1 }
+        }
+    }
+
+    /// Keeps the titlebar band from moving the window over the pages, so their tops take clicks. An
+    /// `NSControl`, because only those carve the band (`WindowDragBlocker`); it hit-tests as nothing,
+    /// so the clicks go to whatever is under it — a page, or the ground, which drags the window itself.
+    private lazy var bandBlocker: WindowDragBlocker = {
+        let blocker = PassThroughDragBlocker()
+        blocker.isHidden = true
+        return blocker
+    }()
+
+    /// The frame round the tiles in a space: top, leading, trailing, bottom. Window ground, as in Arc.
+    private lazy var gutters: [WindowDragView] = (0..<4).map { _ in WindowDragView() }
+
+    /// The leading gutter while the sidebar is showing: the sidebar's edge, which resizes it.
+    private lazy var sidebarEdge = SidebarEdgeHandle()
+
+    /// ⌘L in a space: the sidebar's address field, on the page in front. Set by the window's split.
+    var focusSpaceAddress: () -> Void = {}
+
+    /// The window's sidebar width, read and set, for `sidebarEdge`. Set by the window's split.
+    var sidebarWidth: () -> CGFloat = { 0 }
+    var setSidebarWidth: (CGFloat) -> Void = { _ in }
+
+    private func layoutGutters() {
+        let bounds = container.bounds
+        let gap = CGFloat(CanvasTiling.edgeGap)
+        let top = CGFloat(headerClearance) + gap
+        let leading = container.safeAreaInsets.left
+        let flipped = container.isFlipped
+        let topY = flipped ? 0 : bounds.height - top
+        let bottomY = flipped ? bounds.height - gap : 0
+        let frames = [
+            NSRect(x: leading, y: topY, width: bounds.width - leading, height: top),
+            NSRect(x: leading, y: 0, width: gap, height: bounds.height),
+            NSRect(x: bounds.width - gap, y: 0, width: gap, height: bounds.height),
+            NSRect(x: leading, y: bottomY, width: bounds.width - leading, height: gap),
+        ]
+        let masks: [NSView.AutoresizingMask] = [
+            [.width, flipped ? .maxYMargin : .minYMargin], [.height, .maxXMargin], [.height, .minXMargin],
+            [.width, flipped ? .minYMargin : .maxYMargin],
+        ]
+        let sidebarShowing = trafficLightsAreElsewhere()
+        for (index, gutter) in gutters.enumerated() {
+            if gutter.superview == nil { container.addSubview(gutter, positioned: .above, relativeTo: scroll) }
+            gutter.autoresizingMask = masks[index]
+            gutter.frame = frames[index]
+            // Hidden and shown, so the window's drag region is rebuilt for the new frame.
+            gutter.isHidden = true
+            gutter.isHidden = !hidesHeader || (index == 1 && sidebarShowing)
+        }
+        // Beside the sidebar, the leading gutter is the sidebar's edge rather than more window to drag.
+        if sidebarEdge.superview == nil { container.addSubview(sidebarEdge, positioned: .above, relativeTo: scroll) }
+        sidebarEdge.autoresizingMask = masks[1]
+        sidebarEdge.frame = frames[1]
+        sidebarEdge.width = { [weak self] in self?.sidebarWidth() ?? 0 }
+        sidebarEdge.resize = { [weak self] in self?.setSidebarWidth($0) }
+        sidebarEdge.isHidden = !(hidesHeader && sidebarShowing)
+        container.window?.invalidateCursorRects(for: sidebarEdge)
+    }
+
+    private func applyHeaderHidden() {
+        guard pill != nil else { return }
+        layoutGutters()
+        for piece in [pill, tabBar, capsule] as [NSView] { piece.isHidden = hidesHeader }
+        scroll.board.topClearance = headerClearance
+        scroll.board.dragsWindowFromGround = hidesHeader
+        if bandBlocker.superview == nil { container.addSubview(bandBlocker) }
+        let band = CGFloat(Self.titlebarBand)
+        // Over the tiles' tops only: the gutters round them are left to the band's own drag.
+        let gap = CGFloat(CanvasTiling.edgeGap)
+        let leading = container.safeAreaInsets.left + gap
+        let tilesTop = CGFloat(headerClearance) + gap
+        let covered = max(0, band - tilesTop)
+        bandBlocker.autoresizingMask = container.isFlipped ? [.width, .maxYMargin] : [.width, .minYMargin]
+        bandBlocker.frame = NSRect(x: leading,
+                                   y: container.isFlipped ? tilesTop : container.bounds.height - band,
+                                   width: max(0, container.bounds.width - leading - gap), height: covered)
+        bandBlocker.isHidden = !hidesHeader
+        applyWindowButtons()
+        if scroll.board.isTiled { scroll.board.retileForWindowSize() }
+    }
     /// Which part of the board this pane is pinned to. `.whole` is a plain board and behaves exactly as
     /// one; the other two are a tab that was opened *at* something.
     var focus: CanvasFocus = .whole
@@ -113,7 +240,11 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     var trafficLightsAreElsewhere: () -> Bool = { false }
 
     /// Something that decides where the header starts has changed. See `trafficLightsAreElsewhere`.
-    func titlebarDidChange() { measureTitlebar() }
+    func titlebarDidChange() {
+        measureTitlebar()
+        // The sidebar folding moves the window's buttons onto the content, or off it.
+        if hidesHeader { applyHeaderHidden() }
+    }
 
     init(store: CanvasDocumentStore, tabs: ProjectTabModel) {
         self.store = store
@@ -204,7 +335,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             self?.say(message, reveal: file)
         }
         scroll.board.onFocusAddress = { [weak self] in
-            self?.header.addressFocusToken &+= 1
+            guard let self else { return }
+            // A space has no header: its address field is the sidebar's.
+            if hidesHeader { return focusSpaceAddress() }
+            header.addressFocusToken &+= 1
         }
         scroll.board.onRefreshIntervalChanged = { [weak self] in self?.rememberViewState() }
         scroll.board.onModeChanged = { [weak self] in
@@ -1098,6 +1232,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
                 selectMovedCards()
             }
         }
+        applyHeaderHidden()
     }
 
     /// Keep the header level with, and clear of, the window's own buttons.
@@ -1836,7 +1971,7 @@ extension CanvasPaneController {
             setFocusOnCard(false)
             self.focusMode = nil
             scroll.board.onEscape = nil
-            easeTopClearance(to: CanvasBoardView.headerClearance)
+            easeTopClearance(to: headerClearance)
             revealStrip?.removeFromSuperview()
             revealStrip = nil
             grabStrip?.removeFromSuperview()
@@ -1906,7 +2041,7 @@ extension CanvasPaneController {
     /// The header's three pieces and the window's buttons, away or back: a short slide up and a fade,
     /// on the board's clock; just the fade under Reduce Motion.
     fileprivate func setFocusedChrome(hidden: Bool, revealing: Bool = false) {
-        let pieces: [NSView] = [pill, tabBar, capsule]
+        let pieces: [NSView] = hidesHeader ? [] : [pill, tabBar, capsule]
         let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap { view.window?.standardWindowButton($0) }
         let lift: CGFloat = Motion.isReduced ? 0 : -18
@@ -1971,7 +2106,7 @@ extension CanvasPaneController {
         state.revealed = shown
         focusMode = state
         setFocusedChrome(hidden: !shown, revealing: true)
-        easeTopClearance(to: shown ? CanvasBoardView.headerClearance : 0)
+        easeTopClearance(to: shown ? headerClearance : 0)
     }
 
     /// "⌘. to leave focus mode", at the foot of the window for a moment each time you go in.
@@ -2091,4 +2226,60 @@ final class CanvasHUD: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// A drag-band blocker that takes no clicks itself: see `CanvasPaneController.bandBlocker`.
+final class PassThroughDragBlocker: WindowDragBlocker {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// Tells whether the pointer is near a view's top-left corner, as it moves: where a window's hidden
+/// buttons come back (a space with its sidebar folded, docs/spaces.md § The frame).
+@MainActor
+final class CornerReveal: NSResponder {
+    private let changed: (Bool) -> Void
+    private weak var watched: NSView?
+    private var area: NSTrackingArea?
+    private(set) var isNear = false
+
+    /// The corner: as wide as the window's three buttons with room round them, and as deep.
+    static let size = NSSize(width: 96, height: 44)
+
+    init(_ changed: @escaping (Bool) -> Void) {
+        self.changed = changed
+        super.init()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Watch this view, or stop with nil.
+    func watch(_ view: NSView?) {
+        guard view !== watched else { return }
+        if let area { watched?.removeTrackingArea(area) }
+        area = nil
+        watched = view
+        isNear = false
+        guard let view else { return }
+        let made = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        view.addTrackingArea(made)
+        area = made
+    }
+
+    override func mouseMoved(with event: NSEvent) { update(event) }
+    override func mouseEntered(with event: NSEvent) { update(event) }
+    override func mouseExited(with event: NSEvent) { set(false) }
+
+    private func update(_ event: NSEvent) {
+        guard let view = watched else { return }
+        let point = view.convert(event.locationInWindow, from: nil)
+        let top = view.isFlipped ? point.y : view.bounds.height - point.y
+        set(point.x <= Self.size.width && top <= Self.size.height)
+    }
+
+    private func set(_ near: Bool) {
+        guard near != isNear else { return }
+        isNear = near
+        changed(near)
+    }
 }

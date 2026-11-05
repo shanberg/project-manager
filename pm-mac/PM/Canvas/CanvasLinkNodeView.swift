@@ -832,6 +832,16 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         view.fullFrameRate = isEngaged
         // A link dropped on the page makes a card, unless there is a field under it to type into.
         view.dropFallback = board
+        // A tile in a space's layout: dead space at the page's top moves the window, as Arc's does.
+        // Asked of whichever board the page is in at the press, not this card's: a running page is
+        // handed between panes (`CanvasPageHandover`), so the card that built it may be on a board that
+        // isn't the one showing it — which is how Apple Music's tile never qualified (2026-11-05).
+        view.dragsWindowFromDeadSpace = { [weak view] in
+            var ancestor = view?.superview
+            while let current = ancestor, !(current is CanvasBoardView) { ancestor = current.superview }
+            guard let board = ancestor as? CanvasBoardView else { return false }
+            return board.dragsWindowFromGround && board.isTiled
+        }
         // And a link right-clicked or middle-clicked can make one too.
         view.linkHost = self
         // Safari unless this site has been told otherwise; the configuration above already says Safari.
@@ -1984,6 +1994,16 @@ extension CanvasLinkNodeView: WKUIDelegate {
                  withFlags flags: NSEvent.ModifierFlags, userInfo: AnyObject?) {
         guard webView === web else { return }
         let link = hit?.value(forKey: "absoluteLinkURL") as? URL
+        // What dead space is told from (`CanvasPageView.isDeadSpace`). Asked only of keys the object
+        // answers to: KVC on one it doesn't is an exception, not a nil.
+        func value(_ key: String) -> Any? {
+            guard let hit = hit as? NSObject, hit.responds(to: NSSelectorFromString(key)) else { return nil }
+            return hit.value(forKey: key)
+        }
+        (web as? CanvasPageView)?.hoverIsInteractive = link != nil
+            || (value("isContentEditable") as? Bool ?? false)
+            || value("absoluteImageURL") as? URL != nil
+            || value("absoluteMediaURL") as? URL != nil
         guard let text = CanvasLinkStatus.text(for: link, flags: flags) else {
             linkStatus?.show(nil)
             return
