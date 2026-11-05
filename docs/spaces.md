@@ -115,6 +115,30 @@ Built 2026-11-05.
 - Page menu: Show Reader (⇧⌘R) — the page's article (`<article>`, `<main>`, or the block with the most paragraph text) over the page in plain type; again, Esc or Close Reader takes it away (`CanvasReader`). Mute Page. More Page Commands ▸ Copy Address.
 - ⇧⌘C in a space: the page's address on the pasteboard, as Arc's (in project windows it stays Canvas in New Window).
 
+## Adding cards from the sidebar
+
+Decided 2026-11-05 in `.claude/mocks/folio-add-cards.html` (two rounds); built the same day (`SpaceCardKinds`, `SpaceRecentFolders`, `SpaceFrame.make`, `CanvasAddressTextField.cards`). Spaces and projects alike.
+
+Was: the sidebar made only web cards (address field, New Tab, ⌘T); every other kind was File ▸ New Card, a tab strip's +, or Board's right-click.
+
+- The door is the sidebar's address field (⌘T, click). Typing a kind's name makes that card. New Tab stays the web row.
+- Kinds and the names that match them: Card (card, text), File, Folder, Private (a private web card), Day, Leftovers, Coming Up, Projects, Time, Waiting, Search, Frame. No Web: the field makes web cards already. No note: a project's notes are its Notes row.
+- File: the open panel (a project's starts in its folder). Private: the field again, for the private card's address.
+- The empty field lists up to 3 recent pages, then every kind; Folder there types "folder" (its rows are the recent folders).
+- Return on a kind's name makes the card. The name is filled in after the caret as you type (2+ characters), as an address is; Tab accepts it, deleting drops it. Anything more than the name ("time zones") is a search, as before.
+- An address fills in before a kind does ("we" → weather.com, not Web). A kind fills in only when no address does.
+- Otherwise kinds are rows after the search and the pages; ↑↓ Return picks one. A row says what it makes ("Time — New view").
+- "folder": the rows are recent folders, Folder · <name> (a project's own folder first, then folders used on cards lately, Downloads), then Choose Folder…. One Return.
+- A path (typing ~ or /): folders and files on this Mac; Return makes a folder or file card, Tab goes into a folder.
+- A card from the field goes at the top of Today (space) or Cards (project), shown in the tile you're in; the card that was there stays listed. Frame: an empty frame on the board, a new sidebar folder.
+- A folder's row has a + on hover: the add menu (File ▸ New Card's list, views in a submenu); the card goes into that frame, shown in the tile you're in.
+- Right-click empty sidebar, or a project's Cards rule: the same menu; the card goes to the top of Today / Cards. A space's Today rule keeps its Clear / Archive menu.
+- Web Card… and Private Web Card… in the menu: the field, then the card goes where the menu said.
+- In the menu, New Folder is a submenu of the same recent folders, then Choose….
+- Recent folders: `PMRecentCardFolders`, 12 kept, 5 shown; noted whenever a folder card is made, from the sidebar or the board.
+- ⌘L (the page in front) offers no kinds: its field sends that page somewhere.
+- "Folder" keeps both meanings: a frame is a folder in the sidebar; New Folder… / "folder" makes a Finder-folder card.
+
 ## Motion
 
 Decided 2026-11-05 in `.claude/mocks/folio-spaces-motion.html`. All of it through `Motion` (Shared/Motion.swift): Reduce Motion drops the movement, and a fade stays only where noted.

@@ -273,17 +273,29 @@ struct CanvasAddressTextField: NSViewRepresentable {
     /// The capsule's width, which the suggestions line up under.
     var boxWidth: CGFloat
     var placeholder: String
+    /// The sidebar's field also makes cards by name: "time", "folder", a path (docs/spaces.md § Adding
+    /// cards from the sidebar). Nil everywhere else, where the field only goes to addresses.
+    var cards: Cards? = nil
     /// Where to go, or nil for nowhere.
     var onCommit: (String?) -> Void
     var onCancel: () -> Void
     /// The field took the keyboard (a click, or the focus token).
     var onBegin: () -> Void = {}
 
+    struct Cards {
+        /// The project's own folder, which leads the recent folders.
+        var projectFolder: URL?
+        var make: (SpaceNewCard) -> Void
+    }
+
     func makeNSView(context: Context) -> NSTextField {
         let field = FocusReportingField()
         // On taking the keyboard, not on the first keystroke (`controlTextDidBeginEditing`): ⌘T and
         // New Tab focus an empty field, and a ring that waited for typing left them looking dead.
-        field.onFocus = { [weak coordinator = context.coordinator] in coordinator?.parent.onBegin() }
+        field.onFocus = { [weak coordinator = context.coordinator] in
+            coordinator?.parent.onBegin()
+            coordinator?.focused()
+        }
         field.delegate = context.coordinator
         field.isBordered = false
         field.drawsBackground = false
@@ -357,6 +369,18 @@ struct CanvasAddressTextField: NSViewRepresentable {
             hideSuggestions()
         }
 
+        /// The field took the keyboard. Empty, the sidebar's lists recent pages and every kind of card —
+        /// on the next turn, once a click's `onBegin` has handed the field its candidates.
+        func focused() {
+            guard parent.cards != nil else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let field = self.field, field.currentEditor() != nil,
+                      field.stringValue.isEmpty else { return }
+                self.typed = ""
+                self.showSuggestions([])
+            }
+        }
+
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField,
                   let editor = field.currentEditor() as? NSTextView else { return }
@@ -375,6 +399,10 @@ struct CanvasAddressTextField: NSViewRepresentable {
                 field.stringValue = completion.text
                 editor.selectedRange = NSRange(location: length,
                                                length: (completion.text as NSString).length - length)
+            } else if completion == nil, appended, parent.cards != nil, let filled = SpaceCardKinds.filled(text) {
+                // A kind's name, filled in the way an address is — only where no address fills in.
+                field.stringValue = filled
+                editor.selectedRange = NSRange(location: length, length: (filled as NSString).length - length)
             }
             parent.text = field.stringValue
             showSuggestions(matches)
@@ -384,6 +412,10 @@ struct CanvasAddressTextField: NSViewRepresentable {
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
                 committing = true
+                if parent.cards != nil, let card = cardForReturn(control.stringValue) {
+                    make(card)
+                    return true
+                }
                 let address = destination(for: control.stringValue)
                 hideSuggestions()
                 parent.onCommit(address)
@@ -405,6 +437,7 @@ struct CanvasAddressTextField: NSViewRepresentable {
                 list.move(by: selector == #selector(NSResponder.moveDown(_:)) ? 1 : -1)
                 return true
             case #selector(NSResponder.insertTab(_:)):
+                if parent.cards != nil, tabIntoFolder(control, textView) { return true }
                 // Accept what was filled in, and keep typing after it.
                 guard let completion, control.stringValue == completion.text else { return false }
                 typed = completion.text
@@ -435,15 +468,107 @@ struct CanvasAddressTextField: NSViewRepresentable {
         }
 
         private func pick(_ row: CanvasAddressSuggestionRow) {
+            if let card = row.card, parent.cards != nil {
+                // Folder from the empty list: its rows are the recent folders, so it types its name.
+                if card == .kind(.folder) { return retype("folder") }
+                return make(card)
+            }
             committing = true
             hideSuggestions()
             parent.onCommit(row.address)
+        }
+
+        // MARK: Cards (the sidebar's field)
+
+        /// Leave the field, then make the card — it may show in a tile, open a panel, or ask for an address.
+        private func make(_ card: SpaceNewCard) {
+            committing = true
+            hideSuggestions()
+            if let field, field.currentEditor() != nil { field.window?.makeFirstResponder(nil) }
+            committing = false
+            parent.cards?.make(card)
+        }
+
+        /// What Return makes rather than going to an address: a row you chose; the lit row while a path
+        /// is typed; the first row when the whole of a kind's name is.
+        private func cardForReturn(_ text: String) -> SpaceNewCard? {
+            if list.isChosen { return list.selectedRow?.card }
+            if SpaceCardKinds.isPath(text) { return list.selectedRow?.card }
+            guard SpaceCardKinds.exact(text) != nil else { return nil }
+            return list.rows.first?.card
+        }
+
+        /// Tab on a folder while typing a path: into it, to keep typing there.
+        private func tabIntoFolder(_ control: NSControl, _ textView: NSTextView) -> Bool {
+            guard SpaceCardKinds.isPath(control.stringValue),
+                  case .folder(let url)? = list.selectedRow?.card else { return false }
+            retype(SpaceCardKinds.written(url, isFolder: true))
+            return true
+        }
+
+        /// Put `text` in the field as though typed, caret at the end, and list what it finds.
+        private func retype(_ text: String) {
+            guard let field else { return }
+            field.stringValue = text
+            parent.text = text
+            typed = text
+            completion = nil
+            field.currentEditor()?.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+            showSuggestions(CanvasAddressSuggestions.matches(text, in: parent.candidates))
+        }
+
+        /// Recent folders as rows, then Choose Folder….
+        private var folderRows: [CanvasAddressSuggestionRow] {
+            SpaceRecentFolders.list(projectFolder: parent.cards?.projectFolder).map {
+                CanvasAddressSuggestionRow(card: .folder($0), title: "Folder \u{00B7} " + $0.lastPathComponent,
+                                           detail: SpaceCardKinds.written($0.deletingLastPathComponent(), isFolder: false),
+                                           symbol: "folder")
+            } + [CanvasAddressSuggestionRow(card: .chooseFolder, title: "Choose Folder\u{2026}",
+                                            detail: "Open panel", symbol: "folder.badge.plus")]
+        }
+
+        private func kindRows(_ kinds: [SpaceCardKinds.Kind]) -> [CanvasAddressSuggestionRow] {
+            kinds.flatMap { kind -> [CanvasAddressSuggestionRow] in
+                kind.command == .folder ? folderRows
+                    : [CanvasAddressSuggestionRow(card: .kind(kind.command), title: kind.title,
+                                                  detail: kind.detail, symbol: kind.symbol)]
+            }
+        }
+
+        /// The sidebar's lists where they differ from an address field's: empty (recent pages, then every
+        /// kind) and a path (what's there). Nil to list as any address field does.
+        private func cardList(_ query: String) -> (rows: [CanvasAddressSuggestionRow], lit: Int?)? {
+            guard parent.cards != nil else { return nil }
+            if query.isEmpty {
+                let recent = parent.candidates.filter { $0.source == .history }.prefix(3).map {
+                    CanvasAddressSuggestionRow(.init(title: $0.title, address: $0.address, source: $0.source))
+                }
+                let kinds = SpaceCardKinds.all.map {
+                    CanvasAddressSuggestionRow(card: .kind($0.command), title: $0.title, detail: $0.detail, symbol: $0.symbol)
+                }
+                return (Array(recent) + kinds, nil)
+            }
+            if SpaceCardKinds.isPath(query) {
+                let rows = SpaceCardKinds.paths(query).map { hit in
+                    CanvasAddressSuggestionRow(card: hit.isFolder ? .folder(hit.url) : .file(hit.url),
+                                               title: hit.url.lastPathComponent,
+                                               detail: SpaceCardKinds.written(hit.url.deletingLastPathComponent(), isFolder: true),
+                                               symbol: hit.isFolder ? "folder" : "doc")
+                }
+                return (rows, rows.isEmpty ? nil : 0)
+            }
+            return nil
         }
 
         // MARK: The list
 
         private func showSuggestions(_ matches: [CanvasAddressSuggestions.Suggestion]) {
             let query = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let found = cardList(query) {
+                list.show(found.rows, selecting: found.lit)
+                guard !found.rows.isEmpty, let field, let window = field.window else { return hideSuggestions() }
+                return panel.present(under: field, in: window, boxWidth: parent.boxWidth)
+            }
             // The page the completion came from is the top hit, and goes first so the highlighted row
             // and the filled-in text are the same answer.
             var pages = matches
@@ -459,8 +584,19 @@ struct CanvasAddressTextField: NSViewRepresentable {
             if let search { rows.append(search) }
             rows += pages.map(CanvasAddressSuggestionRow.init)
 
+            // A kind's name: its rows lead when the whole name is in the field (filled in or typed), and
+            // Return makes it; otherwise they follow the pages.
+            var kindsLead = false
+            if parent.cards != nil {
+                let shown = field?.stringValue ?? typed
+                let kinds = kindRows(SpaceCardKinds.matches(shown))
+                kindsLead = completion == nil && SpaceCardKinds.exact(shown) != nil && !kinds.isEmpty
+                rows = kindsLead ? kinds + rows : rows + kinds
+            }
             // The row lit up is the one Return would take anyway, so nothing changes by pressing it.
-            let lit: Int? = if completion != nil {
+            let lit: Int? = if kindsLead {
+                0
+            } else if completion != nil {
                 0
             } else if CanvasAddress.normalized(query) == nil, search != nil {
                 rows.firstIndex { $0.isSearch }
@@ -503,6 +639,17 @@ struct CanvasAddressSuggestionRow: Equatable, Identifiable {
     /// Whose icon to draw, when there is one.
     var host: String?
     var isSearch = false
+    /// A card this row makes instead of going to `address` (the sidebar's field).
+    var card: SpaceNewCard?
+
+    init(card: SpaceNewCard, title: String, detail: String, symbol: String) {
+        id = "card|\(title)|\(detail)"
+        self.title = title
+        self.detail = detail
+        address = ""
+        self.symbol = symbol
+        self.card = card
+    }
 
     init(_ suggestion: CanvasAddressSuggestions.Suggestion) {
         id = suggestion.id

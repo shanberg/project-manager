@@ -1862,13 +1862,8 @@ extension CanvasBoardView {
         case .file: addFileCard(at: where_)
         case .folder: addFolderCard(at: where_)
         case .projectNote: addProjectNoteCard(at: where_)
-        case .dayView: addViewCard(.newDay, at: where_)
-        case .leftoversView: addViewCard(.newLeftovers, at: where_)
-        case .comingUpView: addViewCard(.newComingUp, at: where_)
-        case .projectsView: addViewCard(.newProjects, at: where_)
-        case .timeView: addViewCard(.newTime, at: where_)
-        case .waitingView: addViewCard(.newWaiting, at: where_)
-        case .searchView: addViewCard(.newSearch, at: where_)
+        case .dayView, .leftoversView, .comingUpView, .projectsView, .timeView, .waitingView, .searchView:
+            if let spec = command.viewSpec { addViewCard(spec, at: where_) }
         }
     }
 
@@ -2118,6 +2113,8 @@ extension CanvasBoardView {
         let path = store.resolver.storablePath(for: url) ?? url.path
         let at = where_ ?? centreOfVisibleBoard
         let height: Double = folder ? 400 : 350
+        // Offered first next time the sidebar's New Folder is asked (`SpaceRecentFolders`).
+        if folder { SpaceRecentFolders.note(url) }
         addCard(CanvasNode(content: .file(path: path, subpath: nil),
                            frame: CanvasRect(x: at.x - 200, y: at.y - height / 2,
                                              width: 400, height: height)),

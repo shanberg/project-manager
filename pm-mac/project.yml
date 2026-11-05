@@ -212,6 +212,7 @@ targets:
       - path: PM/Switcher/SwitcherModel.swift
       - path: PM/Spaces/SpaceModel.swift
       - path: PM/Spaces/SpaceCardMarks.swift
+      - path: PM/Spaces/SpaceCardKinds.swift
       - path: PM/Spaces/WindowDragView.swift
       - path: PM/Canvas/CanvasWebPopup.swift
       - path: PM/Canvas/CanvasWebDialogs.swift

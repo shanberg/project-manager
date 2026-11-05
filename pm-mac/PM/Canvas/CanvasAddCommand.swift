@@ -189,6 +189,21 @@ enum CanvasAddCommand: CaseIterable {
         }
     }
 
+    /// The view card this makes: one answer for the board's add list and the sidebar's (docs/spaces.md
+    /// § Adding cards from the sidebar).
+    var viewSpec: CanvasViewSpec? {
+        switch self {
+        case .dayView: return .newDay
+        case .leftoversView: return .newLeftovers
+        case .comingUpView: return .newComingUp
+        case .projectsView: return .newProjects
+        case .timeView: return .newTime
+        case .waitingView: return .newWaiting
+        case .searchView: return .newSearch
+        default: return nil
+        }
+    }
+
     /// A view's name inside New View ▸, where "New" and "View" are already said.
     var viewName: String? { viewKind?.title }
 

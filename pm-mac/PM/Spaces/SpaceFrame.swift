@@ -86,6 +86,11 @@ final class SpaceFrame {
     @ObservationIgnored var addressDone: () -> Void = {}
     /// The front card's address, for ⌘L to start from.
     private(set) var frontAddress = ""
+    /// Where the field's next web card goes, when a folder's + or a menu asked for one; nil is the top
+    /// of Today / Cards.
+    @ObservationIgnored private var pendingList: SpaceCardMarks.List?
+    /// The browser session the field's next web card is on: Private Web Card from the add list.
+    private(set) var pendingProfile: String?
 
     @ObservationIgnored private weak var split: ProjectSplitViewController?
     @ObservationIgnored private let store: CanvasDocumentStore
@@ -709,9 +714,22 @@ final class SpaceFrame {
     /// The engine a space searches with: Settings', as every address field (`CanvasSearchEngine.current`).
     static var engine: CanvasSearchEngine { CanvasSearchEngine.current }
 
+    /// The address field made a card instead of going somewhere ("time", "folder", a path): where a
+    /// folder's + asked, else the top of Today / Cards.
+    func makeFromField(_ card: SpaceNewCard) {
+        let list = pendingList
+        editingFront = false
+        pendingList = nil
+        pendingProfile = nil
+        addressDone()
+        make(card, in: list)
+    }
+
     /// The address field gave up the keyboard without a line.
     func addressCancelled() {
         editingFront = false
+        pendingList = nil
+        pendingProfile = nil
         addressDone()
     }
 
@@ -725,7 +743,10 @@ final class SpaceFrame {
             return card.go(to: address)
         }
         editingFront = false
-        openNewCard(address, showing: true)
+        let list = pendingList ?? .today(folder: nil), profile = pendingProfile
+        pendingList = nil
+        pendingProfile = nil
+        openNewCard(address, showing: true, in: list, profile: profile)
     }
 
     /// A link from another app: the card on that address if the space has one, else a new card.
@@ -741,19 +762,152 @@ final class SpaceFrame {
 
     /// A web card in Today, right of everything on the board, shown in the tile you're in when
     /// `showing` (⌘T, a link that wants a new window) or left in the sidebar (⇧⌘-click).
+    /// From the address field (`list` given): at the start of that list, which is the top of Today /
+    /// Cards unless a folder's + asked, on `profile`'s session.
     @discardableResult
-    func openNewCard(_ address: String, showing: Bool) -> String? {
+    func openNewCard(_ address: String, showing: Bool, in list: SpaceCardMarks.List? = nil,
+                     profile: String? = nil) -> String? {
         guard board != nil else { return nil }
-        let right = store.document.nodes.map { $0.frame.x + $0.frame.width }.max() ?? 0
-        let node = CanvasNode(content: .link(url: address),
-                              frame: CanvasRect(x: right + 40, y: 0, width: 400, height: 400))
+        var node = CanvasNode(content: .link(url: address), frame: newCardFrame(width: 400, height: 400))
+        CanvasCardSession.set(profile, on: &node)
         // Onto the board only, not `addCard`, which also tiles it into the layout up: in a named
         // workspace that grew the workspace (a project's Notes became two cards) instead of showing
         // the card in the tile you're in (2026-11-05).
-        store.change("New Tab") { $0.nodes.append(node) }
+        put(node, actionName: profile == nil ? "New Tab" : "New Private Tab", in: list)
         if showing { show(node.id) } else { refresh() }
         return node.id
     }
+
+    /// Right of everything on the board, where a new card goes.
+    private func newCardFrame(width: Double, height: Double) -> CanvasRect {
+        let right = store.document.nodes.map { $0.frame.x + $0.frame.width }.max() ?? 0
+        return CanvasRect(x: right + 40, y: 0, width: width, height: height)
+    }
+
+    /// One undo step: the card onto the board, and when `list` is given, first in it (into its folder's
+    /// frame if it has one).
+    private func put(_ node: CanvasNode, actionName: String, in list: SpaceCardMarks.List?) {
+        let members = list.map(members(of:)) ?? []
+        store.change(actionName) { document in
+            document.nodes.append(node)
+            if let list { SpaceCardMarks.move(node.id, to: list, at: 0, members: members, in: &document) }
+        }
+    }
+
+    // MARK: Adding cards (docs/spaces.md § Adding cards from the sidebar)
+
+    /// A card from the address field or the add menu, first in `list` (the top of Today / Cards when
+    /// nil), shown in the tile you're in. A web card asks for its address in the field; a file, or a
+    /// folder not among the recent ones, asks with the open panel.
+    func make(_ card: SpaceNewCard, in list: SpaceCardMarks.List? = nil) {
+        guard let board else { return }
+        let list = list ?? .today(folder: nil)
+        let node: CanvasNode, action: String
+        switch card {
+        case .kind(.web), .kind(.privateWeb):
+            pendingList = list
+            pendingProfile = card == .kind(.privateWeb) ? CanvasWebSession.ephemeralName : nil
+            return askForAddress()
+        case .kind(.file):
+            guard let url = choose(folder: false) else { return }
+            return make(.file(url), in: list)
+        case .kind(.folder), .chooseFolder:
+            guard let url = choose(folder: true) else { return }
+            return make(.folder(url), in: list)
+        case .folder(let url), .file(let url):
+            let isFolder = card == .folder(url)
+            if isFolder { SpaceRecentFolders.note(url) }
+            node = CanvasNode(content: .file(path: store.resolver.storablePath(for: url) ?? url.path, subpath: nil),
+                              frame: newCardFrame(width: 400, height: isFolder ? 400 : 350))
+            action = isFolder ? "Add Folder" : "Add File"
+        case .kind(.frame):
+            // A folder in the sidebar; nothing to show in a tile.
+            let frame = CanvasNode(content: .group(label: "Frame", background: nil, backgroundStyle: nil),
+                                   frame: newCardFrame(width: 600, height: 400))
+            store.change("Add Frame") { $0.nodes.append(frame) }
+            return refresh()
+        case .kind(.card):
+            node = board.newCardNode(frame: newCardFrame(width: 400, height: 400))
+            action = "Add Card"
+        case .kind(let command):
+            guard let spec = command.viewSpec else { return }
+            var view = CanvasNode(content: .text(spec.noteText), frame: newCardFrame(width: 360, height: 480))
+            CanvasViewSpec.set(spec, on: &view)
+            node = view
+            action = "Add View"
+        }
+        put(node, actionName: action, in: list)
+        show(node.id)
+        if card == .kind(.card) { board.beginEditing(node.id) }
+    }
+
+    /// The open panel for a file or a folder, starting in the project's folder when there is one.
+    private func choose(folder: Bool) -> URL? {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = !folder
+        panel.canChooseDirectories = folder
+        panel.message = folder ? "Choose a folder." : "Choose a file."
+        panel.directoryURL = projectFolder
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
+    }
+
+    /// A project's own folder, which leads the recent folders; nil in a space.
+    var projectFolder: URL? { isSpace ? nil : CanvasProjectNoteCard.projectFolder(forCanvasAt: canvas) }
+
+    /// The add list as a menu: a folder's +, a right-click on the sidebar (docs/spaces.md § Adding cards
+    /// from the sidebar). File ▸ New Card's list, except New Folder is the recent folders.
+    func addMenu(in list: SpaceCardMarks.List? = nil) -> NSMenu {
+        let menu = NSMenu()
+        let item = { (title: String, card: SpaceNewCard) -> NSMenuItem in
+            SpaceMenuItem(title) { [weak self] in self?.make(card, in: list) }
+        }
+        for row in CanvasAddCommand.rows(projectNote: false, tabs: false) {
+            switch row {
+            case .item(.folder):
+                let folders = NSMenu()
+                for url in SpaceRecentFolders.list(projectFolder: projectFolder) {
+                    let entry = item(url.lastPathComponent, .folder(url))
+                    entry.toolTip = url.path
+                    folders.addItem(entry)
+                }
+                if !folders.items.isEmpty { folders.addItem(.separator()) }
+                folders.addItem(item("Choose\u{2026}", .chooseFolder))
+                menu.addItem(withTitle: "New Folder", action: nil, keyEquivalent: "").submenu = folders
+            case .item(let command):
+                menu.addItem(item(command.title, .kind(command)))
+            case .views(let views):
+                let submenu = NSMenu()
+                for command in views {
+                    let entry = item(command.viewName ?? command.title, .kind(command))
+                    entry.image = command.viewKind.flatMap { MenuPictures.symbol($0.symbol, $0.title) }
+                    MenuPictures.forceImageVisible(entry)
+                    if let subtitle = command.viewSubtitle { entry.subtitle = subtitle }
+                    submenu.addItem(entry)
+                }
+                menu.addItem(withTitle: "New View", action: nil, keyEquivalent: "").submenu = submenu
+            case .separator:
+                menu.addItem(.separator())
+            }
+        }
+        return menu
+    }
+}
+
+/// A menu item that runs a closure.
+final class SpaceMenuItem: NSMenuItem {
+    private let run: () -> Void
+
+    init(_ title: String, run: @escaping () -> Void) {
+        self.run = run
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+
+    required init(coder: NSCoder) { fatalError("init(_:run:)") }
+
+    @objc private func fire() { run() }
 }
 
 // MARK: - The sidebar
@@ -813,7 +967,7 @@ struct SpaceFrameSidebar: View {
                 }
                 .padding(.bottom, 8)
                 .frame(maxWidth: .infinity, minHeight: area.size.height, alignment: .topLeading)
-                .background { WindowDragArea() }
+                .background { WindowDragArea { frame.addMenu() } }
             }
             .scrollIndicators(.never)
             }
@@ -858,7 +1012,13 @@ struct SpaceFrameSidebar: View {
             CanvasAddressTextField(
                 text: $address, focusToken: focusToken, engine: SpaceFrame.engine, candidates: candidates,
                 originalAddress: frame.editingFront ? frame.frontAddress : "", boxWidth: fieldWidth,
-                placeholder: frame.frontHost ?? "Search or enter address"
+                placeholder: frame.pendingProfile != nil ? "Private: search or enter address"
+                    : frame.frontHost ?? "Search or enter address",
+                cards: frame.editingFront ? nil : .init(projectFolder: frame.projectFolder) { card in
+                    address = ""
+                    addressFocused = false
+                    frame.makeFromField(card)
+                }
             ) { destination in
                 address = ""
                 addressFocused = false
@@ -1001,6 +1161,8 @@ struct SpaceFrameSidebar: View {
         }
         .frame(height: 18)
         .padding(.horizontal, 8).padding(.vertical, 3)
+        // Right-click: the add list (a space's rule has its Archive menu there instead).
+        .background { WindowDragArea { frame.addMenu() } }
     }
 
     @ViewBuilder
@@ -1043,7 +1205,8 @@ struct SpaceFrameSidebar: View {
             let list: SpaceCardMarks.List = pinned ? .pinned(folder: folder.id) : .today(folder: folder.id)
             // A row dropped on a folder goes in first; a closed folder is marked as the place.
             let first = SpaceFrame.DropSpot.list(list, 0)
-            SpaceSidebarRow(title: folder.label, symbol: open ? "folder" : "folder.fill", disclosure: open) {
+            SpaceSidebarRow(title: folder.label, symbol: open ? "folder" : "folder.fill", disclosure: open,
+                            addMenu: { frame.addMenu(in: list) }) {
                 if open { frame.closedFolders.insert(folder.id) } else { frame.closedFolders.remove(folder.id) }
             }
             .overlay(dropRing(!open && frame.dropSpot == first))
@@ -1296,10 +1459,14 @@ struct SpaceSidebarRow: View {
     let tap: () -> Void
     @State private var hover = false
 
+    /// A folder's +, shown on hover: the add list, into that folder.
+    var addMenu: (() -> NSMenu)?
+
     init(title: String, symbol: String? = nil, stack: [String?] = [], trailing: String? = nil, on: Bool = false,
-         dim: Bool = false, disclosure: Bool? = nil, tap: @escaping () -> Void) {
+         dim: Bool = false, disclosure: Bool? = nil, addMenu: (() -> NSMenu)? = nil, tap: @escaping () -> Void) {
         self.title = title; self.symbol = symbol; self.stack = stack; self.trailing = trailing
-        self.on = on; self.front = on; self.dim = dim; self.disclosure = disclosure; self.tap = tap
+        self.on = on; self.front = on; self.dim = dim; self.disclosure = disclosure; self.addMenu = addMenu
+        self.tap = tap
     }
 
     var playing = false
@@ -1338,6 +1505,11 @@ struct SpaceSidebarRow: View {
                 .foregroundStyle(dim && !front ? .secondary : .primary)
             Spacer(minLength: 2)
             if let trailing, !hover { Text(trailing).font(.system(size: 11)).foregroundStyle(.tertiary).monospacedDigit() }
+            if let addMenu, hover {
+                SidebarMenuButton(menu: addMenu)
+                    .frame(width: 18, height: 18)
+                    .help("Add a Card to \(title)")
+            }
             if playing {
                 // Arc's speaker: says the tab is making sound, and stops it.
                 Button { pause?() } label: {
@@ -1506,5 +1678,36 @@ struct SpaceRowDropTarget: DropDelegate {
         guard let spot = spot(info.location) else { frame.dropSpot = nil; return false }
         frame.land(at: spot)
         return true
+    }
+}
+
+/// A small + that drops a menu below itself — a folder's add list. AppKit, so the menu is the add
+/// list's `NSMenu` (recent folders, views) rather than a second copy of it in SwiftUI.
+struct SidebarMenuButton: NSViewRepresentable {
+    let menu: () -> NSMenu
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "Add a Card")!,
+                              target: context.coordinator, action: #selector(Coordinator.pop(_:)))
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.symbolConfiguration = .init(pointSize: 10, weight: .bold)
+        button.contentTintColor = .secondaryLabelColor
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) { context.coordinator.menu = menu }
+
+    func makeCoordinator() -> Coordinator { Coordinator(menu: menu) }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var menu: () -> NSMenu
+        init(menu: @escaping () -> NSMenu) { self.menu = menu }
+
+        @objc func pop(_ sender: NSButton) {
+            let below = sender.isFlipped ? sender.bounds.maxY + 4 : -4
+            menu().popUp(positioning: nil, at: NSPoint(x: 0, y: below), in: sender)
+        }
     }
 }

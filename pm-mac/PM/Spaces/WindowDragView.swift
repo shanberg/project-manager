@@ -10,7 +10,12 @@ import SwiftUI
 /// rather than here — so a gutter in the band moved nothing (2026-11-04). In the band the window's own
 /// drag answers; below it, this does.
 final class WindowDragView: NSView {
+    /// What a right-click here offers (the sidebar's add list); nil for nothing.
+    var contextMenu: (() -> NSMenu)?
+
     override var mouseDownCanMoveWindow: Bool { true }
+
+    override func menu(for event: NSEvent) -> NSMenu? { contextMenu?() }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
@@ -35,8 +40,12 @@ final class WindowDragView: NSView {
 
 /// `WindowDragView` behind SwiftUI rows: what isn't a row moves the window.
 struct WindowDragArea: NSViewRepresentable {
+    var menu: (() -> NSMenu)?
+
+    init(menu: (() -> NSMenu)? = nil) { self.menu = menu }
+
     func makeNSView(context: Context) -> WindowDragView { WindowDragView() }
-    func updateNSView(_ nsView: WindowDragView, context: Context) {}
+    func updateNSView(_ nsView: WindowDragView, context: Context) { nsView.contextMenu = menu }
 }
 
 /// The gutter between a space's sidebar and its tiles, as the sidebar's edge: drag it to make the

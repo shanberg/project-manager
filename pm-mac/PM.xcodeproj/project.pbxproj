@@ -152,6 +152,7 @@
 		5067836D6AAD43EA4838C507 /* CanvasWebSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B78492229004D23C8950DF6 /* CanvasWebSession.swift */; };
 		51449132D5A3F20809C110DC /* PMStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03A7709B2DE4D155EAE70CCF /* PMStore.swift */; };
 		5261F89226899DE67E22799C /* CanvasSnapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F76094B9162CBB804EEE118 /* CanvasSnapping.swift */; };
+		532350DDA4508E2CB286394C /* SpaceCardKinds.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F00187B4D5A74D5D80661B5 /* SpaceCardKinds.swift */; };
 		5373F6519FFB9872B7CCB3C5 /* CanvasCardShows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CBB6451CDE795A64E27CF99 /* CanvasCardShows.swift */; };
 		53E5D7C9A6AF1EE23FD1BD85 /* CanvasSessionPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD939225280D2EE38C200188 /* CanvasSessionPill.swift */; };
 		54340DB057B2B613E3E9DE83 /* RowSelectionBand.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC91C59007ABC53958980A0C /* RowSelectionBand.swift */; };
@@ -348,6 +349,7 @@
 		B06B2A05BCEAAAD838F8524A /* CanvasPanBounds.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A22E7015433BB94E0092FF7 /* CanvasPanBounds.swift */; };
 		B09D8D0687A6991F80CC5ABE /* CanvasViewNodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9356AE7F4DE27965E9331A6 /* CanvasViewNodeView.swift */; };
 		B0E9BFFA635AC01C891756F3 /* ProjectWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11501CA86C8643B15B0B0F87 /* ProjectWindowController.swift */; };
+		B0EECC56E8A2A4707DCE2DB9 /* SpaceCardKinds.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F00187B4D5A74D5D80661B5 /* SpaceCardKinds.swift */; };
 		B0F33867D086DF1DE57D028E /* CanvasTimeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97EE2A4006E3248F6A9F6208 /* CanvasTimeCard.swift */; };
 		B11DFBEA67571CC47819A5B7 /* CanvasUndoRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF31BC3EAD48DE12BA00C6A2 /* CanvasUndoRoute.swift */; };
 		B2D9A9C1F853C96FBF4E314B /* CanvasCardSize.swift in Sources */ = {isa = PBXBuildFile; fileRef = 848FA341B00F0C77B03E0B5E /* CanvasCardSize.swift */; };
@@ -387,6 +389,7 @@
 		C506626F6422F3CAFBF88C91 /* CanvasViewState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E23FF0F7441589014BEC322 /* CanvasViewState.swift */; };
 		C561E66486635FB61568FCBE /* CanvasFocusCodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FBD825DDFD05CF50FA02B24 /* CanvasFocusCodingTests.swift */; };
 		C571940B6DE70A637C14CE94 /* SwitcherModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 719E3778E5DF3402C026B97E /* SwitcherModelTests.swift */; };
+		C598FBF1AC2F21ACCEA300DB /* SpaceCardKindsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC6C653238CDC6A94A1922AB /* SpaceCardKindsTests.swift */; };
 		C5FD86F542DD37772C08D7BE /* CanvasHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AD2F0A659BE24A6D83D8C71 /* CanvasHeader.swift */; };
 		C604CAD25A5756F4BDDB768A /* NoteImagePaste.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A7702E7B244533507CDCE64 /* NoteImagePaste.swift */; };
 		C6B4C7C44C010CCF1D41CB6B /* CanvasSessionPillTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E03DF803366E7200465FC1A2 /* CanvasSessionPillTests.swift */; };
@@ -721,6 +724,7 @@
 		8D12B90835C4E6F3C9FAD6E5 /* CanvasAddressSuggestions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasAddressSuggestions.swift; sourceTree = "<group>"; };
 		8DA5731D97AE6117FBCCA3EB /* PanelSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelSettings.swift; sourceTree = "<group>"; };
 		8DC71EEE064EEB697AC27297 /* CanvasSiteSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSiteSettings.swift; sourceTree = "<group>"; };
+		8F00187B4D5A74D5D80661B5 /* SpaceCardKinds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceCardKinds.swift; sourceTree = "<group>"; };
 		8F4D62F116242DA3A6E47232 /* FocusPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusPanelController.swift; sourceTree = "<group>"; };
 		8FF6ECAEF432775C80253903 /* CanvasFileWatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFileWatchTests.swift; sourceTree = "<group>"; };
 		90A29BE9C624BCA20C640DDA /* CanvasItemListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasItemListView.swift; sourceTree = "<group>"; };
@@ -790,6 +794,7 @@
 		BB17A901F9B08DCECED33B24 /* ProjectSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSearch.swift; sourceTree = "<group>"; };
 		BB7B7013A93C4B219C107C6E /* CanvasWebDialogs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasWebDialogs.swift; sourceTree = "<group>"; };
 		BC020F6380FA33BCB94106CA /* WindowDragExcluder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowDragExcluder.swift; sourceTree = "<group>"; };
+		BC6C653238CDC6A94A1922AB /* SpaceCardKindsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceCardKindsTests.swift; sourceTree = "<group>"; };
 		BC6D8010322E380C3D032444 /* TaskTransitions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTransitions.swift; sourceTree = "<group>"; };
 		BC8D7339C2EBA7F95597A204 /* ProjectWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWindow.swift; sourceTree = "<group>"; };
 		BD092E03A33DCBBD701D682B /* CanvasDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDownload.swift; sourceTree = "<group>"; };
@@ -1026,6 +1031,7 @@
 		96537BA5C3D925C1470EA52D /* Spaces */ = {
 			isa = PBXGroup;
 			children = (
+				8F00187B4D5A74D5D80661B5 /* SpaceCardKinds.swift */,
 				7ECF6593D982366B529E8BEB /* SpaceCardMarks.swift */,
 				1BA91AF42671A0BAA13697EE /* SpaceDockCard.swift */,
 				9EB80D0E303077FED4728835 /* SpaceFrame.swift */,
@@ -1452,6 +1458,7 @@
 				BAF03BC376FBB593A7D24263 /* SessionPicksTests.swift */,
 				A683751482352094B3CF8AC6 /* SidebarClickTests.swift */,
 				95FDEBEBB7BAD06A19EBECE9 /* SidebarRevealTests.swift */,
+				BC6C653238CDC6A94A1922AB /* SpaceCardKindsTests.swift */,
 				6B2DD491BB71B6E2CACA119B /* SpaceCardMarksTests.swift */,
 				43E40B7A425C60A322FB5BBA /* SpaceModelTests.swift */,
 				D33DF155DB315F92FFEE5F26 /* SpaceRowDragTests.swift */,
@@ -1835,6 +1842,7 @@
 				F620D94113D96BFDDEE77367 /* SettingsPanes.swift in Sources */,
 				18D0FFC79E7293686F9F11D2 /* SettingsWindowController.swift in Sources */,
 				2AB4A19C5F60D4154DC72182 /* ShortcutsSettings.swift in Sources */,
+				532350DDA4508E2CB286394C /* SpaceCardKinds.swift in Sources */,
 				6EC544B6373563B1B25ACE31 /* SpaceCardMarks.swift in Sources */,
 				1345161EAE04A6F91F8C59D6 /* SpaceDockCard.swift in Sources */,
 				2A32707C2FA6ED1B9CBBEA8A /* SpaceFrame.swift in Sources */,
@@ -2075,6 +2083,8 @@
 				3A7D8CAA7F82F8A2C614A6E4 /* SessionPicksTests.swift in Sources */,
 				2024EF85F6CBE0F336B79659 /* SidebarClickTests.swift in Sources */,
 				BE241853058C8E947E918C73 /* SidebarRevealTests.swift in Sources */,
+				B0EECC56E8A2A4707DCE2DB9 /* SpaceCardKinds.swift in Sources */,
+				C598FBF1AC2F21ACCEA300DB /* SpaceCardKindsTests.swift in Sources */,
 				3363D0FE9D6126AFDDED14FE /* SpaceCardMarks.swift in Sources */,
 				D5420BA45B0CE2EA61C744B3 /* SpaceCardMarksTests.swift in Sources */,
 				3A87569A4ACE823EC2BC8684 /* SpaceModel.swift in Sources */,
@@ -2160,7 +2170,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.59.2;
+				MARKETING_VERSION = 0.60.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -2307,7 +2317,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 0.59.2;
+				MARKETING_VERSION = 0.60.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
