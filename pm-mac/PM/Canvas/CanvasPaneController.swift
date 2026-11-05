@@ -472,7 +472,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     private func fitWhenThereIsAWindowToFitTo() {
         guard !hasFitted else { return }
         DispatchQueue.main.async { [weak self] in
-            guard let self, !hasFitted, scroll.zoomToFit() else { return }
+            guard let self, !hasFitted, fitOrKeepTiles() else { return }
             restoreViewState()
             applyFocus()
             // **Last, which is what `isSettled` has always claimed.** The latch used to be set first,
@@ -483,6 +483,21 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
             hasFitted = true
             view.window?.makeFirstResponder(scroll.board)
         }
+    }
+
+    /// The first fit, unless the board was tiled before it came round.
+    ///
+    /// **A tiling already up keeps the view it chose.** A space's sidebar (⌘T, ⌘1, a row) goes to the
+    /// canvas tab and tiles the card at once, and a canvas tab never shown before has a pane made for it
+    /// right there, whose fit is still a turn away. Fitting then zoomed the board out to frame every card
+    /// and scrolled off the tile: an empty window, or the tile shrunk to nothing, until a resize retiled
+    /// it (2026-11-05). So the tiles are measured again for the window the pane now has, as a resize
+    /// would, and the board is not zoomed. False while there is no window to measure, as `zoomToFit`.
+    private func fitOrKeepTiles() -> Bool {
+        guard scroll.board.isTiled else { return scroll.zoomToFit() }
+        guard !scroll.board.visibleRect.isEmpty else { return false }
+        scroll.board.retileForWindowSize()
+        return true
     }
 
     /// Whether this pane has fitted, restored and applied its focus — see `fitWhenThereIsAWindowToFitTo`.
