@@ -19,9 +19,7 @@ enum PMSpotlight {
     private static func reindexEntities() async {
         do {
             let projects = try ProjectEntity.all()
-            let tasks = projects.flatMap { p in
-                (try? TaskEntity.inProject(folder: p.folder, projectKey: p.id, openOnly: true)) ?? []
-            }
+            let tasks = projects.flatMap { p in (try? openTasks(of: p)) ?? [] }
             let index = CSSearchableIndex.default()
             try await index.deleteAllSearchableItems()
             if !projects.isEmpty { try await index.indexAppEntities(projects) }
@@ -29,5 +27,17 @@ enum PMSpotlight {
         } catch {
             // Indexing is a convenience; never let a Spotlight failure surface to the user.
         }
+    }
+
+    /// A project's open tasks, or none for a project whose notes are only in the cloud: reading them
+    /// would download every such project's notes at each launch, for an index nobody asked to update.
+    /// They are indexed the first reindex after the file is on this Mac.
+    @available(macOS 15.0, *)
+    private static func openTasks(of project: ProjectEntity) throws -> [TaskEntity] {
+        let handle = try resolveNotesHandle(project: project.folder)
+        guard !CloudFile.isCloudOnly(URL(fileURLWithPath: handle.notesPath)) else { return [] }
+        return try notesShow(handle: handle).todos
+            .filter { !$0.checked }
+            .map { TaskEntity.make(projectKey: project.id, folder: project.folder, todo: $0) }
     }
 }

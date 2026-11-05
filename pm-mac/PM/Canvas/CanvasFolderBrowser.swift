@@ -272,6 +272,10 @@ final class CanvasFolderBrowser: NSView {
     /// room the disk has left.
     func updateStatus() {
         guard model.options.statusBar else { return }
+        guard model.loaded else {
+            statusBar.stringValue = "Loading…"
+            return
+        }
         statusBar.stringValue = Self.status(total: model.listing.total, selected: surface.selectedURLs.count,
                                             available: Self.available(at: model.location))
     }

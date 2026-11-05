@@ -285,6 +285,7 @@ final class CanvasFolderCardTests: XCTestCase {
     func testTheListingFollowsTheFolder() {
         make(["one.md"])
         let model = CanvasFolderModel(url: root)
+        model.waitForReads()
         defer { model.stop() }
         XCTAssertEqual(model.listing.total, 1)
         make(["two.md"])
@@ -301,9 +302,11 @@ final class CanvasFolderCardTests: XCTestCase {
         try Data(count: 10).write(to: root.appendingPathComponent("a.txt"))
         try Data(count: 900).write(to: root.appendingPathComponent("b.txt"))
         let model = CanvasFolderModel(url: root)
+        model.waitForReads()
         defer { model.stop() }
         XCTAssertEqual(model.listing.entries.map(\.name), ["a.txt", "b.txt"])
         model.options.sort = .size
+        model.waitForReads()
         XCTAssertEqual(model.listing.entries.map(\.name), ["b.txt", "a.txt"])
     }
 
@@ -311,10 +314,12 @@ final class CanvasFolderCardTests: XCTestCase {
     func testOpeningAFolderRowReadsItAndClosingForgetsIt() {
         make(["Docs/brief.md", "Docs/Specs/one.md"], folders: ["Docs", "Docs/Specs"])
         let model = CanvasFolderModel(url: root)
+        model.waitForReads()
         defer { model.stop() }
         let docs = root.appendingPathComponent("Docs")
         model.expand(docs)
         model.expand(docs.appendingPathComponent("Specs"))
+        model.waitForReads()
         XCTAssertEqual(model.children[docs]?.entries.map(\.name), ["Specs", "brief.md"])
         model.collapse(docs)
         XCTAssertTrue(model.children.isEmpty)
@@ -325,13 +330,16 @@ final class CanvasFolderCardTests: XCTestCase {
     func testTheCardGoesIntoItsFoldersAndBack() throws {
         make(["top.md", "Docs/brief.md"], folders: ["Docs", "Docs/Specs"])
         let model = CanvasFolderModel(url: root)
+        model.waitForReads()
         defer { model.stop() }
         XCTAssertFalse(model.isInside)
         XCTAssertTrue(model.go(to: root.appendingPathComponent("Docs")))
+        model.waitForReads()
         XCTAssertTrue(model.isInside)
         XCTAssertEqual(model.listing.entries.map(\.name), ["Specs", "brief.md"])
         XCTAssertEqual(model.parent.standardizedFileURL.path, root.standardizedFileURL.path)
         XCTAssertTrue(model.go(to: model.parent))
+        model.waitForReads()
         XCTAssertFalse(model.isInside)
     }
 
@@ -343,6 +351,7 @@ final class CanvasFolderCardTests: XCTestCase {
         try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: sibling) }
         let model = CanvasFolderModel(url: root)
+        model.waitForReads()
         defer { model.stop() }
         XCTAssertFalse(model.go(to: sibling))
         XCTAssertFalse(model.go(to: root.deletingLastPathComponent()))
@@ -354,13 +363,62 @@ final class CanvasFolderCardTests: XCTestCase {
     func testAFolderDeletedUnderTheCardSendsItHome() throws {
         make(["top.md"], folders: ["Docs"])
         let model = CanvasFolderModel(url: root)
+        model.waitForReads()
         defer { model.stop() }
         model.go(to: root.appendingPathComponent("Docs"))
+        model.waitForReads()
         try FileManager.default.removeItem(at: root.appendingPathComponent("Docs"))
         let deadline = Date().addingTimeInterval(3)
         while model.isInside, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
         XCTAssertFalse(model.isInside)
         XCTAssertEqual(model.listing.entries.map(\.name), ["top.md"])
+    }
+
+    // MARK: Reads off the main thread
+
+    /// A card goes up without reading its folder: the read is the card's own queue's, and the card says
+    /// it is loading until it lands. A stalled cloud provider holds a directory read indefinitely.
+    func testTheCardGoesUpBeforeItsFolderIsRead() {
+        make(["one.md"])
+        let model = CanvasFolderModel(url: root)
+        defer { model.stop() }
+        XCTAssertFalse(model.loaded)
+        XCTAssertEqual(model.listing.total, 0)
+        XCTAssertTrue(model.waitForReads())
+        XCTAssertTrue(model.loaded)
+        XCTAssertEqual(model.listing.entries.map(\.name), ["one.md"])
+    }
+
+    /// A read that doesn't return — standing in for read() of a dataless file whose provider has
+    /// stalled — leaves the main thread turning, and the answer comes when the read does.
+    func testABlockedFileReadLeavesTheMainThreadFree() {
+        let stuck = DispatchSemaphore(value: 0)
+        var answer: Data??
+        let started = Date()
+        BackgroundFileRead.read(root.appendingPathComponent("stuck.png"), with: { _ in
+            stuck.wait()
+            return Data([1, 2, 3])
+        }) { answer = .some($0) }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.1, "asking blocked the caller")
+        var turns = 0
+        let deadline = Date().addingTimeInterval(0.5)
+        while Date() < deadline {
+            DispatchQueue.main.async { turns += 1 }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertGreaterThan(turns, 10, "the main queue stopped while the read was stuck")
+        XCTAssertNil(answer, "the blocked read answered")
+        stuck.signal()
+        let landing = Date().addingTimeInterval(3)
+        while answer == nil, Date() < landing { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        XCTAssertEqual(answer ?? nil, Data([1, 2, 3]), "the read's answer never came back to main")
+    }
+
+    /// A file on this Mac isn't cloud-only; a path that isn't there isn't either.
+    func testALocalFileIsNotCloudOnly() {
+        make(["here.md"])
+        XCTAssertFalse(CloudFile.isCloudOnly(root.appendingPathComponent("here.md")))
+        XCTAssertFalse(CloudFile.isCloudOnly(root.appendingPathComponent("gone.md")))
     }
 
     /// The icon view draws what a file looks like: a picture gets a thumbnail from Quick Look,
@@ -403,6 +461,7 @@ final class CanvasFolderCardTests: XCTestCase {
         TestApp.start()
         let host = host ?? Host()
         let model = CanvasFolderModel(url: root, options: options)
+        model.waitForReads()
         let browser = CanvasFolderBrowser(model: model, linkZones: CanvasLinkZones())
         browser.host = host
         // A harness window: the ordinary window ground, and never key unless a test asks.
@@ -422,6 +481,12 @@ final class CanvasFolderCardTests: XCTestCase {
             model.stop()
         }
         return (browser, host)
+    }
+
+    /// Let the model's reads land and the browser draw them — what a key that opens a folder waits on.
+    private func settle(_ browser: CanvasFolderBrowser) {
+        browser.model.waitForReads()
+        browser.reloadNow()
     }
 
     private func names(_ outline: CanvasFolderOutline) -> [String] {
@@ -492,8 +557,10 @@ final class CanvasFolderCardTests: XCTestCase {
         pick(0, in: outline)
         key("\u{F701}", code: 125, flags: [.command, .numericPad, .function], to: outline)
         XCTAssertTrue(browser.model.isInside)
+        settle(browser)
         XCTAssertEqual(names(outline), ["inside.md"])
         key("\u{F700}", code: 126, flags: [.command, .numericPad, .function], to: outline)
+        settle(browser)
         XCTAssertFalse(browser.model.isInside)
         XCTAssertEqual(outline.selectedURLs.map(\.lastPathComponent), ["Docs"])
     }
@@ -506,6 +573,7 @@ final class CanvasFolderCardTests: XCTestCase {
         let outline = browser.outline
         pick(0, in: outline)
         key("\u{F703}", code: 124, flags: [.numericPad, .function], to: outline)
+        settle(browser)
         XCTAssertEqual(names(outline), ["Docs", "brief.md", "top.md"])
         XCTAssertEqual(browser.model.expanded.map(CanvasFolderEntry.key), [CanvasFolderEntry.key(root.appendingPathComponent("Docs"))])
         key("\u{F702}", code: 123, flags: [.numericPad, .function], to: outline)
@@ -525,6 +593,7 @@ final class CanvasFolderCardTests: XCTestCase {
         XCTAssertEqual((editor.string as NSString).substring(with: editor.selectedRange()), "draft")
         editor.insertText("final", replacementRange: editor.selectedRange())
         outline.window?.makeFirstResponder(outline)
+        settle(browser)
         let renamed = root.appendingPathComponent("final.md")
         XCTAssertTrue(FileManager.default.fileExists(atPath: renamed.path))
         XCTAssertEqual(outline.selectedURLs.map(\.lastPathComponent), ["final.md"])
@@ -654,6 +723,7 @@ final class CanvasFolderCardTests: XCTestCase {
         let (browser, _) = browser()
         browser.window?.makeFirstResponder(browser.outline)
         browser.actions.newFolder()
+        browser.model.waitForReads()
         XCTAssertTrue(CanvasFolderListing.isFolder(root.appendingPathComponent("untitled folder")))
         XCTAssertEqual(browser.outline.selectedURLs.map(\.lastPathComponent), ["untitled folder"])
         XCTAssertTrue(browser.outline.window?.firstResponder is NSTextView, "its name is being edited")

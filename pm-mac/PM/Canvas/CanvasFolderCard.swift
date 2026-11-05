@@ -206,6 +206,12 @@ struct CanvasFolderListing: Equatable {
 /// its disclosure triangle, and a burst of changes (a copy of forty files) is read once, a moment after
 /// it settles.
 ///
+/// **Read off the main thread.** A folder on a cloud drive whose provider has stalled can hold a
+/// directory read for as long as it likes, and cards are built while a window is restored at launch.
+/// Every read runs on the card's own serial queue and lands back on main; until the first one has, the
+/// card is `loaded == false` and says it is loading. Each card has its own queue, so one stuck folder
+/// leaves the others' cards alone. A read that lands after the card moved elsewhere is dropped.
+///
 /// **Sync status has no vnode.** An upload finishing changes the provider's records, not the folder, so
 /// while anything listed is uploading or downloading the folder is read again every couple of seconds,
 /// and not at all once everything has settled.
@@ -219,7 +225,10 @@ final class CanvasFolderModel: ObservableObject {
     /// this is where you happen to be looking, like how far a list is scrolled, and a board opened
     /// tomorrow should show the folder the card is of rather than wherever it was left.
     @Published private(set) var location: URL
-    @Published private(set) var listing: CanvasFolderListing
+    @Published private(set) var listing = CanvasFolderListing()
+    /// Whether the folder showing has been read yet. False from the card going up, or going into
+    /// another folder, until that read lands.
+    @Published private(set) var loaded = false
     /// The folders opened under `location` with their disclosure triangles, each with what is in it.
     @Published private(set) var children: [URL: CanvasFolderListing] = [:]
     /// Where files being dragged over the card would go if let go now — the folder showing, or one of
@@ -234,6 +243,16 @@ final class CanvasFolderModel: ObservableObject {
         }
     }
 
+    /// Where this card's reads run — its own, so a folder that never answers stalls only its card.
+    private let reads = DispatchQueue(label: "Folio.folder-card-reads", qos: .userInitiated)
+    /// Bumped by every read asked for, so only the newest one's answer is published.
+    private var generation = 0
+    /// Reads asked for and not yet landed. See `waitForReads`, for tests.
+    private(set) var readsInFlight = 0
+    /// What callers asked to do once the folder has been read — select what a command made, say.
+    /// Run after the newest read lands, so they see it.
+    private var afterRead: [() -> Void] = []
+
     private var watches: [URL: DispatchSourceFileSystemObject] = [:]
     private var pending: DispatchWorkItem?
     private var poll: DispatchWorkItem?
@@ -244,9 +263,8 @@ final class CanvasFolderModel: ObservableObject {
         self.url = url
         location = url
         self.options = options
-        listing = CanvasFolderListing.read(url, options: options)
         watch(url)
-        schedulePoll()
+        refresh(force: true)
     }
 
     /// Whether the card is showing a folder inside the one it is of, and so has a way back.
@@ -260,25 +278,28 @@ final class CanvasFolderModel: ObservableObject {
 
     /// Show `folder`, if it is the card's own folder or one inside it. A folder elsewhere is not this
     /// card's to wander into — it answers false, and the caller opens it where folders open.
+    /// `then` runs once the folder has been read, or at once when it is already the one showing.
     @discardableResult
-    func go(to folder: URL) -> Bool {
+    func go(to folder: URL, then: (() -> Void)? = nil) -> Bool {
         guard Self.contains(url, folder), CanvasFolderListing.isFolder(folder) else { return false }
-        guard !Self.same(folder, location) else { return true }
+        guard !Self.same(folder, location) else { then?(); return true }
         unwatchAll()
         children = [:]
         location = folder
-        listing = CanvasFolderListing.read(folder, options: options)
+        listing = CanvasFolderListing()
+        loaded = false
         watch(folder)
-        schedulePoll()
+        refresh(force: true, then: then)
         return true
     }
 
-    /// Open a folder row with its triangle: read what is in it, and keep watching it.
+    /// Open a folder row with its triangle: open at once with nothing in it, read what is in it in the
+    /// background, and keep watching it.
     func expand(_ folder: URL) {
         guard children[folder] == nil, CanvasFolderListing.isFolder(folder) else { return }
-        children[folder] = CanvasFolderListing.read(folder, options: options)
+        children[folder] = CanvasFolderListing()
         watch(folder)
-        schedulePoll()
+        refresh(force: true)
     }
 
     /// Close a folder row — and every folder opened inside it, as the Finder forgets them too.
@@ -290,28 +311,78 @@ final class CanvasFolderModel: ObservableObject {
         }
     }
 
-    /// Read the folder showing and every opened folder again, publishing only what changed.
-    func refresh(force: Bool = false) {
+    /// Read the folder showing and every opened folder again, in the background, publishing only what
+    /// changed. `then` runs once that read has landed.
+    func refresh(force: Bool = false, then: (() -> Void)? = nil) {
+        if let then { afterRead.append(then) }
+        generation += 1
+        let asked = generation
+        let location = location, folders = Array(children.keys), options = options
+        readsInFlight += 1
+        reads.async { [weak self] in
+            let read = Self.read(location: location, folders: folders, options: options)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.readsInFlight -= 1
+                    guard asked == self.generation else { return }
+                    self.publish(read, force: force)
+                }
+            }
+        }
+    }
+
+    /// One read, off main: the folder showing — nil when it has gone — and each opened folder still there.
+    private nonisolated static func read(location: URL, folders: [URL], options: CanvasFolderOptions)
+        -> (listing: CanvasFolderListing?, children: [URL: CanvasFolderListing]) {
+        // Fresh URLs: resource values are cached on the URL object and only flushed by a turn of the
+        // run loop, which this queue never has — a folder deleted since would still say it's there.
+        func fresh(_ url: URL) -> URL { URL(fileURLWithPath: url.path, isDirectory: true) }
+        let listing = CanvasFolderListing.isFolder(fresh(location))
+            ? CanvasFolderListing.read(fresh(location), options: options) : nil
+        var children: [URL: CanvasFolderListing] = [:]
+        for folder in folders where CanvasFolderListing.isFolder(fresh(folder)) {
+            children[folder] = CanvasFolderListing.read(folder, options: options)
+        }
+        return (listing, children)
+    }
+
+    private func publish(_ read: (listing: CanvasFolderListing?, children: [URL: CanvasFolderListing]), force: Bool) {
         // The folder you were in went away — deleted, or renamed out from under the card. Back to the
         // one the card is of, rather than an empty card with a way back to nowhere.
-        if isInside, !CanvasFolderListing.isFolder(location) {
-            go(to: url)
+        guard let next = read.listing else {
+            if isInside { go(to: url) } else { loaded = true; listing = CanvasFolderListing() }
             return
         }
-        let next = CanvasFolderListing.read(location, options: options)
         if force || next != listing { listing = next }
+        if !loaded { loaded = true }
         var opened = children
         for folder in children.keys {
-            guard CanvasFolderListing.isFolder(folder) else {
+            // The newest read was asked after every expand, so a folder it hasn't got has gone. One
+            // collapsed since is not in `children` and is skipped.
+            guard let fresh = read.children[folder] else {
                 opened[folder] = nil
                 unwatch(folder)
                 continue
             }
-            let read = CanvasFolderListing.read(folder, options: options)
-            if force || read != opened[folder] { opened[folder] = read }
+            if force || fresh != opened[folder] { opened[folder] = fresh }
         }
         if opened != children { children = opened }
         schedulePoll()
+        let waiting = afterRead
+        afterRead = []
+        waiting.forEach { $0() }
+    }
+
+    /// Spin the main run loop until every read asked for has landed, or `timeout` passes. Tests only:
+    /// the app never waits on a read.
+    @discardableResult
+    func waitForReads(timeout: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while readsInFlight > 0, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        return readsInFlight == 0
     }
 
     /// Whether anything the card lists is mid-upload or mid-download.
@@ -410,7 +481,7 @@ struct CanvasFolderHeader: View {
                     .truncationMode(.middle)
                 // The status bar says it when it is showing; saying it twice is noise.
                 if !folder.options.statusBar {
-                    Text(CanvasFolderListing.countLabel(folder.listing.total))
+                    Text(folder.loaded ? CanvasFolderListing.countLabel(folder.listing.total) : "Loading…")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }

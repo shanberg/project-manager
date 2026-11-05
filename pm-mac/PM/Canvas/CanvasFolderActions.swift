@@ -28,7 +28,8 @@ final class CanvasFolderActions: NSObject, QLPreviewPanelDataSource, QLPreviewPa
     /// anything else opens in its app, and several folders open in the Finder.
     func open(_ urls: [URL]) {
         guard !urls.isEmpty else { return NSSound.beep() }
-        if urls.count == 1, CanvasFolderListing.isFolder(urls[0]), model.go(to: urls[0]) {
+        if urls.count == 1, CanvasFolderListing.isFolder(urls[0]),
+           model.go(to: urls[0], then: { [weak browser] in browser?.reloadNow() }) {
             browser.reloadNow()
             return
         }
@@ -43,9 +44,11 @@ final class CanvasFolderActions: NSObject, QLPreviewPanelDataSource, QLPreviewPa
     func goUp() {
         guard model.isInside else { return NSSound.beep() }
         let from = model.location
-        model.go(to: model.parent)
+        model.go(to: model.parent) { [weak browser] in
+            browser?.reloadNow()
+            browser?.surface.select([from], scrolling: true)
+        }
         browser.reloadNow()
-        browser.surface.select([from], scrolling: true)
     }
 
     // MARK: Changing files
@@ -173,18 +176,17 @@ final class CanvasFolderActions: NSObject, QLPreviewPanelDataSource, QLPreviewPa
     func newFolder() {
         let target = CanvasFolderDrop.freeName(for: "untitled folder", in: model.location, fileManager: files)
         do { try files.createDirectory(at: target, withIntermediateDirectories: false) } catch { return NSSound.beep() }
-        finishMaking([target], "New Folder")
-        browser.surface.beginRename(target)
+        finishMaking([target], "New Folder") { [weak browser] in browser?.surface.beginRename(target) }
     }
 
     /// What a command made: undoable as a trip to the Trash, and selected.
-    private func finishMaking(_ made: [URL], _ actionName: String) {
+    private func finishMaking(_ made: [URL], _ actionName: String, then: (() -> Void)? = nil) {
         guard !made.isEmpty else { return }
         registerUndo(actionName) { actions in
             for url in made { try? actions.files.trashItem(at: url, resultingItemURL: nil) }
             actions.refresh()
         }
-        refresh(selecting: made)
+        refresh(selecting: made, then: then)
     }
 
     func copy(_ urls: [URL]) {
@@ -296,10 +298,14 @@ final class CanvasFolderActions: NSObject, QLPreviewPanelDataSource, QLPreviewPa
 
     // MARK: Reading again
 
-    private func refresh(selecting urls: [URL]? = nil) {
-        model.refresh()
-        browser.reloadNow()
-        if let urls { browser.surface.select(urls, scrolling: true) }
+    /// Read the folder again; once it lands, draw it, select `urls`, then `then`.
+    private func refresh(selecting urls: [URL]? = nil, then: (() -> Void)? = nil) {
+        model.refresh { [weak browser] in
+            guard let browser else { return }
+            browser.reloadNow()
+            if let urls { browser.surface.select(urls, scrolling: true) }
+            then?()
+        }
     }
 
     private func registerUndo(_ name: String, _ action: @escaping (CanvasFolderActions) -> Void) {

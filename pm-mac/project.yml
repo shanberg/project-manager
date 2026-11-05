@@ -284,6 +284,7 @@ targets:
       - path: PM/Canvas/CanvasAddCommand.swift
       - path: PM/Canvas/CanvasDrop.swift
       - path: PM/Canvas/CanvasFolderCard.swift
+      - path: PM/Shared/CloudFile.swift
       - path: PM/Canvas/CanvasFolderOptions.swift
       - path: PM/Canvas/CanvasFolderBrowser.swift
       - path: PM/Canvas/CanvasFolderIconGrid.swift

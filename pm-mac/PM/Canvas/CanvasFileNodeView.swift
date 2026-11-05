@@ -62,6 +62,12 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// What draws the folder: the Finder's list or icons, kept across rebuilds of the card's content so
     /// the selection and what is opened survive a zoom past reading and back.
     private(set) var folderBrowser: CanvasFolderBrowser?
+    /// The file's bytes as last read, with its modification date then — what a picture, a PDF or prose
+    /// is drawn from. Read off main by `contents(of:)`, since cards are built during the launch
+    /// restore and a stalled cloud provider holds a read indefinitely.
+    private var loaded: (url: URL, stamp: Date?, data: Data?)?
+    /// The file a read is out for, so a rebuild meanwhile doesn't ask again.
+    private var loading: URL?
 
     override init(node: CanvasNode, board: CanvasBoardView, scale: Double) {
         super.init(node: node, board: board, scale: scale)
@@ -257,8 +263,9 @@ final class CanvasFileNodeView: CanvasNodeView {
             // Fitted, or filling the card when the card is nearly the picture's own shape — which is
             // what keeps a board of photographs from being a board of grey margins. See
             // `CanvasPictureView`, which owns that judgement and the reason it is not a setting.
+            if CloudFile.isCloudOnly(url) { return cloudOnlyView(url) }
             let image = CanvasPictureView()
-            image.image = NSImage(contentsOf: url)
+            image.image = contents(of: url)?.flatMap(NSImage.init(data:))
             image.setAccessibilityLabel(url.lastPathComponent)
             return image
 
@@ -266,8 +273,10 @@ final class CanvasFileNodeView: CanvasNodeView {
             // A PDF card is a *preview*, so the view is stripped of everything that would invite
             // interaction it isn't going to get: one page, scaled to the card, no scrolling, no
             // shadow. Opening it properly is what the strip's button is for.
+            if CloudFile.isCloudOnly(url) { return cloudOnlyView(url) }
+            guard let read = contents(of: url) else { return NSView() }
             let view = PDFView()
-            view.document = PDFDocument(url: url)
+            view.document = read.flatMap(PDFDocument.init(data:))
             view.autoScales = true
             view.displayMode = .singlePage
             view.displaysPageBreaks = false
@@ -288,7 +297,9 @@ final class CanvasFileNodeView: CanvasNodeView {
                         .canvasLinkZones(linkZones))
             }
             if let document { return documentEditor(document, url: url) }
-            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            if CloudFile.isCloudOnly(url) { return cloudOnlyView(url) }
+            guard let read = contents(of: url) else { return NSView() }
+            let text = read.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             let shown = subpath.flatMap { section(named: $0, in: text) } ?? text
             return NSHostingView(rootView:
                 CanvasRenderedProse(prose: shown, style: textStyle, zoom: contentZoom,
@@ -422,6 +433,54 @@ final class CanvasFileNodeView: CanvasNodeView {
         StoreRegistry.shared.release(projectStoreKey)
         projectStore = nil
         projectStoreKey = nil
+    }
+
+    /// The bytes of `url`. Nil until the first read lands, which rebuilds the card; a file changed since
+    /// its last read is read again and drawn as it was meanwhile. The inner nil is a file that couldn't
+    /// be read.
+    private func contents(of url: URL) -> Data?? {
+        let stamp = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        let had = loaded.flatMap { $0.url == url ? Optional($0.data) : nil }
+        if let loaded, loaded.url == url, loaded.stamp == stamp { return .some(loaded.data) }
+        guard loading != url else { return had }
+        loading = url
+        BackgroundFileRead.read(url) { [weak self] data in
+            guard let self, loading == url else { return }
+            loading = nil
+            loaded = (url, stamp, data)
+            contentChanged()
+        }
+        return had
+    }
+
+    /// A file that is in the cloud and not on this Mac. Not read: reading downloads it, and a card
+    /// coming into view isn't asking for that. Opening it is.
+    private func cloudOnlyView(_ url: URL) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 4
+        stack.alignment = .centerX
+
+        let glyph = NSImageView()
+        glyph.image = NSImage(systemSymbolName: "icloud.and.arrow.down", accessibilityDescription: nil)
+        glyph.contentTintColor = .tertiaryLabelColor
+        glyph.symbolConfiguration = .init(pointSize: 22, weight: .regular)
+
+        let name = NSTextField(labelWithString: url.lastPathComponent)
+        name.font = .systemFont(ofSize: 11)
+        name.textColor = .secondaryLabelColor
+        name.alignment = .center
+        name.lineBreakMode = .byTruncatingMiddle
+
+        let note = NSTextField(labelWithString: "Online only. Downloads when you open it.")
+        note.font = .systemFont(ofSize: 10.5)
+        note.textColor = .tertiaryLabelColor
+        note.alignment = .center
+
+        for view in [glyph, name, note] { stack.addArrangedSubview(view) }
+        name.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor, constant: -16).isActive = true
+        stack.setAccessibilityLabel("\(url.lastPathComponent), online only")
+        return stack
     }
 
     private func missingView(_ path: String) -> NSView {

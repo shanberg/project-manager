@@ -56,7 +56,7 @@ enum ProjectLinksSync {
                     // A closed board that is only in the cloud is left until it is on this Mac — opening
                     // it downloads it, and the next read of the notes syncs it. A sync runs for every
                     // project whose notes are read, so reading each canvas would pull every board down.
-                    guard CanvasStoreRegistry.isOpen(url) || !isCloudOnly(url) else {
+                    guard CanvasStoreRegistry.isOpen(url) || !CloudFile.isCloudOnly(url) else {
                         Log.write("links sync: \(canvas) is only in the cloud, left until it's downloaded")
                         finished(notesPath, projectPath: projectPath)
                         return
@@ -69,15 +69,6 @@ enum ProjectLinksSync {
                 }
             }
         }
-    }
-
-    /// Whether `url` is a placeholder for a file that is in the cloud and not on this Mac — what iCloud
-    /// and Google Drive both leave when they free space. Asked of the file's flags, which says so
-    /// without downloading it; reading it is what downloads it.
-    nonisolated static func isCloudOnly(_ url: URL) -> Bool {
-        var info = stat()
-        guard stat(url.path, &info) == 0 else { return false }
-        return info.st_flags & UInt32(SF_DATALESS) != 0
     }
 
     // MARK: Pieces
