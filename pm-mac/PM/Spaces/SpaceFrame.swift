@@ -479,6 +479,13 @@ final class SpaceFrame {
         refresh()
     }
 
+    /// A layout's name typed into its row — the same rename as typing into its tab chip, so it carries
+    /// the chips, asks before replacing a name that's taken, and is one ⌘Z.
+    func renameWorkspace(_ old: String, to new: String) {
+        split?.renameWorkspace(named: old, to: new)
+        refresh()
+    }
+
     // MARK: Marks
 
     func setPinned(_ id: String, _ on: Bool) {
@@ -925,6 +932,8 @@ struct SpaceFrameSidebar: View {
     @State private var fieldWidth: CGFloat = 220
     @State private var ruleHover = false
     @State private var sidebarHover = false
+    /// The layout whose row's name is being typed into, if one is.
+    @State private var renamingWorkspace: String?
     /// A card's icon is one thing whether it's on a row or a favourite: adding to (or taking off)
     /// Favourites moves it between the two (`matchedGeometryEffect`).
     @Namespace private var glyphs
@@ -1087,7 +1096,15 @@ struct SpaceFrameSidebar: View {
     private func workspaceRow(_ workspace: SpaceFrame.Workspace, index: Int) -> some View {
         let into = SpaceFrame.DropSpot.workspace(workspace.name)
         let count = frame.workspaces.count
-        return SpaceSidebarRow(title: workspace.name, stack: workspace.hosts, on: workspace.showing) {
+        return SpaceSidebarRow(title: workspace.name, stack: workspace.hosts, on: workspace.showing,
+                               editing: renamingWorkspace == workspace.name,
+                               rename: { renamingWorkspace = workspace.name },
+                               endRename: { new in
+                                   // Once: Escape then the blur that follows would otherwise commit.
+                                   guard renamingWorkspace == workspace.name else { return }
+                                   renamingWorkspace = nil
+                                   if let new { frame.renameWorkspace(workspace.name, to: new) }
+                               }) {
             frame.showWorkspace(workspace.name)
         }
         .overlay(dropRing(frame.dropSpot == into))
@@ -1098,8 +1115,12 @@ struct SpaceFrameSidebar: View {
             if index == count - 1, frame.dropSpot == .workspaceSlot(count) { insertionMark().offset(y: 2) }
         }
         .opacity(frame.draggingWorkspace == workspace.name ? 0.4 : 1)
-        .contextMenu { Button("Delete Workspace") { frame.deleteWorkspace(workspace.name) } }
-        .onDrag { frame.beginWorkspaceDrag(workspace.name) }
+        .contextMenu {
+            Button("Rename Layout\u{2026}") { renamingWorkspace = workspace.name }
+            Button("Delete Workspace") { frame.deleteWorkspace(workspace.name) }
+        }
+        // Not while its name is being typed into: a drag there is selecting text.
+        .onDrag(if: renamingWorkspace != workspace.name) { frame.beginWorkspaceDrag(workspace.name) }
         .onDrop(of: [SpaceRowDrag.type, ProjectTabDrag.type], delegate: SpaceRowDropTarget(
             frame: frame, owned: [into, .workspaceSlot(index), .workspaceSlot(index + 1)]) { point in
             frame.draggingWorkspace != nil ? .workspaceSlot(point.y < 16 ? index : index + 1) : into
@@ -1459,13 +1480,24 @@ struct SpaceSidebarRow: View {
     let tap: () -> Void
     @State private var hover = false
 
+    /// Rename in place: double-click the row (or its Rename) puts a field where the title is.
+    /// Return or clicking away keeps what's typed; Escape abandons. Nil `rename` = not renameable.
+    var editing = false
+    var rename: (() -> Void)?
+    /// The edit's end: the typed name, or nil when abandoned or unchanged.
+    var endRename: ((String?) -> Void)?
+    @State private var draft = ""
+    @FocusState private var fieldFocused: Bool
+
     /// A folder's +, shown on hover: the add list, into that folder.
     var addMenu: (() -> NSMenu)?
 
     init(title: String, symbol: String? = nil, stack: [String?] = [], trailing: String? = nil, on: Bool = false,
-         dim: Bool = false, disclosure: Bool? = nil, addMenu: (() -> NSMenu)? = nil, tap: @escaping () -> Void) {
+         dim: Bool = false, disclosure: Bool? = nil, addMenu: (() -> NSMenu)? = nil, editing: Bool = false,
+         rename: (() -> Void)? = nil, endRename: ((String?) -> Void)? = nil, tap: @escaping () -> Void) {
         self.title = title; self.symbol = symbol; self.stack = stack; self.trailing = trailing
         self.on = on; self.front = on; self.dim = dim; self.disclosure = disclosure; self.addMenu = addMenu
+        self.editing = editing; self.rename = rename; self.endRename = endRename
         self.tap = tap
     }
 
@@ -1501,8 +1533,19 @@ struct SpaceSidebarRow: View {
                 SpaceRowGlyph(host: host, symbol: symbol, title: title, size: 16)
                     .matchedGlyph(cardID, in: glyphs)
             }
-            Text(title).font(.system(size: 13)).lineLimit(1)
-                .foregroundStyle(dim && !front ? .secondary : .primary)
+            if editing {
+                TextField("", text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13)).lineLimit(1)
+                    .focused($fieldFocused)
+                    .onSubmit { finishRename(keeping: true) }
+                    .onExitCommand { finishRename(keeping: false) }
+                    .onChange(of: fieldFocused) { _, focused in if !focused { finishRename(keeping: true) } }
+                    .onAppear { draft = title; fieldFocused = true }
+            } else {
+                Text(title).font(.system(size: 13)).lineLimit(1)
+                    .foregroundStyle(dim && !front ? .secondary : .primary)
+            }
             Spacer(minLength: 2)
             if let trailing, !hover { Text(trailing).font(.system(size: 11)).foregroundStyle(.tertiary).monospacedDigit() }
             if let addMenu, hover {
@@ -1543,10 +1586,23 @@ struct SpaceSidebarRow: View {
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(picked ? Color.accentColor : .clear, lineWidth: 1.5))
         .contentShape(Rectangle())
         .onHover { hover = $0 }
-        .onTapGesture(perform: tap)
-        .accessibilityElement(children: .combine)
+        .onTapGesture { if !editing { tap() } }
+        // Simultaneous, so the first click still shows the row at once instead of waiting out the
+        // double-click interval.
+        .simultaneousGesture(TapGesture(count: 2).onEnded { if !editing { rename?() } })
+        .accessibilityElement(children: editing ? .contain : .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(front ? .isSelected : [])
+    }
+}
+
+extension SpaceSidebarRow {
+    /// Guarded on `editing`: ending blurs the field, and the blur would end it again — after Escape,
+    /// committing what Escape refused.
+    fileprivate func finishRename(keeping: Bool) {
+        guard editing else { return }
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        endRename?(keeping && !name.isEmpty && name != title ? name : nil)
     }
 }
 
