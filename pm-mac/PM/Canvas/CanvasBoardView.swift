@@ -437,8 +437,10 @@ final class CanvasBoardView: NSView {
     /// Where a tile carried by its handlebar would land if let go now, and what it would do there.
     /// See `previewDrop`.
     var dropMark: (rect: CanvasRect, title: String)?
-    /// Whether `dropMark` is a sidebar row's (`rowDrop`), for the drag leaving to take down.
-    var rowMarked = false
+    /// Whether `dropMark` is a drag's from outside the tiles — a sidebar row's (`rowDrop`) or a dropped
+    /// note, file or link's (`markTileDrop`) — for the drag leaving to take down, and for the mark to
+    /// carry its own words, since nothing is drawn under the pointer to say them.
+    var tileDropMarked = false
     /// Whether the workspace is zoomed out to the board so you can pick its cards (⌥B). The tiling is
     /// still up — nothing about the workspace is set aside — and only what is drawn, and what a click
     /// means, changes. See `beginPicking` and `showsTiles`.
@@ -475,6 +477,14 @@ final class CanvasBoardView: NSView {
     var tabSlide: CanvasTabSlide? {
         didSet { tileHandleView.tabSlideChanged(from: oldValue) }
     }
+    /// The tabs a tab drag carries: the selected ones when it began on one of several selected, else
+    /// that tab alone. See `tabGroup(for:)`.
+    var tabDragGroup: [String] = []
+    /// A press on one of several selected tabs keeps them selected, so they can be dragged together;
+    /// let go without dragging and it was a click on that tab alone. See `tiledMouseDown`.
+    var tabClickPending: String?
+    /// Where a ⇧-click on a tab runs from: the tab last clicked or ⌘-clicked.
+    var tabSelectionAnchor: String?
     /// The tab under the pointer, and whether the pointer is on its close button — drawn as a hover.
     var hoveredTab: (card: String, onClose: Bool)? {
         didSet {

@@ -214,6 +214,7 @@ final class CanvasTileHandleView: NSView {
     private func drawTabStrips(_ board: CanvasBoardView, _ scale: Double) {
         guard let session = board.tiling, !board.isPicking else { return }
         let space = CanvasTiling.space(of: session.area)
+        let picked = board.selection.filter(session.cards.contains)
         for strip in session.tabStrips {
             // The band's own ground, rounded on the tile's outer corners and run a radius in under the
             // card, so the card's corners round off into the strip rather than onto the ground behind.
@@ -269,12 +270,31 @@ final class CanvasTileHandleView: NSView {
 
             let key = strip.cards.sorted().joined(separator: "\u{1}")
             let shown = strip.cards[strip.showing]
+            // Several tabs selected: each says so with the accent, under the chip. One selected is just
+            // the tile you are on, which the chip already says.
+            if picked.count > 1 {
+                let radius = Self.tabRadius / scale
+                NSColor.controlAccentColor.withAlphaComponent(0.2).setFill()
+                for (index, card) in strip.cards.enumerated() where picked.contains(card) {
+                    NSBezierPath(roundedRect: rects[index], xRadius: radius, yRadius: radius).fill()
+                }
+            }
             drawChip(in: chipRect(for: key, card: shown, at: rects[strip.showing]), scale)
 
             let draggedIndex = slide.flatMap { strip.cards.firstIndex(of: $0.card) }
             for (index, card) in strip.cards.enumerated() where index != draggedIndex {
+                // The rest of a group being slid are coming along: faded where they stand until it lands.
+                let carried = slide != nil && board.tabDragGroup.contains(card)
+                if carried {
+                    NSGraphicsContext.current?.cgContext.setAlpha(0.35)
+                    NSGraphicsContext.current?.cgContext.beginTransparencyLayer(auxiliaryInfo: nil)
+                }
                 drawTab(card, in: rects[index], showing: index == strip.showing, board, scale,
                         hoverable: slide == nil, named: strip.namesShown)
+                if carried {
+                    NSGraphicsContext.current?.cgContext.endTransparencyLayer()
+                    NSGraphicsContext.current?.cgContext.setAlpha(1)
+                }
             }
             if let draggedIndex {
                 drawTab(strip.cards[draggedIndex], in: rects[draggedIndex],

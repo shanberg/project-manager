@@ -67,6 +67,13 @@ extension CanvasPageLinkHost {
     func loadDroppedFile(_ url: URL) {}
 }
 
+/// A `dropFallback` that takes some drags before the page is asked about them — the board, for a tile's
+/// edges and tab strip (`CanvasBoardView.tilingTakesDrop`).
+@MainActor
+protocol CanvasPageDropClaim: AnyObject {
+    func claimsDrop(_ sender: NSDraggingInfo) -> Bool
+}
+
 @MainActor
 final class CanvasPageView: WKWebView {
     /// Where a drop goes when the page has nowhere to put it. Nil leaves every drop to the page.
@@ -355,7 +362,8 @@ final class CanvasPageView: WKWebView {
     /// everything, since there is nowhere else for a drop to go. And **files on a page you are working
     /// in** are the page's wherever they land — `pageTakesFiles` is a rule about the card, not about
     /// what is under the pointer, so a file dropped on Figma goes into Figma rather than becoming a
-    /// card beside it.
+    /// card beside it. Except on a tile's edges and tab strip, which are the tiling's
+    /// (`CanvasPageDropClaim`): a note dropped there goes up beside the page.
     ///
     /// Only the board is crossed in and out of here. The page is entered once and kept entered for as
     /// long as the drag is over this view, because it has to go on being asked: the pointer moves onto
@@ -379,6 +387,16 @@ final class CanvasPageView: WKWebView {
             leavePage(sender)
             holder = .load
             return .link
+        }
+        // **A tile's edges and tab strip are the tiling's**, so a note dragged there goes up beside the
+        // page or into its tabs rather than into it — the middle is still the page's, files and all.
+        // Not a drag the page started: its own reorders and text drags reach its edges too.
+        if let fallback = dropFallback, (sender.draggingSource as AnyObject?) !== self,
+           (fallback as? CanvasPageDropClaim)?.claimsDrop(sender) == true {
+            leavePage(sender)
+            let crossing = holder != .fallback
+            holder = .fallback
+            return crossing ? fallback.draggingEntered(sender) : fallback.draggingUpdated(sender)
         }
         let answer = pageEntered ? super.draggingUpdated(sender) : enterPage(sender)
         pageAsks += 1

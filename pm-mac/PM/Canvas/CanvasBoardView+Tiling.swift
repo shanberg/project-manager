@@ -1445,6 +1445,77 @@ extension CanvasBoardView {
         if changed { onTilingChanged?() }
     }
 
+    // MARK: Several tabs at once
+
+    /// The tabs a drag or a tab's menu is about: every selected tab, in strip order, when `card` is one of
+    /// several selected — else `card` alone.
+    func tabGroup(for card: String) -> [String] {
+        guard let tiling, selection.count > 1, selection.contains(card) else { return [card] }
+        let group = tiling.cards.filter(selection.contains)
+        return group.count > 1 ? group : [card]
+    }
+
+    /// ⌘-click on a tab: in or out of the selection, the tab showing unchanged. The last one out leaves
+    /// the tile's showing tab selected rather than nothing.
+    func toggleTabSelection(_ card: String) {
+        guard let tiling else { return }
+        var picked = selection.filter(tiling.cards.contains)
+        if picked.contains(card) { picked.remove(card) } else { picked.insert(card) }
+        if picked.isEmpty, let shown = tiling.ids.first(where: { tiling.tabs(of: $0).contains(card) }) {
+            picked = [shown]
+        }
+        tabSelectionAnchor = card
+        selection = picked
+    }
+
+    /// ⇧-click on a tab: the run along its strip from the tab last clicked, added to the selection. From a
+    /// tab in another strip — or none — it is the showing tab of this one.
+    func extendTabSelection(to card: String) {
+        guard let tiling else { return }
+        let strip = tiling.tabs(of: card)
+        let from = tabSelectionAnchor.flatMap(strip.firstIndex(of:))
+            ?? strip.firstIndex { tiling.ids.contains($0) } ?? 0
+        guard let to = strip.firstIndex(of: card) else { return }
+        let run = strip[min(from, to)...max(from, to)]
+        selection = selection.filter(tiling.cards.contains).union(run)
+    }
+
+    /// Let go of several tabs slid along a strip: they land together where the one under the pointer was
+    /// let go (`CanvasTabSlide.to`, counted among the strip's tabs without it), in strip order, with that
+    /// one showing. Selected tabs from other tiles come into this one.
+    func moveTabs(_ group: [String], with anchor: String, to slot: Int) {
+        guard var session = tiling else { return }
+        var order = session.tabs(of: anchor).filter { $0 != anchor }
+        order.insert(anchor, at: min(max(0, slot), order.count))
+        let index = order.prefix { $0 != anchor }.filter { !group.contains($0) }.count
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Move Tabs", from: undoFrom) }
+        session.gatherTabs(group, into: anchor, at: index)
+        guard session != tiling else { return }
+        tiling = session
+        setLayout(session.layout, animated: false)
+        onTilingChanged?()
+        selection = Set(group)
+    }
+
+    /// Let go of several tabs carried off their strips: beside a tile or into its tabs, together
+    /// (`CanvasTileSession.landTabs`). They stay selected.
+    func finishDrop(ofTabs group: [String], with anchor: String,
+                    _ drop: (target: String, drop: CanvasTileSession.Drop)) {
+        let undoFrom = beginTilingUndo()
+        defer { endTilingUndo("Move Tabs", from: undoFrom) }
+        dropMark = nil
+        guard var session = tiling else { return }
+        session.landTabs(group, anchor: anchor, on: drop.target, drop.drop)
+        let changed = session != tiling
+        tiling = session
+        if changed { FrameMeter.measure("drop (\(session.ids.count) tiles)", on: self) }
+        setLayout(session.layout, animated: true)
+        overlay.needsDisplay = true
+        if changed { onTilingChanged?() }
+        selection = Set(group)
+    }
+
     /// Drag a boundary: the two tiles either side of it change length, and nothing else moves.
     ///
     /// **Local, and that is the whole design.** The alternative — attributing the drag to one card and

@@ -169,7 +169,8 @@ extension CanvasBoardView {
     /// modal session started there is a nested event loop inside that one. The drop is reported
     /// accepted straight away — it *was* — and the cards go up when there is an answer.
     private func askWhereOutsidersGo(_ files: [URL], frames: [CanvasRect],
-                                     into destination: CanvasCardDestination) -> Bool {
+                                     into destination: CanvasCardDestination,
+                                     beside tile: CanvasTileSession.Placement?) -> Bool {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let outsiders = Self.outside(files, of: store.resolver)
@@ -183,10 +184,10 @@ extension CanvasBoardView {
                     }
                     copies.append(copy)
                     return copy
-                }), frames: frames, asking: false, into: destination)
+                }), frames: frames, asking: false, into: destination, beside: tile)
                 registerCreatedFiles(copies)
             case .pointAt?:
-                commit(.files(files), frames: frames, asking: false, into: destination)
+                commit(.files(files), frames: frames, asking: false, into: destination, beside: tile)
             case nil:
                 break
             }
@@ -234,7 +235,8 @@ extension CanvasBoardView {
     /// the vault would not take it.
     @discardableResult
     func commit(_ drop: CanvasDrop, frames: [CanvasRect], asking: Bool = true,
-                into destination: CanvasCardDestination = .point) -> Bool {
+                into destination: CanvasCardDestination = .point,
+                beside tile: CanvasTileSession.Placement? = nil) -> Bool {
         // Resolved once, here: the tiling below and the placement in `insert` have to agree about
         // whether these cards are going onto a board at all, and asking twice is how they would come
         // to differ.
@@ -265,7 +267,7 @@ extension CanvasBoardView {
             // **A file from outside the vault is a question, and it is asked here.** See
             // `askWhereOutsidersGo`; `asking` is false on the way back through it with the answer.
             if asking, !Self.outside(files, of: store.resolver).isEmpty {
-                return askWhereOutsidersGo(files, frames: frames, into: landing)
+                return askWhereOutsidersGo(files, frames: frames, into: landing, beside: tile)
             }
             insert(cards(files.map(file)), at: nil,
                    actionName: files.count > 1 ? "Add Files" : "Add File", into: landing)
@@ -292,8 +294,15 @@ extension CanvasBoardView {
         // `insert` selects what it made. In document order, so several go up in the order they were
         // dropped. Not while a lens is up: there is no tiled view in front of you to put them in, and
         // the cards have been placed in a frame instead.
+        //
+        // A drop aimed at a tile (`tileDropTarget`) goes there: it is ⌥N's preselection for the length of
+        // this add, so it lands the way an add into a chosen place does — and a place nothing used is
+        // handed back to whatever was chosen before.
         if case .point = landing, isTiled {
+            let chosen = tiling?.preselection
+            if let tile, tiling?.position(of: tile.target) != nil { tiling?.preselection = tile }
             addToTiling(document.nodes.filter { selection.contains($0.id) }.map(\.id))
+            if let tile, tiling?.preselection == tile { tiling?.preselection = chosen }
         }
         return true
     }
@@ -508,8 +517,10 @@ extension CanvasBoardView {
             //
             // Asked before the boundary, whose reach laps a few points onto the strip below it: a tab is
             // a control you aimed at, and the boundary is still one point further up.
+            //
+            // One of several selected tabs keeps them selected: the menu is about all of them.
             if let chip = tabChip(at: where_) {
-                showTab(chip.card)
+                if tabGroup(for: chip.card).count == 1 { showTab(chip.card) }
                 menuTile = chip.card
                 buildCardMenu(menu, id: chip.card, includingTiling: false, includingDelete: false)
                 menu.insertItem(.sectionHeader(title: "Card"), at: 0)
@@ -1578,17 +1589,72 @@ extension CanvasBoardView {
     /// and the tab's own button is a ×. It deletes nothing either way (`removeFromTiling`).
     private func addTabSection(_ menu: NSMenu, id: String) {
         guard let tiling else { return }
-        menu.addItem(.sectionHeader(title: "Tab"))
-        add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:)))
-        add(menu, "Move Tab to Window", #selector(moveMenuTabToWindow(_:)))
-        menu.addItem(tabsPalette())
-        addReplaceWith(menu)
-        if tiling.tabs(of: id).count > 1 {
-            add(menu, "Close Other Tabs", #selector(closeOtherMenuTabs(_:)))
+        let group = tabGroup(for: id)
+        let noun = group.count == 1 ? "Tab" : "\(group.count) Tabs"
+        menu.addItem(.sectionHeader(title: group.count == 1 ? "Tab" : "\(group.count) Tabs"))
+        if group.count == 1 { add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:))) }
+        add(menu, "Move \(noun) to Window", #selector(moveMenuTabToWindow(_:)))
+        addMoveToBoard(menu, noun: noun)
+        if group.count == 1 {
+            menu.addItem(tabsPalette())
+            addReplaceWith(menu)
+            if tiling.tabs(of: id).count > 1 {
+                add(menu, "Close Other Tabs", #selector(closeOtherMenuTabs(_:)))
+            }
         }
         menu.addItem(.separator())
-        addDeleteCard(menu)
-        add(menu, "Close Tab", #selector(removeMenuTile(_:)))
+        if group.count == 1 { addDeleteCard(menu) }
+        add(menu, "Close \(noun)", #selector(closeMenuTabs(_:)))
+    }
+
+    /// Move to Project ▸ and Move to Space ▸: the right-clicked tabs off this board and onto another's
+    /// (`Spaces.move`). Projects are the recent ones, as the dock's Move to Project offers.
+    private func addMoveToBoard(_ menu: NSMenu, noun: String) {
+        let here = store.url.standardizedFileURL
+        let projects = ProjectIndex.shared.recents.filter { !here.path.contains("/\($0.name)/") }
+        if !projects.isEmpty {
+            let list = NSMenu()
+            for project in projects {
+                add(list, ProjectCodes.display(project.name), #selector(moveMenuTabsToProject(_:)))
+                    .representedObject = project.name
+            }
+            menu.addItem(withTitle: "Move \(noun) to Project", action: nil, keyEquivalent: "").submenu = list
+        }
+        let spaces = Spaces.shared.all.filter { Spaces.shared.canvas(of: $0.id)?.standardizedFileURL != here }
+        if !spaces.isEmpty {
+            let list = NSMenu()
+            for space in spaces {
+                add(list, space.title, #selector(moveMenuTabsToSpace(_:))).representedObject = space.id
+            }
+            menu.addItem(withTitle: "Move \(noun) to Space", action: nil, keyEquivalent: "").submenu = list
+        }
+    }
+
+    /// The right-clicked tabs that can leave this board: a tab out in a window of its own stays.
+    private var movableMenuTabs: [String] {
+        guard let id = menuTile else { return [] }
+        return tabGroup(for: id).filter { nodeViews[$0]?.lentTo == nil }
+    }
+
+    @objc func moveMenuTabsToProject(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        let ids = movableMenuTabs
+        guard !ids.isEmpty else { return NSSound.beep() }
+        Spaces.shared.move(ids, fromCanvas: store.url, toProject: name)
+    }
+
+    @objc func moveMenuTabsToSpace(_ sender: NSMenuItem) {
+        guard let target = sender.representedObject as? String, let to = Spaces.shared.canvas(of: target) else { return }
+        let ids = movableMenuTabs
+        guard !ids.isEmpty else { return NSSound.beep() }
+        if !FileManager.default.fileExists(atPath: to.path) { try? Spaces.shared.makeCanvas(at: to) }
+        Spaces.shared.move(ids, fromCanvas: store.url, toCanvas: to)
+    }
+
+    /// Close Tab, or Close 3 Tabs: out of the workspace, the cards left on the board.
+    @objc func closeMenuTabs(_ sender: Any?) {
+        guard let id = menuTile else { return }
+        closeInTiling(tabGroup(for: id))
     }
 
     /// Right-clicking a strip anywhere but on a tab: the tile's menu. What can go into it first — a new
@@ -1676,7 +1742,7 @@ extension CanvasBoardView {
 
     @objc func moveMenuTabToWindow(_ sender: Any?) {
         guard let id = menuTile else { return }
-        restoringMaximized { moveToWindow([id]) }
+        restoringMaximized { moveToWindow(tabGroup(for: id), showing: id) }
     }
 
     @objc func pullMenuTabOut(_ sender: Any?) {

@@ -155,11 +155,27 @@ extension CanvasBoardView {
             }
             let chip = tabChip(at: where_)
             let id = chip?.card ?? owner
+            // ⌘ adds a tab to the selection or takes it out, and ⇧ selects the run along the strip from
+            // the last one clicked — neither changes which tab shows. (Finder's list, and Safari's tabs.)
+            if let chip, event.modifierFlags.contains(.command) { return toggleTabSelection(chip.card) }
+            if let chip, event.modifierFlags.contains(.shift) { return extendTabSelection(to: chip.card) }
             let wasShowing = chip != nil && showingTopTab(id) != nil
-            if chip != nil { showTab(id) } else { selection = [id] }
+            tabDragGroup = chip != nil ? tabGroup(for: id) : []
+            if chip != nil, tabDragGroup.count > 1 {
+                // One of several selected: they stay selected, so a drag carries them all; a click
+                // without one is a click on this tab alone, settled on the way up.
+                tabClickPending = id
+            } else if chip != nil {
+                showTab(id)
+                tabSelectionAnchor = id
+            } else {
+                selection = [id]
+            }
             if chip == nil, dragWindow(clicks: clicks, event: event) { return }
             if clicks == 2 { return toggleMaximizeTile(id) }
-            guard tiling?.tileFrames[id] != nil else { return }
+            // A tab that isn't showing — one of several selected, left as it was — has no tile frame of
+            // its own; it is still up.
+            guard chip != nil ? tiling?.position(of: id) != nil : tiling?.tileFrames[id] != nil else { return }
             gesture = chip != nil ? .slideTab(id, from: where_, wasShowing: wasShowing)
                                   : .placeTile(id, base: tiling?.tileFrames ?? [:], drop: nil, pulling: false)
             return
@@ -250,6 +266,7 @@ extension CanvasBoardView {
             // way it runs: up or down off a top strip, sideways off a side one.
             if strip.distanceOff(now) > Self.tabTearDistance / liveScale {
                 tabSlide = nil
+                tabClickPending = nil
                 gesture = .placeTile(card, base: tiling?.tileFrames ?? [:], drop: nil, pulling: true)
                 return mouseDragged(with: event)
             }
@@ -263,8 +280,16 @@ extension CanvasBoardView {
             let offset = min(strip.start(of: chips[chips.count - 1]) - strip.start(of: chips[index]),
                              max(strip.start(of: chips[0]) - strip.start(of: chips[index]), moved))
             let centre = strip.middle(of: chips[index]) + offset
-            let to = chips.indices.filter { $0 != index && strip.middle(of: chips[$0]) < centre }.count
+            // A tab after it is passed once the centre reaches its middle, and one before it once the
+            // centre is past its middle — so the ends, where the slide stops with the centre exactly on
+            // the last tab's middle or the first's, are places it can land. (Strict both ways, a tab
+            // could never be slid to the end of a strip of tabs the same width.)
+            let to = chips.indices.filter {
+                $0 != index && ($0 > index ? strip.middle(of: chips[$0]) <= centre
+                                           : strip.middle(of: chips[$0]) < centre)
+            }.count
             let next = CanvasTabSlide(card: card, from: index, offset: offset, to: to)
+            tabClickPending = nil
             if next != tabSlide { tabSlide = next }
 
         case .placeTile(let id, let base, let drop, let pulling):
@@ -487,11 +512,18 @@ extension CanvasBoardView {
             // Let go along the strip: the order is the one the slide showed. A press that never moved
             // was a click, and showed the tab when it went down — or, on the tab already showing, was a
             // click on the tile's handle, which opens its controls (`showingTopTab`).
-            if let slide = tabSlide { moveTab(card, to: slide.to) }
-            else if wasShowing, event.clickCount == 1, showingTopTab(card) != nil {
+            if let slide = tabSlide {
+                if tabDragGroup.count > 1 { moveTabs(tabDragGroup, with: card, to: slide.to) }
+                else { moveTab(card, to: slide.to) }
+            } else if tabClickPending == card {
+                showTab(card)
+                tabSelectionAnchor = card
+            } else if wasShowing, event.clickCount == 1, showingTopTab(card) != nil {
                 CanvasTileControls.shared.gripClicked(self, tile: card, viaTab: true)
             }
             tabSlide = nil
+            tabClickPending = nil
+            tabDragGroup = []
 
         case .placeTile(let id, let base, let drop, let pulling):
             // Let go: what the mark said happens, and the tiles move — once, now.
@@ -501,10 +533,14 @@ extension CanvasBoardView {
                 overlay.needsDisplay = true
                 previewDrop(of: id, nil, pulling: pulling)
                 let frame = satelliteFrame(for: base[id])
-                if pulling { moveToWindow([id], frame: frame) } else { moveTileToWindow(id, frame: frame) }
+                if pulling { moveToWindow(tabDragGroup.count > 1 ? tabDragGroup : [id], showing: id, frame: frame) }
+                else { moveTileToWindow(id, frame: frame) }
+                tabDragGroup = []
                 break
             }
-            finishDrop(of: id, drop, pulling: pulling)
+            if pulling, tabDragGroup.count > 1, let drop { finishDrop(ofTabs: tabDragGroup, with: id, drop) }
+            else { finishDrop(of: id, drop, pulling: pulling) }
+            tabDragGroup = []
         case .move(let from, _, _):
             store.endInteraction()
             stepIn(pressedAt: from, released: event)
@@ -1586,8 +1622,12 @@ extension CanvasBoardView {
         }
         for id in previous.union(selection) { nodeViews[id]?.selectionChanged() }
         overlay.needsDisplay = true
-        // A selected tile shows its handlebar, and that is drawn under the cards.
-        if isTiled { refreshTileHandles() }
+        // A selected tile shows its handlebar, and that is drawn under the cards. Selected tabs are
+        // drawn on the strips.
+        if isTiled {
+            refreshTileHandles()
+            tileHandleView.needsDisplay = true
+        }
         onSelectionChanged?(selection)
     }
 

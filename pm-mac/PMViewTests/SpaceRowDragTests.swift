@@ -125,6 +125,84 @@ final class SpaceRowDragTests: XCTestCase {
         XCTAssertEqual(tiles.drop(ofCard: "a", at: CanvasPoint(x: b.midX, y: b.midY))?.drop, .beside(.tab))
     }
 
+    /// A note dropped from outside goes beside a tile at its edges and into its tabs everywhere else —
+    /// never in a tile's place, which would take what you were looking at out of view.
+    func testADroppedNoteGoesBesideAtTheEdgesAndIntoTheTabsInTheMiddle() throws {
+        let tiles = session([["a"], ["b"]])
+        let a = try XCTUnwrap(tiles.tileFrames["a"])
+        let middle = tiles.drop(ofNewCardAt: CanvasPoint(x: a.midX, y: a.midY))
+        XCTAssertEqual(middle?.target, "a")
+        XCTAssertEqual(middle?.drop, .beside(.tab))
+        XCTAssertEqual(tiles.drop(ofNewCardAt: CanvasPoint(x: a.maxX - 5, y: a.midY))?.drop, .beside(.right))
+        XCTAssertEqual(tiles.drop(ofNewCardAt: CanvasPoint(x: a.midX, y: a.maxY - 5))?.drop, .beside(.below))
+        XCTAssertEqual(tiles.drop(ofNewCardAt: CanvasPoint(x: a.midX, y: a.minY + 2))?.drop, .beside(.tab))
+        XCTAssertNil(tiles.drop(ofNewCardAt: CanvasPoint(x: -50, y: -50)), "off the tiles is nowhere")
+    }
+
+    /// The edges and the strip are the tiling's; the middle is the card's — a web tile's page keeps it.
+    func testOnlyATilesEdgesAndStripAreTheTilings() throws {
+        let tiles = session([["a"], ["b"]])
+        let a = try XCTUnwrap(tiles.tileFrames["a"])
+        XCTAssertFalse(tiles.isTilingGround(CanvasPoint(x: a.midX, y: a.midY)))
+        XCTAssertTrue(tiles.isTilingGround(CanvasPoint(x: a.minX + 5, y: a.midY)))
+        XCTAssertTrue(tiles.isTilingGround(CanvasPoint(x: a.midX, y: a.minY + 2)))
+        XCTAssertFalse(tiles.isTilingGround(CanvasPoint(x: -50, y: -50)))
+    }
+
+    /// Landing where the mark said: the Figma tile keeps its place, and the note opens a column beside it.
+    func testADroppedNoteLandsBesideTheTileItWasAimedAt() {
+        var tiles = session([["figma"]])
+        tiles.preselection = .init(target: "figma", side: .right)
+        tiles.add("note", at: tiles.preselection)
+        XCTAssertEqual(tiles.ids, ["figma", "note"])
+        XCTAssertEqual(tiles.columns.count, 2)
+        XCTAssertNil(tiles.preselection, "the place is used up")
+    }
+
+    // MARK: Several tabs at once
+
+    private func tabbed(_ columns: [[[String]]]) -> CanvasTileSession {
+        CanvasTileSession(columns: columns.map { CanvasTiling.Column($0.map { CanvasTiling.Tile($0) }) },
+                          area: area, restoreVisible: area)
+    }
+
+    /// Slid along their strip, selected tabs land together where the dragged one was let go, in order.
+    func testSelectedTabsMoveAlongTheirStripTogether() {
+        var tiles = tabbed([[["a", "b", "c", "d", "e"]]])
+        tiles.gatherTabs(["b", "d"], into: "d", at: 3)
+        XCTAssertEqual(tiles.tabs(of: "a"), ["a", "c", "e", "b", "d"])
+        XCTAssertEqual(tiles.ids, ["d"], "the one dragged shows")
+        tiles.gatherTabs(["b", "d"], into: "b", at: 0)
+        XCTAssertEqual(tiles.tabs(of: "a"), ["b", "d", "a", "c", "e"])
+    }
+
+    /// Selected tabs in other tiles come into the strip, and a tile they leave empty goes.
+    func testSelectedTabsFromOtherTilesJoinTheStrip() {
+        var tiles = tabbed([[["a", "b"]], [["x"], ["y", "z"]]])
+        tiles.gatherTabs(["b", "x", "z"], into: "b", at: 1)
+        XCTAssertEqual(tiles.tabs(of: "a"), ["a", "b", "x", "z"])
+        XCTAssertEqual(tiles.tabs(of: "y"), ["y"])
+        XCTAssertEqual(tiles.columns.count, 2, "x's tile went; y's stayed")
+    }
+
+    /// Carried off the strip and let go beside a tile, the group is a new tile of its own, in order.
+    func testSelectedTabsPulledOutMakeOneTileBeside() {
+        var tiles = tabbed([[["a", "b", "c"]], [["x"]]])
+        tiles.landTabs(["b", "c"], anchor: "c", on: "x", .beside(.right))
+        XCTAssertEqual(tiles.tabs(of: "a"), ["a"])
+        XCTAssertEqual(tiles.tabs(of: "c"), ["b", "c"])
+        XCTAssertEqual(tiles.columns.count, 3)
+        XCTAssertEqual(tiles.ids.last, "c")
+    }
+
+    /// Let go on another tile's tabs, the group joins them, after what is there.
+    func testSelectedTabsJoinAnotherTilesTabs() {
+        var tiles = tabbed([[["a", "b", "c"]], [["x", "y"]]])
+        tiles.landTabs(["a", "c"], anchor: "a", on: "x", .beside(.tab))
+        XCTAssertEqual(tiles.tabs(of: "x"), ["x", "y", "a", "c"])
+        XCTAssertEqual(tiles.tabs(of: "b"), ["b"])
+    }
+
     func testLandingANewCardBesideAndInPlace() throws {
         var tiles = session([["a"], ["b"]])
         tiles.add("x", at: .init(target: "b", side: .right))

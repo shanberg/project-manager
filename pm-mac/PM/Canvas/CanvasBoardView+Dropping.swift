@@ -56,9 +56,10 @@ struct CanvasDropSession {
 /// `CanvasSnapping.move` a dragged card uses. A preview with its own opinion would be a board that
 /// shows you one thing and makes another.
 ///
-/// Not in a tiled view, where there is no free space to show a card being placed in: a drop there
-/// still makes the card, where the pointer was, and the tiling takes it from there.
-extension CanvasBoardView {
+/// Not in a tiled view, where there is no free space to show a card being placed in: a drop there is
+/// marked on the tiles instead — beside the tile under the pointer, or into its tabs — and goes up
+/// there (`markTileDrop`).
+extension CanvasBoardView: CanvasPageDropClaim {
     /// Registering here rather than in the board's initialiser keeps the list beside the code that
     /// interprets it. See `CanvasDrop.read` for what each type becomes.
     func registerForDrops() {
@@ -70,11 +71,13 @@ extension CanvasBoardView {
         let drop = CanvasDrop.read(sender.draggingPasteboard, cardsType: Self.pasteboardType)
         dropSession = CanvasDropSession(sequence: sender.draggingSequenceNumber, drop: drop,
                                         pasteboardChange: sender.draggingPasteboard.changeCount)
-        if let filing = fileIntoFolder(sender) { return filing }
+        if let filing = fileIntoFolder(sender) { clearTileDropMark(); return filing }
         guard let drop else { return [] }
         if !isTiled {
             place(sender)
             carry(sender, as: drop)
+        } else {
+            markTileDrop(sender)
         }
         return .copy
     }
@@ -87,13 +90,15 @@ extension CanvasBoardView {
         if session.pasteboardChange != sender.draggingPasteboard.changeCount {
             return rereadDrop(sender)
         }
-        if let filing = fileIntoFolder(sender) { return filing }
+        if let filing = fileIntoFolder(sender) { clearTileDropMark(); return filing }
         guard let drop = session.drop else { return [] }
         if !isTiled {
             place(sender)
             // Back off a folder card: the files turn into the cards they would make again.
             // And a picture that landed since the drag's was drawn (see `face(forFile:)`) is drawn in.
             if dropSession?.original == nil || dropSession?.picture == nil { carry(sender, as: drop) }
+        } else {
+            markTileDrop(sender)
         }
         return .copy
     }
@@ -115,7 +120,7 @@ extension CanvasBoardView {
             dropMark = mark
             overlay.needsDisplay = true
         }
-        rowMarked = mark != nil
+        tileDropMarked = mark != nil
         guard target != nil else { return [] }
         let allowed = sender.draggingSourceOperationMask
         return allowed.contains(.move) ? .move : allowed.contains(.copy) ? .copy : .generic
@@ -154,6 +159,51 @@ extension CanvasBoardView {
         announceTiling()
     }
 
+    // MARK: A note, file or link over the tiles
+
+    /// Something dragged in from outside over the tiles goes where the pointer says, the way a sidebar
+    /// row does: beside a tile at its edges, into its tabs on its strip or in its middle
+    /// (`CanvasTileSession.drop(ofNewCardAt:)`). Off the tiles, it goes where the next card goes.
+    ///
+    /// This is how a note goes up beside the Figma file you have open. A web tile keeps the middle —
+    /// files dropped there are the page's (`CanvasPageLinkHost.pageTakesFiles`) — and gives its edges
+    /// and strip to the tiling (`tilingTakesDrop`).
+    func tileDropTarget(at point: CanvasPoint) -> (target: String, drop: CanvasTileSession.Drop)? {
+        guard !isPicking else { return nil }
+        return tiling?.drop(ofNewCardAt: point)
+    }
+
+    /// Whether a drag over a web tile at `sender`'s pointer is the tiling's rather than the page's: on
+    /// the tile's edges or strip, carrying something the board can make a card of. Asked by
+    /// `CanvasPageView` before the page.
+    func tilingTakesDrop(_ sender: NSDraggingInfo) -> Bool {
+        guard let tiling, !isPicking, SpaceRowDrag.card(in: sender, for: store.url) == nil,
+              tiling.isTilingGround(canvasPoint(convert(sender.draggingLocation, from: nil))) else { return false }
+        return CanvasDrop.read(sender.draggingPasteboard, cardsType: Self.pasteboardType) != nil
+    }
+
+    func claimsDrop(_ sender: NSDraggingInfo) -> Bool { tilingTakesDrop(sender) }
+
+    /// Mark where the drop would land, on the tiles as they stand — nothing moves until it's let go.
+    private func markTileDrop(_ sender: NSDraggingInfo) {
+        let target = tileDropTarget(at: canvasPoint(convert(sender.draggingLocation, from: nil)))
+        let mark = target.flatMap { target in
+            tiling?.dropMark(target.drop, on: target.target).map { (rect: $0, title: target.drop.title) }
+        }
+        if dropMark?.rect != mark?.rect || dropMark?.title != mark?.title {
+            dropMark = mark
+            overlay.needsDisplay = true
+        }
+        tileDropMarked = mark != nil
+    }
+
+    private func clearTileDropMark() {
+        guard tileDropMarked else { return }
+        tileDropMarked = false
+        dropMark = nil
+        overlay.needsDisplay = true
+    }
+
     // MARK: Filing into a folder card
 
     /// Files over a folder card go into its folder, the Finder's drop — or into the folder row under
@@ -188,6 +238,8 @@ extension CanvasBoardView {
               pasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
         else { return nil }
         let point = convert(sender.draggingLocation, from: nil)
+        // A folder tile's edges and strip are the tiling's, like any tile's: the files go beside it.
+        if tiling?.isTilingGround(canvasPoint(point)) == true { return nil }
         guard case .node(let id) = hitTester.hit(canvasPoint(point)), let model = folderModel(id) else { return nil }
         // Over one of its folders: that folder. Anywhere else on the card: the folder it is showing.
         if let row = (nodeViews[id] as? CanvasFileNodeView)?.folderRow(at: point),
@@ -243,6 +295,7 @@ extension CanvasBoardView {
         dropSession?.picture = nil
         guard let drop else {
             giveBack(sender)
+            clearTileDropMark()
             dropSession?.drop = nil
             overlay.ghost = nil
             showGrid(false)
@@ -252,6 +305,8 @@ extension CanvasBoardView {
         if !isTiled {
             place(sender)
             carry(sender, as: drop)
+        } else {
+            markTileDrop(sender)
         }
         return .copy
     }
@@ -270,11 +325,7 @@ extension CanvasBoardView {
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        if rowMarked {
-            rowMarked = false
-            dropMark = nil
-            overlay.needsDisplay = true
-        }
+        clearTileDropMark()
         if let sender { giveBack(sender) }
         endDropPreview()
     }
@@ -293,7 +344,7 @@ extension CanvasBoardView {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         defer { endDropPreview() }
         if let id = SpaceRowDrag.card(in: sender, for: store.url) {
-            rowMarked = false
+            tileDropMarked = false
             dropMark = nil
             overlay.needsDisplay = true
             guard let target = rowTarget(id, at: canvasPoint(convert(sender.draggingLocation, from: nil))) else {
@@ -319,12 +370,19 @@ extension CanvasBoardView {
         }
         // Placed once more at the pointer's last position, so the card lands where the guides said it
         // would at the moment you let go rather than where they said it one update ago.
-        var frames = drop.frames(centredOn: canvasPoint(convert(sender.draggingLocation, from: nil)))
+        let point = canvasPoint(convert(sender.draggingLocation, from: nil))
+        var frames = drop.frames(centredOn: point)
         if !isTiled, session != nil {
             place(sender)
             frames = dropSession?.landing ?? frames
         }
-        guard commit(drop, frames: frames) else { return false }
+        clearTileDropMark()
+        // Over a tile: where the mark said. A drop's middle is always a tab, never a swap.
+        let tile = tileDropTarget(at: point).flatMap { target -> CanvasTileSession.Placement? in
+            guard case .beside(let side) = target.drop else { return nil }
+            return .init(target: target.target, side: side)
+        }
+        guard commit(drop, frames: frames, beside: tile) else { return false }
         if dropSession?.original != nil { settle(sender, onto: frames) }
         return true
     }

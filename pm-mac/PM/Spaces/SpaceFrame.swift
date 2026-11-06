@@ -133,6 +133,11 @@ final class SpaceFrame {
         let board = self.board
         let tiled = Set(board?.tiling?.ids ?? [])
         let front = board?.focusedTile ?? (tiled.count == 1 ? tiled.first : nil)
+        if let front, recentFronts.first != front {
+            recentFronts.removeAll { $0 == front }
+            recentFronts.insert(front, at: 0)
+        }
+        recentFronts = Array(recentFronts.filter { document.node(id: $0) != nil }.prefix(64))
         let lookups = CanvasExistingCards.lookups(isFolder: { board?.isFolderPath($0) ?? false })
         let sounding = CanvasLinkNodeView.playingCards(onCanvas: canvas)
         let sections = CanvasItems.sections(of: document, showing: [], lookups: lookups)
@@ -538,10 +543,36 @@ final class SpaceFrame {
         guard let node = store.document.node(id: id) else { return }
         if SpaceCardMarks.isPinned(node) { return setPinned(id, false) }
         guard let board else { return }
+        // **Closing the card in front goes to the one you were on before it**, as a browser does — into
+        // its slot, so the layout keeps its shape. See `nextFront`.
+        let tiling = board.tiling
+        let front = board.focusedTile ?? (tiling?.ids.count == 1 ? tiling?.ids.first : nil)
+        let document = store.document
+        let next = id == front ? tiling.flatMap {
+            Self.nextFront(closing: id, recent: recentFronts, tabs: $0.tabs(of: id)) { document.node(id: $0) != nil }
+        } : nil
         noteClosed(id)
+        if let next, tiling?.cards.contains(next) == false {
+            board.replaceInTiling(id, with: next, animated: false)
+        }
         board.select([id])
         board.deleteSelection()
+        if let next { show(next) }
         refresh()
+    }
+
+    /// The cards that have been in front, most recent first: where closing the one in front goes.
+    @ObservationIgnored private var recentFronts: [String] = []
+
+    /// Where closing `closed`, the card in front, sends you: the card in front before it that is still
+    /// on the board (`recent`, most recent first) — a tab of the same tile first, when it had others,
+    /// so closing a tab stays in its tile. Nil for nowhere remembered, which leaves the tiling's own
+    /// rule (the neighbouring tab, or the board).
+    static func nextFront(closing closed: String, recent: [String], tabs: [String],
+                          exists: (String) -> Bool) -> String? {
+        let candidates = recent.filter { $0 != closed && exists($0) }
+        if tabs.count > 1 { return candidates.first(where: tabs.contains) }
+        return candidates.first
     }
 
     /// ⌘W: the card in front, closed as above. False when there's none, so the window closes instead.

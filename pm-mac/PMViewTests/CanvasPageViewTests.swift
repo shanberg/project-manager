@@ -294,6 +294,47 @@ final class CanvasPageViewTests: XCTestCase {
         XCTAssertEqual(board.calls, ["entered"])
     }
 
+    /// **A tile's edges are the tiling's**, even on a page that takes files: a note dragged there goes
+    /// up beside the page, and the page is never told it arrived.
+    func testFilesOnATilesEdgesAreTheBoardsEvenWhereThePageTakesThem() {
+        let host = MenuHost()
+        host.pageTakesFiles = true
+        page.linkHost = host
+        board.claimsEverything = true
+        let drag = FakeDrag(at: page.convert(paragraph, to: nil), in: window, carrying: Self.file)
+        XCTAssertEqual(page.draggingEntered(drag), .copy)
+        _ = page.draggingUpdated(drag)
+        XCTAssertEqual(board.calls, ["entered", "updated"])
+        XCTAssertTrue(page.performDragOperation(drag))
+        XCTAssertEqual(board.calls.last, "performed")
+    }
+
+    /// Off the edges again, the file is the page's, and the board hears the drag leave.
+    func testFilesGoBackToThePageOffATilesEdges() {
+        let host = MenuHost()
+        host.pageTakesFiles = true
+        page.linkHost = host
+        board.claimsEverything = true
+        let drag = FakeDrag(at: page.convert(paragraph, to: nil), in: window, carrying: Self.file)
+        _ = page.draggingEntered(drag)
+        board.claimsEverything = false
+        _ = page.draggingUpdated(drag)
+        XCTAssertEqual(board.calls, ["entered", "exited"])
+    }
+
+    /// A drag the page started — a list it reorders, its own text — stays the page's at its edges.
+    func testThePagesOwnDragsAreNotClaimed() {
+        let host = MenuHost()
+        host.pageTakesFiles = true
+        page.linkHost = host
+        board.claimsEverything = true
+        let drag = FakeDrag(at: page.convert(paragraph, to: nil), in: window, carrying: Self.file)
+        drag.source = page
+        _ = page.draggingEntered(drag)
+        _ = page.draggingUpdated(drag)
+        XCTAssertEqual(board.calls, [], "the board is never offered it")
+    }
+
     private static let file = URL(fileURLWithPath: NSTemporaryDirectory())
         .appendingPathComponent("drop.txt") as NSURL
 
@@ -389,8 +430,11 @@ final class CanvasPageViewTests: XCTestCase {
 }
 
 /// Stands in for the board: says yes to every drag and writes down what it was told.
-private final class Recorder: NSView {
+private final class Recorder: NSView, CanvasPageDropClaim {
     var calls: [String] = []
+    /// Whether this board claims every drag before the page — a tile's edges, standing in.
+    var claimsEverything = false
+    func claimsDrop(_ sender: NSDraggingInfo) -> Bool { claimsEverything }
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { calls.append("entered"); return .copy }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { calls.append("updated"); return .copy }
     override func draggingExited(_ sender: NSDraggingInfo?) { calls.append("exited") }
@@ -420,7 +464,8 @@ private final class FakeDrag: NSObject, NSDraggingInfo {
     var draggingSourceOperationMask: NSDragOperation { .copy }
     var draggedImageLocation: NSPoint { draggingLocation }
     var draggedImage: NSImage? { nil }
-    var draggingSource: Any? { nil }
+    var source: AnyObject?
+    var draggingSource: Any? { source }
     var draggingSequenceNumber: Int { 1 }
     func slideDraggedImage(to screenPoint: NSPoint) {}
     var draggingFormation: NSDraggingFormation = .default

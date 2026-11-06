@@ -595,6 +595,26 @@ struct CanvasTileSession: Equatable {
         return (under.key, drop)
     }
 
+    /// Where something dragged in from outside the board — a note, a file, a link — lands with the pointer
+    /// at `point`: the tile under it, beside it at its edges, and into its tabs on the strip or in the
+    /// middle. Nil off the tiles.
+    ///
+    /// **The middle joins the tabs rather than replacing**, unlike a sidebar row's (`drop(ofCard:at:)`):
+    /// a row chooses which of the board's cards a slot shows, and a drop is a new card — taking a tile
+    /// out of view to show it would cost you the thing you were looking at.
+    func drop(ofNewCardAt point: CanvasPoint) -> (target: String, drop: Drop)? {
+        guard let under = tileFrames.first(where: { $0.value.contains(x: point.x, y: point.y) }) else { return nil }
+        return (under.key, Self.drop(at: point, on: under.value, middle: .beside(.tab),
+                                     tabsOnSide: tabsOnSide(under.key)))
+    }
+
+    /// Whether `point` is on a tile's edges or its tab strip — the tiling's ground — rather than in its
+    /// middle, which is the card's.
+    func isTilingGround(_ point: CanvasPoint) -> Bool {
+        guard let under = tileFrames.first(where: { $0.value.contains(x: point.x, y: point.y) }) else { return false }
+        return Self.drop(at: point, on: under.value, middle: .swap, tabsOnSide: tabsOnSide(under.key)) != .swap
+    }
+
     /// Drop `id`'s tile on `target`'s: change places with it, or come out of its place and go beside
     /// it. The handlebar's whole vocabulary, and what `dropMark` marks before you let go.
     mutating func drop(_ id: String, on target: String, _ drop: Drop) {
@@ -661,6 +681,37 @@ struct CanvasTileSession: Equatable {
         // Beside its own tile: the tile is still there, showing another of its cards now.
         let target = onto == from ? columns[from.column].tiles[from.tile].shown : placement.target
         insert(.init(card), Placement(target: target, side: placement.side))
+    }
+
+    /// Bring `group` together as one run of tabs in `anchor`'s tile, in the order given, starting at
+    /// `index` among that tile's other cards, `anchor` showing. Tabs from other tiles are taken out of
+    /// theirs, and a tile left with nothing goes, as `remove` does. Cards not up are skipped.
+    mutating func gatherTabs(_ group: [String], into anchor: String, at index: Int) {
+        let group = group.filter(cards.contains)
+        guard group.contains(anchor) else { return }
+        for card in group where card != anchor {
+            if let at = position(of: card), at != position(of: anchor) { remove(card) }
+        }
+        guard let home = position(of: anchor) else { return }
+        var tile = columns[home.column].tiles[home.tile]
+        let rest = tile.cards.filter { !group.contains($0) }
+        let at = min(max(0, index), rest.count)
+        tile.cards = Array(rest[..<at]) + group + Array(rest[at...])
+        tile.showing = tile.cards.firstIndex(of: anchor) ?? 0
+        columns[home.column].tiles[home.tile] = tile
+        revealShowingTab(of: anchor)
+    }
+
+    /// Several tabs carried off their strips together and let go on `target`: `anchor` — the one under
+    /// the pointer — goes where one tab would (`pull`), and the rest join it there, after it in the
+    /// order given.
+    mutating func landTabs(_ group: [String], anchor: String, on target: String, _ drop: Drop) {
+        guard case .beside(let side) = drop else { return }
+        pull(anchor, to: Placement(target: target, side: side))
+        guard let home = position(of: anchor) else { return }
+        let tile = columns[home.column].tiles[home.tile].cards
+        let before = tile.prefix { $0 != anchor }.filter { !group.contains($0) }.count
+        gatherTabs(group, into: anchor, at: before)
     }
 
     /// Take a card out of a tile's tabs, keeping the one that was showing if it is still there, else

@@ -111,7 +111,7 @@ final class Spaces {
         CanvasSatelliteDock.shared.refresh()
     }
 
-    private func makeCanvas(at url: URL) throws {
+    func makeCanvas(at url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try SpaceCanvas.empty.write(to: url, options: .withoutOverwriting)
     }
@@ -176,34 +176,82 @@ final class Spaces {
 
     /// The same from any board, a project's included: a row dropped on a space's dock mark.
     func move(_ cardID: String, fromCanvas from: URL, to target: String, then done: @escaping @MainActor () -> Void = {}) {
-        guard let to = canvas(of: target), from.standardizedFileURL != to.standardizedFileURL else { return }
-        let id = space(forCanvas: from)?.id ?? ""
+        guard let to = canvas(of: target) else { return }
         if !FileManager.default.fileExists(atPath: to.path) { try? makeCanvas(at: to) }
+        move([cardID], fromCanvas: from, toCanvas: to, then: done)
+    }
+
+    /// Several cards off one board and onto another — a space's or a project's — side by side, right of
+    /// everything there, as Today. The lines between them go with them; lines to cards left behind go.
+    /// One undo on each board.
+    func move(_ cardIDs: [String], fromCanvas from: URL, toCanvas to: URL,
+              then done: @escaping @MainActor () -> Void = {}) {
+        guard !cardIDs.isEmpty, from.standardizedFileURL != to.standardizedFileURL else { return }
         // Both boards read off main when they aren't open. See `CanvasStoreRegistry.withStores`.
         CanvasStoreRegistry.withStores([from, to]) { [weak self] stores in
             guard let self, stores.count == 2 else { return }
-            move(cardID, from: stores[0], to: stores[1], spaceID: id, target: target)
+            Self.move(cardIDs, from: stores[0], to: stores[1],
+                      names: (from: boardTitle(stores[0]), to: boardTitle(stores[1])))
+            CanvasSatelliteDock.shared.refresh()
             done()
         }
     }
 
-    private func move(_ cardID: String, from source: CanvasDocumentStore, to destination: CanvasDocumentStore,
-                      spaceID id: String, target: String) {
-        guard var node = source.document.node(id: cardID) else { return }
-        let right = destination.document.nodes.map { $0.frame.x + $0.frame.width }.max() ?? 0
-        node.frame = CanvasRect(x: right + 40, y: 0, width: node.frame.width, height: node.frame.height)
-        SpaceCardMarks.setPinned(false, on: &node)
-        SpaceCardMarks.setFavorite(false, on: &node)
-        node.extra[SpaceCardMarks.orderKey] = nil
-        let moved = node
-        destination.change("Move from \(space(id)?.title ?? "Project")") { $0.nodes.append(moved) }
+    /// Several cards to a project's board, found — or made, as opening the project would — off main.
+    func move(_ cardIDs: [String], fromCanvas from: URL, toProject name: String,
+              then done: @escaping @MainActor () -> Void = {}) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let canvas = Result { () -> String in
+                let folder = try resolveProjectPath(nameOrPrefix: name)
+                return try resolveProjectCanvasPath(projectPath: folder)
+                    ?? createProjectCanvas(projectPath: folder)
+            }
+            Task { @MainActor [weak self] in
+                switch canvas {
+                case .success(let path):
+                    self?.move(cardIDs, fromCanvas: from, toCanvas: URL(fileURLWithPath: path), then: done)
+                case .failure(let error):
+                    let alert = NSAlert()
+                    alert.messageText = "Couldn't move to \(ProjectCodes.display(name))."
+                    alert.informativeText = ApiError.from(error).message
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
+    /// What a board is called in an undo name: its space's title, else "Project".
+    private func boardTitle(_ store: CanvasDocumentStore) -> String {
+        space(forCanvas: store.url)?.title ?? "Project"
+    }
+
+    /// The move itself, between two open stores. `names` are the boards' titles, for the undo names.
+    static func move(_ cardIDs: [String], from source: CanvasDocumentStore, to destination: CanvasDocumentStore,
+                     names: (from: String, to: String)) {
+        let ids = Set(cardIDs)
+        let nodes = cardIDs.compactMap(source.document.node(id:))
+        guard !nodes.isEmpty else { return }
+        var x = (destination.document.nodes.map { $0.frame.x + $0.frame.width }.max() ?? 0) + 40
+        let moved = nodes.map { original -> CanvasNode in
+            var node = original
+            node.frame = CanvasRect(x: x, y: 0, width: node.frame.width, height: node.frame.height)
+            x += node.frame.width + 40
+            SpaceCardMarks.setPinned(false, on: &node)
+            SpaceCardMarks.setFavorite(false, on: &node)
+            node.extra[SpaceCardMarks.orderKey] = nil
+            return node
+        }
+        let lines = source.document.edges.filter { ids.contains($0.fromNode) && ids.contains($0.toNode) }
+        destination.change("Move from \(names.from)") {
+            $0.nodes.append(contentsOf: moved)
+            $0.edges.append(contentsOf: lines)
+        }
         destination.save()
-        source.change("Move to \(space(target)?.title ?? "Space")") { doc in
-            doc.nodes.removeAll { $0.id == cardID }
-            doc.edges.removeAll { $0.fromNode == cardID || $0.toNode == cardID }
+        source.change("Move to \(names.to)") { doc in
+            doc.nodes.removeAll { ids.contains($0.id) }
+            doc.edges.removeAll { ids.contains($0.fromNode) || ids.contains($0.toNode) }
         }
         source.save()
-        CanvasSatelliteDock.shared.refresh()
     }
 
     // MARK: Sending a card to a project
