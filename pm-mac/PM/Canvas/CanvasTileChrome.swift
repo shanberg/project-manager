@@ -47,7 +47,8 @@ extension CanvasBoardView {
     /// that would otherwise take it, which is `CanvasTileGripView`'s catcher.
     ///
     /// **A tile with tabs across its top has none.** Its strip is already there, and the strip is what
-    /// moves it — a tab pulls its card, the rest of the strip carries the tile. One with its tabs down
+    /// moves it — a tab pulls its card, the rest of the strip carries the tile — and its showing tab is
+    /// what opens its controls (`showingTopTab`). One with its tabs down
     /// its side keeps its grip, over the card beside them: a column of tabs can be full to the bottom,
     /// with no bare strip left to take hold of.
     func tileHandle(_ id: String) -> (bar: CanvasRect, hit: CanvasRect)? {
@@ -67,6 +68,24 @@ extension CanvasBoardView {
         let hit = CanvasRect(x: frame.midX - Self.gripHitWidth / 2 / scale, y: frame.minY,
                              width: Self.gripHitWidth / scale, height: Self.gripHitHeight / scale)
         return (bar, hit)
+    }
+
+    /// What a tile's controls (`CanvasTileControls`) hang from, in canvas coordinates: its grip's bar, or
+    /// — on a tile with tabs across its top, which has no grip — the tab that is showing.
+    func tileControlsAnchor(_ id: String) -> CanvasRect? {
+        if let handle = tileHandle(id) { return handle.bar }
+        return showingTopTab(id)
+    }
+
+    /// The showing tab of a strip across a tile's top, when `id` is the card it shows: that tile's handle
+    /// for its controls, in place of the grip it doesn't have (`tileHandle(_:)`). Resting on it or
+    /// clicking it while it is already showing opens them, under it. Decided in
+    /// `.claude/mocks/folio-tab-handle.html` (2026-11-05): no cue on the tab, since a tab is already a thing
+    /// you point at.
+    func showingTopTab(_ id: String) -> CanvasRect? {
+        guard let tiling, !isPicking, gripOpensControls, tiling.maximized == nil || tiling.maximized == id,
+              let strip = tiling.tabStrips.first(where: { !$0.onSide && $0.shown == id }) else { return nil }
+        return strip.tabs[strip.showing]
     }
 
     /// The tile whose top-centre zone the pointer is in — the one whose grip shows.

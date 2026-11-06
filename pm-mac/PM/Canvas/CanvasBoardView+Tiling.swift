@@ -1122,6 +1122,8 @@ extension CanvasBoardView {
             // for an animation to cover. Switching tabs does not animate anywhere else either.
             setLayout(session.layout, animated: false)
             onTilingChanged?()
+            // Controls open on the tab that was showing were that card's: they go with it.
+            CanvasTileControls.shared.follow(self)
         }
         selection = [card]
     }
@@ -1133,6 +1135,7 @@ extension CanvasBoardView {
         tiling = session
         setLayout(session.layout, animated: false)
         onTilingChanged?()
+        CanvasTileControls.shared.follow(self)
         selection = [next]
     }
 

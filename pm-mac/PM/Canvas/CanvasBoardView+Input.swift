@@ -154,10 +154,11 @@ extension CanvasBoardView {
             }
             let chip = tabChip(at: where_)
             let id = chip?.card ?? owner
+            let wasShowing = chip != nil && showingTopTab(id) != nil
             if chip != nil { showTab(id) } else { selection = [id] }
             if clicks == 2 { return toggleMaximizeTile(id) }
             guard tiling?.tileFrames[id] != nil else { return }
-            gesture = chip != nil ? .slideTab(id, from: where_)
+            gesture = chip != nil ? .slideTab(id, from: where_, wasShowing: wasShowing)
                                   : .placeTile(id, base: tiling?.tileFrames ?? [:], drop: nil, pulling: false)
             return
         }
@@ -230,7 +231,7 @@ extension CanvasBoardView {
             // A page squeezed too narrow to read says so while the boundary is moving.
             overlay.needsDisplay = true
 
-        case .slideTab(let card, let from):
+        case .slideTab(let card, let from, _):
             guard let strip = tiling?.tabStrips.first(where: { $0.cards.contains(card) }),
                   let index = strip.cards.firstIndex(of: card) else { break }
             // Off the strip by more than a tab's height, and it is a card coming out: from here the drag
@@ -244,6 +245,8 @@ extension CanvasBoardView {
             let chips = strip.tabs
             let moved = strip.along(now) - strip.along(from)
             guard tabSlide != nil || abs(moved) * liveScale >= 3 else { break }
+            // A real drag of the tab: the controls hanging from it go, as they do for a dragged grip.
+            if tabSlide == nil, CanvasTileControls.shared.tile != nil { CanvasTileControls.shared.close() }
             // Along the strip and no further than its ends; it lands after every tab whose middle it
             // has passed.
             let offset = min(strip.start(of: chips[chips.count - 1]) - strip.start(of: chips[index]),
@@ -469,10 +472,14 @@ extension CanvasBoardView {
             tileResizeBaseline = nil
             overlay.needsDisplay = true
 
-        case .slideTab(let card, _):
+        case .slideTab(let card, _, let wasShowing):
             // Let go along the strip: the order is the one the slide showed. A press that never moved
-            // was a click, and showed the tab when it went down.
+            // was a click, and showed the tab when it went down — or, on the tab already showing, was a
+            // click on the tile's handle, which opens its controls (`showingTopTab`).
             if let slide = tabSlide { moveTab(card, to: slide.to) }
+            else if wasShowing, event.clickCount == 1, showingTopTab(card) != nil {
+                CanvasTileControls.shared.gripClicked(self, tile: card)
+            }
             tabSlide = nil
 
         case .placeTile(let id, let base, let drop, let pulling):

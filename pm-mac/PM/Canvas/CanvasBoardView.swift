@@ -334,8 +334,9 @@ final class CanvasBoardView: NSView {
         /// Inside a tiled view: a tab pressed and dragged along its strip, which reorders the strip the
         /// way the window's own tab bar does — the tab follows the pointer and the others slide aside.
         /// Dragged far enough off the strip it becomes `placeTile(… pulling: true)`, and the card comes
-        /// out. `from` is where the press was. See `tabSlide`.
-        case slideTab(String, from: CanvasPoint)
+        /// out. `from` is where the press was. See `tabSlide`. `wasShowing`: the tab was the one showing
+        /// before the press, so a click on it is a click on the tile's handle (`showingTopTab`).
+        case slideTab(String, from: CanvasPoint, wasShowing: Bool)
         /// A press on a link drawn on a card: let go where it started and it opens, move and it is
         /// carried off as a drag the board — or anywhere else — can drop. See `CanvasLinkZones`.
         case link(URL, from: CanvasPoint)
@@ -479,6 +480,13 @@ final class CanvasBoardView: NSView {
         didSet {
             guard hoveredTab?.card != oldValue?.card || hoveredTab?.onClose != oldValue?.onClose else { return }
             tileHandleView.hoverChanged(from: oldValue?.card, to: hoveredTab?.card)
+            // Resting on the tab showing in a strip across a tile's top opens that tile's controls, as
+            // resting on a grip does — the tab is its handle (`showingTopTab`). Not on its close button.
+            let resting = hoveredTab.flatMap { !$0.onClose && showingTopTab($0.card) != nil ? $0.card : nil }
+            if let old = oldValue?.card, old != resting { CanvasTileControls.shared.handleExited(old) }
+            if let resting, resting != oldValue?.card || oldValue?.onClose == true {
+                CanvasTileControls.shared.gripEntered(self, tile: resting)
+            }
         }
     }
     /// The tile whose strip's + is under the pointer, or whose + has its menu open — drawn as a hover,

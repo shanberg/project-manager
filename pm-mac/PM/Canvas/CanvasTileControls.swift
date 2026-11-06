@@ -5,6 +5,8 @@ import SwiftUI
 /// Decided in `.claude/mocks/folio-tile-grip.html`; docs/spaces.md § The frame.
 ///
 /// - Opens when the pointer rests on the grip for 0.3s, or on a click on it. A click never closes it.
+/// - A tile with tabs across its top has no grip: its showing tab is the handle, and the capsule drops
+///   from under that tab instead (`CanvasBoardView.showingTopTab`; `.claude/mocks/folio-tab-handle.html`).
 /// - The grip stays above it and still drags the tile.
 /// - Back, Forward, Reload, the site (click to edit the address, with the address field's suggestions),
 ///   then Pin, Favourite (in a space only), Maximize, Out of the layout, More (the tile's menu). A tile
@@ -31,6 +33,8 @@ final class CanvasTileControls {
     private var leave: DispatchWorkItem?
     private var pointerInCapsule = false
     private var pointerOnGrip = false
+    /// The tile whose handle — grip or showing tab — the pointer is resting on.
+    private var restingOn: String?
     private var resizeWatch: NSObjectProtocol?
 
     func isOpen(on board: CanvasBoardView, tile id: String) -> Bool { self.board === board && tile == id && host != nil }
@@ -39,11 +43,12 @@ final class CanvasTileControls {
 
     func gripEntered(_ board: CanvasBoardView, tile id: String) {
         pointerOnGrip = true
+        restingOn = id
         leave?.cancel()
         guard board.gripOpensControls, !isOpen(on: board, tile: id) else { return }
         rest?.cancel()
         let work = DispatchWorkItem { [weak self, weak board] in
-            guard let self, let board, self.pointerOnGrip, board.gripTile == id else { return }
+            guard let self, let board, self.pointerOnGrip, self.restingOn == id else { return }
             self.open(on: board, tile: id)
         }
         rest = work
@@ -52,8 +57,16 @@ final class CanvasTileControls {
 
     func gripExited() {
         pointerOnGrip = false
+        restingOn = nil
         rest?.cancel()
         scheduleLeave()
+    }
+
+    /// The pointer left a tile's handle — said by a tab strip about one tab, so it only counts when that
+    /// tab is the handle the pointer was resting on.
+    func handleExited(_ id: String) {
+        guard restingOn == id else { return }
+        gripExited()
     }
 
     func gripClicked(_ board: CanvasBoardView, tile id: String) {
@@ -130,24 +143,24 @@ final class CanvasTileControls {
         if inside { leave?.cancel() } else { scheduleLeave() }
     }
 
-    /// The board laid out or redrew: keep the capsule under its grip, or close it if the grip has gone.
+    /// The board laid out or redrew: keep the capsule under its handle, or close it if the handle has gone.
     func follow(_ board: CanvasBoardView) {
         guard self.board === board, host != nil else { return }
-        guard let tile, board.tiling?.ids.contains(tile) == true, board.tileHandle(tile) != nil else { return close() }
+        guard let tile, board.tiling?.ids.contains(tile) == true, board.tileControlsAnchor(tile) != nil else { return close() }
         place()
     }
 
     private func place() {
         guard let board, let tile, let host, let content = host.superview,
-              let handle = board.tileHandle(tile), let frame = board.tiling?.layout.frames[tile] else { return }
+              let anchor = board.tileControlsAnchor(tile), let frame = board.tiling?.layout.frames[tile] else { return }
         let grips = board.tileGripView
-        let bar = content.convert(grips.convert(board.viewRect(handle.bar), to: nil), from: nil)
+        let bar = content.convert(grips.convert(board.viewRect(anchor), to: nil), from: nil)
         let tileRect = content.convert(grips.convert(board.viewRect(frame), to: nil), from: nil)
         let size = host.measure()
         let margin = Host.margin
         var x = bar.midX - size.width / 2
         x = min(max(x, tileRect.minX + 6 - margin), tileRect.maxX - 6 + margin - size.width)
-        // The capsule's top 4pt under the grip's mark, whichever way up the content view is.
+        // The capsule's top 4pt under the grip's mark or the tab, whichever way up the content view is.
         let y = content.isFlipped ? bar.maxY + 4 - margin : bar.minY - 4 + margin - size.height
         let next = NSRect(x: x.rounded(), y: y.rounded(), width: size.width, height: size.height)
         if host.frame != next { host.frame = next }
