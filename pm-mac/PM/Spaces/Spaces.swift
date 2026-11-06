@@ -77,6 +77,17 @@ final class Spaces {
         save()
     }
 
+    /// The spaces in a new order, as the overview's drags leave them; any not named keep their order
+    /// after the rest. The dock and the Spaces menu follow.
+    func reorder(_ ids: [String]) {
+        let named = ids.compactMap { id in file.spaces.first { $0.id == id } }
+        let rest = file.spaces.filter { !ids.contains($0.id) }
+        guard named + rest != file.spaces else { return }
+        file.spaces = named + rest
+        CanvasSatelliteDock.shared.refresh()
+        save()
+    }
+
     private func save() {
         guard !saveQueued else { return }
         saveQueued = true
@@ -164,7 +175,7 @@ final class Spaces {
     }
 
     /// The same from any board, a project's included: a row dropped on a space's dock mark.
-    func move(_ cardID: String, fromCanvas from: URL, to target: String) {
+    func move(_ cardID: String, fromCanvas from: URL, to target: String, then done: @escaping @MainActor () -> Void = {}) {
         guard let to = canvas(of: target), from.standardizedFileURL != to.standardizedFileURL else { return }
         let id = space(forCanvas: from)?.id ?? ""
         if !FileManager.default.fileExists(atPath: to.path) { try? makeCanvas(at: to) }
@@ -172,6 +183,7 @@ final class Spaces {
         CanvasStoreRegistry.withStores([from, to]) { [weak self] stores in
             guard let self, stores.count == 2 else { return }
             move(cardID, from: stores[0], to: stores[1], spaceID: id, target: target)
+            done()
         }
     }
 
@@ -244,12 +256,59 @@ final class Spaces {
 
     // MARK: Making and removing
 
-    /// File ▸ New Space: untitled, an empty board in its window. Named later, if ever.
-    func newSpace() {
-        let made = Space(color: Self.nextColor(after: file.spaces.count))
+    /// File ▸ New Space, Spaces ▸ New Space, the dock's +, the switcher's New Space, the quick bar:
+    /// an empty board in its window, untitled unless `name` is given. Returns the space's id.
+    @discardableResult
+    func newSpace(named name: String = "") -> String {
+        var made = Space(color: Self.nextColor(after: file.spaces.count))
+        made.name = name.trimmingCharacters(in: .whitespaces)
         file.spaces.append(made)
         flush()
         show(made.id)
+        bringForward(made.id)
+        return made.id
+    }
+
+    /// A new space holding a sidebar row dropped on the dock's +: the card moves off its board.
+    func newSpace(moving cardID: String, fromCanvas canvas: URL) {
+        let id = newSpace()
+        move(cardID, fromCanvas: canvas, to: id) { [weak self] in
+            DispatchQueue.main.async { self?.window(of: id)?.spaceFrame?.show(cardID) }
+        }
+    }
+
+    /// A new space on a link dropped on the dock's +: the page as its first card.
+    func newSpace(opening url: URL) {
+        let id = newSpace()
+        openIncoming(url, in: id)
+    }
+
+    /// The space's window in front, Folio active: `show` opens a closed one but leaves an open one where it is.
+    func go(to id: String) {
+        show(id)
+        bringForward(id)
+    }
+
+    private func bringForward(_ id: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let window = self?.window(of: id)?.window else { return }
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    // MARK: Order
+
+    /// The space whose window is furthest forward, if any window of a space is in front of every other
+    /// window of the app; else nil.
+    var frontSpace: String? {
+        NSApp.orderedWindows.lazy.compactMap { $0.windowController as? ProjectWindowController }.first
+            .flatMap { space(forCanvas: $0.openedCanvas)?.id }
+    }
+
+    func goToNext(by step: Int) {
+        guard let id = SpaceOrder.step(from: frontSpace, by: step, in: all.map(\.id)) else { return }
+        go(to: id)
     }
 
     /// Colours in turn, so two new spaces in a row don't look alike.

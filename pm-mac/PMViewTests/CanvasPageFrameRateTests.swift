@@ -104,7 +104,14 @@ final class CanvasPageUsesTests: XCTestCase {
           <div style="left:100px;top:50px;width:200px;height:100px"><div style="left:0;top:0;width:200px;height:40px"></div></div>
           <div role=dialog style="position:static"><div style="left:320px;top:50px;width:100px;height:40px;position:fixed;right:auto"></div></div>
           <canvas style="left:440px;top:50px;width:100px;height:40px"></canvas>
+          <div tabindex=0 style="left:320px;top:110px;width:260px;height:190px">
+            <video style="display:block;width:260px;height:190px"></video>
+            <button style="left:20px;top:10px;width:40px;height:30px"></button>
+          </div>
         </div>
+        <script>window.downs = 0; window.clicks = 0;
+          document.addEventListener('mousedown', () => window.downs++);
+          document.addEventListener('click', () => window.clicks++);</script>
         """
 
     override func setUpWithError() throws {
@@ -142,6 +149,47 @@ final class CanvasPageUsesTests: XCTestCase {
         XCTAssertTrue(dialog, "inside role=dialog")
         let canvas = await page.pageUses(at: at(490, 60))
         XCTAssertTrue(canvas, "a canvas draws its own UI")
+    }
+
+    /// 260×190 at 320,110, inside a player wrapper with `tabindex=0` (how a player takes the space bar)
+    /// and a button over its top left. Its foot, the last 96pt, is where controls live.
+    func testTheVideoPicturePressIsItsOwnAnswer() async {
+        let picture = await page.press(at: at(450, 160))
+        XCTAssertEqual(picture, .video, "the picture, under a tabindex=0 wrapper that only holds it")
+        let button = await page.press(at: at(350, 130))
+        XCTAssertEqual(button, .page, "a control over the picture")
+        let foot = await page.press(at: at(450, 260))
+        XCTAssertEqual(foot, .page, "the strip along the foot is the player's controls")
+        let usesVideo = await page.pageUses(at: at(450, 160))
+        XCTAssertTrue(usesVideo, "a video is not dead space: a press on it is held, not taken")
+    }
+
+    /// A press on a video's picture is held: the page hears nothing until the button comes up, and then
+    /// hears a click — so a player still pauses on a click. (A drag hands the press to the window, which
+    /// `performDrag` runs a tracking loop for; not driven here.)
+    @MainActor
+    func testAClickOnAVideoReachesThePageOnReleaseNotOnPress() {
+        page.dragsWindowFromDeadSpace = { true }
+        page.hoverMoved(at: at(450, 160))
+        XCTAssertTrue(wait { self.page.pageIsOnVideo() })
+        func event(_ type: NSEvent.EventType) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: page.convert(at(450, 160), to: nil), modifierFlags: [],
+                               timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                               context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        func count(_ name: String) -> Int {
+            var result = -1
+            page.evaluateJavaScript("window.\(name)") { value, _ in result = (value as? Int) ?? -1 }
+            _ = wait { result >= 0 }
+            return result
+        }
+        page.mouseDown(with: event(.leftMouseDown))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertEqual(count("downs"), 0, "held: the page has not been told")
+        page.mouseUp(with: event(.leftMouseUp))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertEqual(count("downs"), 1, "released unmoved: the press is replayed")
+        XCTAssertEqual(count("clicks"), 1, "and it is a click")
     }
 
     func testAPressIsDeadSpaceOnlyOnceThePageHasAnsweredForTheLatestHover() {

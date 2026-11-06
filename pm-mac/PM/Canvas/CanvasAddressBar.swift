@@ -347,7 +347,13 @@ struct CanvasAddressTextField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextFieldDelegate {
         fileprivate var parent: CanvasAddressTextField
         weak var field: NSTextField?
-        var lastFocusToken = -1
+        /// The token the field has already answered, and **0 on a field just built**, because every owner
+        /// starts its token at 0 and counts up when it asks for the keyboard. It was -1, which made a
+        /// field taking the keyboard the first thing any newly built one did — and the floating sidebar
+        /// builds a new field each time the pointer reaches the window's left edge, so reaching for the
+        /// edge focused the address, which listed its suggestions over the page. A field built at 0 has
+        /// not been asked for anything; one built at 3 has (⌘L, a click on the chip).
+        var lastFocusToken = 0
         /// Set by a Return or a picked row, so the end-of-editing that follows doesn't report itself as
         /// a cancel.
         private var committing = false

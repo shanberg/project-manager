@@ -1,0 +1,270 @@
+<title>Folio Tile Grip</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a mocked space window (sidebar folded, two tiles, each with its grip at the top centre); controls in a column to the right, stacked below on a phone. */
+:root {
+  --page: #eceef2; --panel: #ffffff; --ink: #1d1f24; --ink-2: #5d6270; --ink-3: #9196a1; --rule: #d9dce3; --accent: #2f6fe4; --chip: #eef1f6;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --frame: #d9a3b4; --pagebg: #ffffff; --m-ink: #1c1d21; --m-ink-2: rgba(28,29,33,.6); --m-rule: rgba(28,29,33,.12);
+  --glass: rgba(250,250,252,.86); --glass-edge: rgba(255,255,255,.8); --hover: rgba(28,29,33,.07);
+  --shadow: 0 8px 26px rgba(20,24,40,.22), 0 1px 3px rgba(20,24,40,.16);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e; --accent: #6b9cff; --chip: #2b2e36; color-scheme: dark;
+} }
+:root[data-theme="dark"] { --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e; --accent: #6b9cff; --chip: #2b2e36; color-scheme: dark; }
+.mac-dark { --frame: #3a2430; --pagebg: #1e1d24; --m-ink: #f2f2f4; --m-ink-2: rgba(242,242,244,.62); --m-rule: rgba(255,255,255,.12);
+  --glass: rgba(44,45,50,.88); --glass-edge: rgba(255,255,255,.12); --hover: rgba(255,255,255,.09); --shadow: 0 8px 26px rgba(0,0,0,.5), 0 1px 3px rgba(0,0,0,.4); }
+body { background: var(--page); color: var(--ink); font-family: var(--ui); }
+[hidden] { display: none !important; }
+.wrap { display: grid; grid-template-columns: minmax(0,1fr) 290px; gap: 20px; padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); max-width: 1320px; margin: 0 auto; }
+@media (max-width: 900px) { .wrap { grid-template-columns: minmax(0,1fr); } }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 12px; max-width: 78ch; line-height: 1.45; }
+
+.win { position: relative; height: 600px; border-radius: 14px; background: var(--frame); padding: 6px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; color: var(--m-ink); box-shadow: var(--shadow); }
+@media (max-width: 620px) { .win { grid-template-columns: 1fr; height: 760px; } }
+.tile { position: relative; border-radius: 10px; background: var(--pagebg); overflow: visible; min-width: 0; }
+.tile .pg { position: absolute; inset: 0; border-radius: 10px; overflow: hidden; }
+.tile.focus { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent); }
+/* example pages */
+.music { position: absolute; inset: 0; display: grid; grid-template-columns: 150px 1fr; background: #1e1d24; color: #f3f1f7; }
+.music .side { padding: 46px 16px; font-size: 12.5px; display: flex; flex-direction: column; gap: 10px; border-right: 1px solid rgba(255,255,255,.07); }
+.music .logo { position: absolute; left: 18px; top: 16px; font-weight: 800; font-size: 19px; letter-spacing: -.5px; }
+.music .main { padding: 40px 18px; }
+.music h2 { font-size: 26px; margin: 0 0 16px; }
+.albums { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 10px; }
+.albums div { aspect-ratio: 1; border-radius: 7px; max-width: 100%; }
+.news { position: absolute; inset: 0; background: #f6f6ef; color: #222; font: 13px Verdana, sans-serif; }
+.news .bar { background: #ff6600; padding: 6px 10px; display: flex; gap: 8px; align-items: center; }
+.news .bar b { font-size: 13px; }
+.news ol { margin: 10px 0 0 26px; padding: 0 10px 0 0; line-height: 1.5; }
+.news li small { display: block; color: #828282; font-size: 10.5px; }
+
+/* the grip */
+.grip { position: absolute; left: 50%; top: -5px; transform: translateX(-50%); width: 46px; height: 14px; z-index: 3; cursor: grab; display: grid; place-items: center; border: 0; background: none; padding: 0; }
+.grip i { width: 34px; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--m-ink) 34%, transparent); box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: width .12s ease; }
+.grip.open i { width: 42px; background: color-mix(in srgb, var(--accent) 80%, transparent); }
+.grip:hover i, .grip:focus-visible i { width: 42px; background: color-mix(in srgb, var(--m-ink) 55%, transparent); }
+.grip:focus-visible { outline: 2px solid var(--accent); border-radius: 6px; }
+.grip .ring { position: absolute; inset: 3px 2px; border-radius: 6px; border: 2px solid var(--accent); opacity: 0; }
+.grip.waiting .ring { animation: wait var(--delay) linear forwards; }
+@keyframes wait { from { opacity: .0; clip-path: inset(0 100% 0 0); } to { opacity: .8; clip-path: inset(0 0 0 0); } }
+
+/* the controls */
+.ctl { position: absolute; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 13px; background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: var(--shadow);
+  backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); font-size: 12px; transform-origin: top center; }
+.ctl.capsule { left: 50%; top: 13px; transform: translateX(-50%); max-width: calc(100% - 12px); }
+.ctl.gap { max-width: calc(100% - 12px); }
+.ctl .addr input { width: min(230px, 100%); }
+.ctl.strip { left: 6px; right: 6px; top: 13px; border-radius: 10px; }
+.ctl.gap { left: 50%; top: -20px; transform: translateX(-50%); }
+.ctl.in { animation: grow .16s ease-out; }
+/* Unfolds from the middle outward, top edge first: the grip stays put above it. */
+@keyframes grow { from { opacity: .4; clip-path: inset(0 50% 70% 50% round 13px); } to { opacity: 1; clip-path: inset(0 0 0 0 round 13px); } }
+@media (prefers-reduced-motion: reduce) { .ctl.in { animation: none; } .grip.waiting .ring { animation: none; opacity: .8; } }
+.cb { height: 26px; min-width: 26px; padding: 0 6px; border: 0; border-radius: 9px; background: none; color: var(--m-ink); display: inline-flex; align-items: center; gap: 5px; cursor: pointer; font: 12px var(--ui); }
+.cb:hover, .cb:focus-visible { background: var(--hover); outline: none; }
+.cb svg { width: 14px; height: 14px; }
+.cb.on svg { color: var(--accent); }
+.addr { min-width: 0; max-width: 260px; flex: 1 1 auto; justify-content: flex-start; color: var(--m-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.addr b { color: var(--m-ink); font-weight: 500; }
+.addr input { font: 12px var(--ui); border: 0; background: color-mix(in srgb, var(--m-ink) 8%, transparent); color: var(--m-ink); border-radius: 6px; padding: 3px 6px; width: 230px; outline: none; }
+.title { color: var(--m-ink); font-weight: 600; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; }
+.sep { width: 1px; height: 16px; background: var(--m-rule); margin: 0 2px; }
+.ctl.strip .grow { flex: 1; }
+.toast { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 6; background: var(--glass); color: var(--m-ink); font-size: 12.5px; padding: 8px 14px; border-radius: 10px; box-shadow: var(--shadow); max-width: calc(100% - 40px); }
+
+/* panel */
+.controls { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 14px; align-self: start; position: sticky; top: calc(12px + env(safe-area-inset-top, 0px)); }
+.cg { display: flex; flex-direction: column; gap: 6px; }
+.gl { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button { font: 12px var(--ui); padding: 4px 9px; border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.seg button:focus-visible, .copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chk { display: flex; gap: 7px; align-items: center; font-size: 12.5px; }
+.hint { font-size: 11.5px; color: var(--ink-2); margin: 0; line-height: 1.4; }
+.summary { font: 11px/1.5 var(--mono); background: var(--chip); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; color: var(--ink); margin: 0; }
+.copy { font: 12px var(--ui); padding: 6px 10px; border-radius: 7px; border: 0; background: var(--accent); color: #fff; cursor: pointer; align-self: flex-start; }
+.note { width: 100%; box-sizing: border-box; min-height: 50px; font: 12px var(--ui); border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); padding: 6px 8px; resize: vertical; }
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>The tile grip as the tab's controls</h1>
+    <p class="sub">A space with its sidebar folded, two tiles. Rest the pointer on a grip at the top centre of a tile (or click it, depending on the setting) and the tab's controls unfold from the middle, under the grip. The grip stays where it is: it still drags the tile, and clicking it again closes them. Move away and they close. Click the address to edit it. All pages here are pictures.</p>
+    <div class="win" id="win">
+      <div class="tile" id="t0" data-i="0"><div class="pg"><div class="music"><div class="logo">♪ music</div><div class="side"><span>Search</span><span>Home</span><span>New</span><span>Radio</span><span>Library</span></div>
+        <div class="main"><h2>Home</h2><div class="albums">
+        <div style="background:linear-gradient(135deg,#ff8a5b,#c02c6f)"></div><div style="background:linear-gradient(135deg,#4fa3d9,#1b3e7a)"></div><div style="background:linear-gradient(135deg,#c9d66b,#4e7a2a)"></div>
+        <div style="background:linear-gradient(135deg,#f2c14e,#d1495b)"></div><div style="background:linear-gradient(135deg,#9b7fd1,#3c2a7a)"></div><div style="background:linear-gradient(135deg,#7ad1c3,#2a6f7a)"></div></div></div></div></div></div>
+      <div class="tile" id="t1" data-i="1"><div class="pg"><div class="news"><div class="bar"><b>Hacker News</b> new | past | comments | ask | show</div>
+        <ol><li>Residential proxies detected on White House network<small>788 points · 247 comments</small></li><li>Images 2.6<small>175 points · 115 comments</small></li>
+        <li>Starfall: affordable, routine access to microgravity<small>142 points · 81 comments</small></li><li>A thousand fewer paths to root<small>199 points · 114 comments</small></li>
+        <li>A new Go API for JSON<small>252 points · 113 comments</small></li></ol></div></div></div>
+      <div class="toast" id="toast" hidden role="status"></div>
+    </div>
+  </div>
+  <aside class="controls" aria-label="Mock controls">
+    <div class="cg"><span class="gl">Opens on</span>
+      <div class="seg" data-k="open"><button data-v="hover">Resting on it</button><button data-v="click">A click</button><button data-v="both">Either</button></div></div>
+    <div class="cg"><span class="gl">Rest for</span>
+      <div class="seg" data-k="delay"><button data-v="300">0.3 s</button><button data-v="500">0.5 s</button><button data-v="800">0.8 s</button></div>
+      <p class="hint">A dragging grip still moves the tile; resting is what opens it.</p></div>
+    <div class="cg"><span class="gl">Shape</span>
+      <div class="seg" data-k="shape"><button data-v="capsule">Capsule from the grip</button><button data-v="gap">Above, in the frame</button><button data-v="strip">Strip across the tile top</button></div></div>
+    <div class="cg"><span class="gl">In it</span>
+      <label class="chk"><input type="checkbox" id="iNav"> Back, Forward</label>
+      <label class="chk"><input type="checkbox" id="iReload"> Reload</label>
+      <label class="chk"><input type="checkbox" id="iTitle"> Page title</label>
+      <label class="chk"><input type="checkbox" id="iAddr"> Address (click to edit)</label>
+      <label class="chk"><input type="checkbox" id="iPin"> Pin, Favourite</label>
+      <label class="chk"><input type="checkbox" id="iMax"> Maximize</label>
+      <label class="chk"><input type="checkbox" id="iPop"> Pop out to a window</label>
+      <label class="chk"><input type="checkbox" id="iClose"> Out of the layout (×)</label>
+      <label class="chk"><input type="checkbox" id="iMore"> More (⋯)</label></div>
+    <div class="cg"><span class="gl">Address shows</span>
+      <div class="seg" data-k="addr"><button data-v="host">Site only</button><button data-v="full">Whole address</button></div></div>
+    <div class="cg"><label class="chk"><input type="checkbox" id="macdark"> Dark Mac</label></div>
+    <div class="cg"><span class="gl">Your note</span><textarea class="note" id="note" placeholder="Anything the controls don't cover"></textarea></div>
+    <div class="cg"><span class="gl">Summary</span><pre class="summary" id="summary"></pre><button class="copy" id="copy">Copy summary</button></div>
+  </aside>
+</div>
+
+<script>
+const I = {
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
+  fwd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
+  reload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>',
+  pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg>',
+  star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 4l2.4 5 5.4.6-4 3.8 1.1 5.4L12 16.2 7.1 18.8l1.1-5.4-4-3.8 5.4-.6z"/></svg>',
+  max: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
+  pop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="13" height="13" rx="2.5"/><path d="M11 4h9v9"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>',
+  more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18" cy="12" r="1.7"/></svg>',
+};
+const TABS = [
+  { title: 'Home — Apple Music', host: 'music.apple.com', path: '/us/home', pinned: true, fav: true },
+  { title: 'Hacker News', host: 'news.ycombinator.com', path: '/news', pinned: false, fav: false },
+];
+const DEFAULTS = { open: 'both', delay: '300', shape: 'capsule', addr: 'host', iNav: true, iReload: true, iTitle: true, iAddr: true, iPin: true, iMax: true, iPop: false, iClose: true, iMore: true, macdark: false, note: '' };
+let S = { ...DEFAULTS };
+try { Object.assign(S, JSON.parse(localStorage.getItem('grip-mock') || '{}')); } catch (e) {}
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let openTile = null, editing = false, waitTimer = null, leaveTimer = null, focus = 0;
+const CHECKS = ['iNav', 'iReload', 'iTitle', 'iAddr', 'iPin', 'iMax', 'iPop', 'iClose', 'iMore', 'macdark'];
+
+function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => el.hidden = true, 2200); }
+
+function controlsHTML(i) {
+  const t = TABS[i], parts = [];
+  if (S.iNav) parts.push(`<button class="cb" data-a="Back" title="Back" aria-label="Back">${I.back}</button><button class="cb" data-a="Forward" title="Forward" aria-label="Forward">${I.fwd}</button>`);
+  if (S.iReload) parts.push(`<button class="cb" data-a="Reload" title="Reload" aria-label="Reload">${I.reload}</button>`);
+  if (S.iTitle) parts.push(`<span class="title" title="${esc(t.title)}">${esc(t.title)}</span>`);
+  if (S.iAddr) parts.push(editing
+    ? `<span class="cb addr"><input id="addrin" value="https://${esc(t.host + t.path)}" aria-label="Address"></span>`
+    : `<button class="cb addr" data-a="edit" title="Edit address (⌘L)">${S.addr === 'host' ? `<b>${esc(t.host)}</b>` : `https://<b>${esc(t.host)}</b>${esc(t.path)}`}</button>`);
+  const right = [];
+  if (S.iPin) right.push(`<button class="cb ${t.pinned ? 'on' : ''}" data-a="pin" title="${t.pinned ? 'Unpin' : 'Pin'}" aria-label="Pin">${I.pin}</button><button class="cb ${t.fav ? 'on' : ''}" data-a="fav" title="Favourite" aria-label="Favourite">${I.star}</button>`);
+  if (S.iMax) right.push(`<button class="cb" data-a="Maximize" title="Maximize (⌥⌘↩)" aria-label="Maximize">${I.max}</button>`);
+  if (S.iPop) right.push(`<button class="cb" data-a="Pop out to a window" title="Pop Out" aria-label="Pop out">${I.pop}</button>`);
+  if (S.iClose) right.push(`<button class="cb" data-a="close" title="Out of the layout (⌘W)" aria-label="Out of the layout">${I.x}</button>`);
+  if (S.iMore) right.push(`<button class="cb" data-a="More: Copy Address, Open in Browser, Send to Project, Session, Block Ads…" title="More" aria-label="More">${I.more}</button>`);
+  const mid = S.shape === 'strip' ? '<span class="grow"></span>' : '';
+  return parts.join('') + (right.length ? (parts.length ? '<span class="sep"></span>' : '') + mid + right.join('') : '');
+}
+
+function render() {
+  $('win').classList.toggle('mac-dark', S.macdark);
+  document.querySelectorAll('.tile').forEach(tile => {
+    const i = +tile.dataset.i;
+    tile.classList.toggle('focus', i === focus);
+    tile.querySelectorAll('.grip,.ctl').forEach(n => n.remove());
+    // The grip stays: it still drags the tile, and a click on it closes what it opened.
+    const g = document.createElement('button');
+    g.className = 'grip' + (openTile === i ? ' open' : ''); g.dataset.i = i;
+    g.setAttribute('aria-label', `${TABS[i].title}: tab controls`); g.setAttribute('aria-expanded', openTile === i);
+    g.style.setProperty('--delay', S.delay + 'ms');
+    g.innerHTML = '<span class="ring"></span><i></i>';
+    tile.appendChild(g);
+    if (openTile === i) {
+      const c = document.createElement('div');
+      c.className = `ctl ${S.shape} in`; c.dataset.i = i; c.setAttribute('role', 'toolbar'); c.setAttribute('aria-label', `${TABS[i].title} controls`);
+      c.innerHTML = controlsHTML(i);
+      tile.appendChild(c);
+      if (editing) { const inp = $('addrin'); inp && (inp.focus(), inp.select()); }
+    }
+  });
+  document.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', S[seg.dataset.k] === b.dataset.v)));
+  CHECKS.forEach(k => $(k).checked = S[k]);
+  if ($('note').value !== S.note) $('note').value = S.note;
+  $('summary').textContent = summary();
+  try { localStorage.setItem('grip-mock', JSON.stringify(S)); } catch (e) {}
+}
+function summary() {
+  const name = k => document.querySelector(`.seg[data-k="${k}"] button[data-v="${S[k]}"]`).textContent;
+  const items = [['iNav', 'Back/Forward'], ['iReload', 'Reload'], ['iTitle', 'Title'], ['iAddr', 'Address'], ['iPin', 'Pin/Favourite'], ['iMax', 'Maximize'], ['iPop', 'Pop out'], ['iClose', 'Out of layout'], ['iMore', 'More']].filter(([k]) => S[k]).map(([, l]) => l).join(', ') || 'nothing';
+  return [`Opens on: ${name('open')}`, `Rest for: ${name('delay')}`, `Shape: ${name('shape')}`, `In it: ${items}`, `Address shows: ${name('addr')}`, S.note.trim() ? `Note: ${S.note.trim()}` : null].filter(Boolean).join('\n');
+}
+
+function openOn(i) { clearTimeout(waitTimer); openTile = i; editing = false; focus = i; render(); }
+function close() { openTile = null; editing = false; render(); }
+
+const win = $('win');
+win.addEventListener('mouseover', e => {
+  const g = e.target.closest('.grip');
+  if (g && (S.open === 'hover' || S.open === 'both') && openTile !== +g.dataset.i) {
+    g.classList.add('waiting'); clearTimeout(waitTimer);
+    waitTimer = setTimeout(() => openOn(+g.dataset.i), +S.delay);
+  }
+  if (e.target.closest('.ctl') || (g && openTile === +g.dataset.i)) clearTimeout(leaveTimer);
+});
+win.addEventListener('mouseout', e => {
+  const g = e.target.closest('.grip');
+  if (g && !g.contains(e.relatedTarget)) { clearTimeout(waitTimer); g.classList.remove('waiting'); }
+  // Leaving the grip or the capsule for anywhere but the other one closes it, after a beat.
+  const from = e.target.closest('.ctl') || (g && openTile === +g.dataset.i ? g : null);
+  const to = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.ctl, .grip');
+  if (from && !from.contains(e.relatedTarget) && !(to && +to.dataset.i === openTile) && !editing) {
+    clearTimeout(leaveTimer); leaveTimer = setTimeout(close, 450);
+  }
+});
+win.addEventListener('click', e => {
+  const g = e.target.closest('.grip');
+  if (g) {
+    if (openTile === +g.dataset.i) { close(); return; }
+    if (S.open !== 'hover') openOn(+g.dataset.i); else toast('Resting on the grip opens it here; dragging it moves the tile.');
+    return;
+  }
+  const b = e.target.closest('.cb[data-a]');
+  if (b) {
+    const t = TABS[openTile], a = b.dataset.a;
+    if (a === 'edit') { editing = true; render(); return; }
+    if (a === 'pin') { t.pinned = !t.pinned; if (!t.pinned) t.fav = false; toast(t.pinned ? 'Pinned.' : 'Unpinned: it\'s in Today now.'); render(); return; }
+    if (a === 'fav') { t.fav = !t.fav; if (t.fav) t.pinned = true; toast(t.fav ? 'Added to Favourites.' : 'Removed from Favourites.'); render(); return; }
+    if (a === 'close') { toast(`${t.title}: out of the layout. Still in the sidebar; ⌘Z puts it back.`); close(); return; }
+    toast(`${a}: ${t.title}`); return;
+  }
+  const tile = e.target.closest('.tile');
+  if (tile && !e.target.closest('.ctl')) { focus = +tile.dataset.i; if (openTile !== null && openTile !== focus) close(); else render(); }
+});
+win.addEventListener('keydown', e => {
+  if (e.target.id === 'addrin') {
+    if (e.key === 'Enter') { toast(`Going to ${e.target.value}`); editing = false; close(); }
+    if (e.key === 'Escape') { editing = false; render(); }
+  } else if (e.key === 'Escape' && openTile !== null) close();
+});
+document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S[seg.dataset.k] = b.dataset.v; render(); }));
+CHECKS.forEach(k => $(k).addEventListener('change', e => { S[k] = e.target.checked; render(); }));
+$('note').addEventListener('input', e => { S.note = e.target.value; $('summary').textContent = summary(); try { localStorage.setItem('grip-mock', JSON.stringify(S)); } catch (err) {} });
+$('copy').addEventListener('click', () => {
+  const text = summary(), pre = $('summary');
+  const fallback = () => { const r = document.createRange(); r.selectNodeContents(pre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+  try { navigator.clipboard.writeText(text).then(() => { $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy summary', 1400); }, fallback); } catch (err) { fallback(); }
+});
+render();
+</script>

@@ -1682,9 +1682,19 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         let domain = CanvasCookieImport.registrableDomain(of: site)
         for card in Self.cards.allObjects where card.profile == profile
             && CanvasCookieImport.matches(card.url?.host() ?? card.host, domain) {
-            card.reload()
+            card.showSignedIn(domain: domain)
         }
         return copied
+    }
+
+    /// After a sign-in arrives: reload the page, unless the card is parked on a step of signing in —
+    /// another site's sign-in page, or its own site's login page — where a reload only shows that
+    /// page again. Those go back to the card's own address.
+    private func showSignedIn(domain: String) {
+        guard let web, revealed, let live = web.url, let url, live != url,
+              CanvasCookieImport.isSignInStep(live, domain: domain) else { return reload() }
+        capturingTitle = true
+        web.load(URLRequest(url: url))
     }
 
     /// Sign in to this card's site in a window you can actually use — see `CanvasSignInWindow`.
@@ -2112,7 +2122,8 @@ extension CanvasLinkNodeView: WKUIDelegate {
         (web as? CanvasPageView)?.hoverIsInteractive = link != nil
             || (value("isContentEditable") as? Bool ?? false)
             || value("absoluteImageURL") as? URL != nil
-            || value("absoluteMediaURL") as? URL != nil
+        // Media is its own answer: a video's picture is the page's only if the press is a click.
+        (web as? CanvasPageView)?.hoverIsMedia = value("absoluteMediaURL") as? URL != nil
         if let page = web as? CanvasPageView, let window = page.window {
             page.hoverMoved(at: page.convert(window.mouseLocationOutsideOfEventStream, from: nil))
         }

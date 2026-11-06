@@ -35,6 +35,7 @@ enum MainMenu {
         mainMenu.addItem(formatMenuItem())
         mainMenu.addItem(viewMenuItem(target: target))
         mainMenu.addItem(goMenuItem(target: target))
+        mainMenu.addItem(SpacesMenu.shared.makeItem())
         mainMenu.addItem(HistoryMenu.shared.makeItem())
         mainMenu.addItem(canvasMenuItem())
         mainMenu.addItem(domainMenuItem(.task, title: "Task", target: target))
@@ -545,6 +546,9 @@ enum MainMenu {
     /// The two panels are windows, so they are listed here with a checkmark, the way Mail lists
     /// Activity. AppKit adds Minimize, Zoom, Bring All to Front and the window list around them.
     private static func fillWindowMenu(_ menu: NSMenu, target: AppDelegate) {
+        // Also in Spaces; no key of its own (⌥Tab, then ↑).
+        let overview = menu.addItem(withTitle: "Overview", action: #selector(OverviewController.showOverview(_:)), keyEquivalent: "")
+        overview.target = OverviewController.shared
         // The focus panel's key is the global shortcut, which is rebindable — `syncGlobalShortcuts()`.
         track(.toggleFocusPanel, add(menu, "Focus Panel", #selector(AppDelegate.toggleFocusPanel),
                                      target: target, key: ""))
@@ -701,5 +705,125 @@ final class CanvasNewCardMenu: NSObject, NSMenuDelegate {
         if menu.items.isEmpty {
             menu.addItem(withTitle: "No Canvas in Front", action: nil, keyEquivalent: "")
         }
+    }
+}
+
+/// The Spaces menu (docs/spaces.md § Spaces menu): New Space, Next / Previous Space, then every space,
+/// open or not, the first nine on ⌃⌥1…⌃⌥9, then Rename and Delete for the space in front.
+///
+/// ⌃⌥ because ⌃1…9 are Go ▸ Frame and ⌃⌘1…6 a note's headings; the Mac's own Spaces keys (⌃←/⌃→,
+/// ⌃1…) belong to the system. The nine slots are built once so their keys are always registered,
+/// retitled by validation and hidden past the last space only while the menu is open (`SlotMenu`'s
+/// rule); spaces past nine are added as it opens and taken off as it closes.
+@MainActor
+final class SpacesMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
+    static let shared = SpacesMenu()
+    static let slots = 9
+    private var extras: [NSMenuItem] = []
+    private weak var slotsEnd: NSMenuItem?
+
+    func makeItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: "Spaces")
+        menu.delegate = self
+        // No key: ⌥Tab then ↑ opens it, from the switcher (docs/spaces.md § Overview).
+        let overview = menu.addItem(withTitle: "Overview", action: #selector(OverviewController.showOverview(_:)), keyEquivalent: "")
+        overview.target = OverviewController.shared
+        // No key: ⌃⌥N is the global Write Session Note, and ⌃⌘N New Project.
+        add(menu, "New Space", #selector(newSpace), key: "")
+        menu.addItem(.separator())
+        add(menu, "Next Space", #selector(nextSpace), key: "]")
+        add(menu, "Previous Space", #selector(previousSpace), key: "[")
+        menu.addItem(.separator())
+        for index in 0..<Self.slots {
+            add(menu, "Space \(index + 1)", #selector(goToSpace(_:)), key: "\(index + 1)").tag = index
+        }
+        let end = NSMenuItem.separator()
+        menu.addItem(end)
+        slotsEnd = end
+        add(menu, "Rename Space…", #selector(renameSpace), key: "")
+        add(menu, "Delete Space…", #selector(deleteSpace), key: "")
+        item.submenu = menu
+        return item
+    }
+
+    @discardableResult
+    private func add(_ menu: NSMenu, _ title: String, _ action: Selector, key: String) -> NSMenuItem {
+        let item = menu.addItem(withTitle: title, action: action, keyEquivalent: key)
+        if !key.isEmpty { item.keyEquivalentModifierMask = [.control, .option] }
+        item.target = self
+        return item
+    }
+
+    // MARK: Actions
+
+    @objc func newSpace() { Spaces.shared.newSpace() }
+    @objc func nextSpace() { Spaces.shared.goToNext(by: 1) }
+    @objc func previousSpace() { Spaces.shared.goToNext(by: -1) }
+
+    @objc func goToSpace(_ sender: NSMenuItem) {
+        let all = Spaces.shared.all
+        let id = (sender.representedObject as? String) ?? (all.indices.contains(sender.tag) ? all[sender.tag].id : nil)
+        guard let id else { return }
+        Spaces.shared.go(to: id)
+    }
+
+    @objc func renameSpace() { Spaces.shared.frontSpace.map(Spaces.shared.rename) }
+    @objc func deleteSpace() { Spaces.shared.frontSpace.map(Spaces.shared.delete) }
+
+    // MARK: Validation
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        let spaces = Spaces.shared
+        switch item.action {
+        case #selector(goToSpace(_:)):
+            let id = (item.representedObject as? String) ?? (spaces.all.indices.contains(item.tag) ? spaces.all[item.tag].id : nil)
+            guard let id, let space = spaces.space(id) else { return false }
+            item.title = space.title
+            item.image = Self.dot(space)
+            item.state = spaces.frontSpace == id ? .on : .off
+            return true
+        case #selector(nextSpace), #selector(previousSpace):
+            return !spaces.all.isEmpty
+        case #selector(renameSpace), #selector(deleteSpace):
+            let front = spaces.frontSpace.flatMap(spaces.space)
+            let verb = item.action == #selector(renameSpace) ? "Rename" : "Delete"
+            item.title = front.map { "\(verb) “\($0.title)”…" } ?? "\(verb) Space…"
+            return front != nil
+        default:
+            return true
+        }
+    }
+
+    /// The space's colour, as the dock's mark wears it.
+    private static func dot(_ space: Space) -> NSImage? {
+        let color = ProjectColor(value: space.color)?.nsColor ?? .systemGray
+        return NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(paletteColors: [color]))
+    }
+
+    // MARK: Opening and closing
+
+    func menuWillOpen(_ menu: NSMenu) {
+        let all = Spaces.shared.all
+        for item in menu.items where item.action == #selector(goToSpace(_:)) && item.representedObject == nil {
+            item.isHidden = item.tag >= all.count
+        }
+        guard let end = slotsEnd, all.count > Self.slots else { return }
+        var at = menu.index(of: end)
+        for space in all.dropFirst(Self.slots) {
+            let item = NSMenuItem(title: space.title, action: #selector(goToSpace(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = space.id
+            menu.insertItem(item, at: at)
+            extras.append(item)
+            at += 1
+        }
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        extras.forEach { menu.removeItem($0) }
+        extras = []
+        for item in menu.items where item.action == #selector(goToSpace(_:)) { item.isHidden = false }
     }
 }

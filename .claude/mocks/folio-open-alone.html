@@ -1,0 +1,217 @@
+<title>Folio Open Alone</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a mocked Folio sidebar + stage on the left; switches for the click rule and the ways back into a layout on the right, stacked below on a phone. */
+:root {
+  --page: #eceef2; --panel: #ffffff; --ink: #1d1f24; --ink-2: #5d6270; --ink-3: #9196a1;
+  --rule: #d9dce3; --accent: #2f6fe4; --chip: #eef1f6; --warn: #b4540a;
+  --win: #fbfbfc; --side: #f1f2f5; --tile: #ffffff; --tileline: #dfe1e7; --hover: rgba(28,29,33,.06); --sel: #ffffff;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; --warn: #f0a060;
+  --win: #1f2025; --side: #26282e; --tile: #2a2c33; --tileline: #3a3d46; --hover: rgba(255,255,255,.07); --sel: #3a3d46; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; --warn: #f0a060;
+  --win: #1f2025; --side: #26282e; --tile: #2a2c33; --tileline: #3a3d46; --hover: rgba(255,255,255,.07); --sel: #3a3d46; color-scheme: dark;
+}
+body { background: var(--page); color: var(--ink); font-family: var(--ui); }
+[hidden] { display: none !important; }
+.wrap { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1200px; margin: 0 auto; }
+@media (max-width: 900px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 12px; max-width: 80ch; line-height: 1.45; }
+kbd { font: 11px var(--mono); padding: 0 4px; border-radius: 4px; border: 1px solid var(--rule); background: var(--chip); }
+
+.win { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: 520px; border-radius: 12px; overflow: hidden;
+  background: var(--win); border: 1px solid var(--rule); }
+@media (max-width: 560px) { .win { grid-template-columns: 150px minmax(0, 1fr); } }
+.side { background: var(--side); padding: 10px 8px; overflow: auto; font-size: 12.5px; display: flex; flex-direction: column; gap: 2px; }
+.side h2 { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 10px 6px 3px; font-weight: 600; }
+.row { display: flex; align-items: center; gap: 7px; padding: 5px 6px; border-radius: 7px; cursor: default; position: relative; min-width: 0; }
+.row:hover { background: var(--hover); }
+.row.front { background: var(--sel); box-shadow: 0 0 0 1px var(--tileline); }
+.row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dot { width: 14px; height: 14px; border-radius: 4px; flex: none; background: var(--c); }
+.lay { flex: none; display: flex; align-items: center; gap: 2px; border: 0; background: none; color: var(--ink-3); font: 11px var(--ui);
+  padding: 1px 4px; border-radius: 5px; cursor: pointer; }
+.lay:hover { background: var(--chip); color: var(--accent); }
+.lay svg { width: 12px; height: 12px; }
+.wsrow { cursor: pointer; }
+.wsrow.front { background: var(--sel); box-shadow: 0 0 0 1px var(--tileline); }
+.menu { position: absolute; right: 4px; top: 100%; z-index: 5; min-width: 170px; padding: 4px; border-radius: 8px; background: var(--panel);
+  border: 1px solid var(--rule); box-shadow: 0 8px 24px rgba(0,0,0,.2); font-size: 12px; }
+.menu div { padding: 4px 8px; border-radius: 5px; cursor: pointer; }
+.menu div:hover { background: var(--accent); color: #fff; }
+.menu hr { border: 0; border-top: 1px solid var(--rule); margin: 3px 0; }
+
+.stage { position: relative; padding: 8px; display: flex; flex-direction: column; min-width: 0; }
+.cap { display: flex; align-items: center; gap: 6px; height: 28px; font-size: 12px; color: var(--ink-2); margin-bottom: 6px; flex: none; }
+.cap .grow { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; background: var(--chip); border: 0; font: 11.5px var(--ui); color: var(--ink); cursor: pointer; }
+.pill:hover { background: var(--accent); color: #fff; }
+.grid { flex: 1; display: grid; gap: 6px; min-height: 0; }
+.tile { background: var(--tile); border: 1px solid var(--tileline); border-radius: 9px; padding: 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow: hidden; }
+.tile .h { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.tile .b { flex: 1; border-radius: 6px; background: repeating-linear-gradient(135deg, transparent 0 9px, var(--hover) 9px 10px); }
+.tile.solo { flex: 1; }
+.note { margin-top: 8px; font-size: 12px; color: var(--ink-2); min-height: 32px; line-height: 1.4; }
+
+.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 14px; align-self: start; }
+.panel h3 { font-size: 12px; margin: 0 0 6px; font-weight: 600; }
+.opt { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.35; padding: 3px 0; }
+.opt input { margin-top: 2px; }
+.opt small { display: block; color: var(--ink-3); font-size: 11.5px; }
+.log { font: 11.5px var(--mono); color: var(--ink-2); white-space: pre-wrap; min-height: 54px; }
+button.reset { font: 12px var(--ui); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--chip); color: var(--ink); cursor: pointer; }
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>Opening a card that is also in a layout</h1>
+    <p class="sub">Click a card in the sidebar. With the new rule it opens alone, whether or not a layout holds it. The switches choose which ways back into its layouts are drawn. <kbd>⌥</kbd>-click keeps its meaning (a tile beside the one you are in); <kbd>⌘</kbd>-click still picks.</p>
+    <div class="win" id="win">
+      <div class="side" id="side"></div>
+      <div class="stage"><div class="cap" id="cap"></div><div class="grid" id="grid"></div></div>
+    </div>
+    <div class="note" id="note"></div>
+  </div>
+  <div class="panel">
+    <div>
+      <h3>Click rule</h3>
+      <label class="opt"><input type="radio" name="rule" value="new" checked><span>Open alone<small>The card fills the window. Layouts are left as they were.</small></span></label>
+      <label class="opt"><input type="radio" name="rule" value="old"><span>Jump into its layout (today)<small>Goes to the first layout holding it, with its tile forward.</small></span></label>
+    </div>
+    <div>
+      <h3>Ways back into a layout</h3>
+      <label class="opt"><input type="checkbox" id="oBadge" checked><span>Layout mark on the row<small>Stacked-tiles glyph and a count. Click it to go to that layout; with two, it asks.</small></span></label>
+      <label class="opt"><input type="checkbox" id="oMenu" checked><span>Row menu<small>“Show in Dashboard”, “Show in Reading”. Click the dots, or right-click.</small></span></label>
+      <label class="opt"><input type="checkbox" id="oCap" checked><span>Chip above the card<small>“In Dashboard, Reading”, one click each. Replaces “Back to…” if you arrived from a layout.</small></span></label>
+      <label class="opt"><input type="checkbox" id="oBack" checked><span>Back to where you came from<small>Arriving from a layout, the chip leads with “← Dashboard”. <kbd>⌘[</kbd></small></span></label>
+    </div>
+    <div><h3>What happened</h3><div class="log" id="log">Nothing yet.</div></div>
+    <button class="reset" id="reset">Reset</button>
+  </div>
+</div>
+
+<script>
+var CARDS = [
+  { id: 'tracker', t: 'PM-4127 Billing rollover fails', c: '#3b7ddd', in: ['Dashboard', 'Reading'] },
+  { id: 'wiki', t: 'Q3 Planning', c: '#2f9e6e', in: ['Dashboard'] },
+  { id: 'music', t: 'Apple Music', c: '#d6455d', in: ['Reading'] },
+  { id: 'inbox', t: 'Inbox (12)', c: '#8a63d2', in: [] }
+];
+var WS = { Dashboard: ['tracker', 'wiki'], Reading: ['tracker', 'music'] };
+var S, openMenu = null;
+function reset() { S = { mode: 'layout', ws: 'Dashboard', card: null, from: null, log: [] }; openMenu = null; draw(); }
+function $(id) { return document.getElementById(id); }
+function opt(id) { return $(id).checked; }
+function rule() { return document.querySelector('input[name=rule]:checked').value; }
+function card(id) { return CARDS.filter(function (c) { return c.id === id; })[0]; }
+function say(s) { S.log.unshift(s); S.log = S.log.slice(0, 4); }
+var LAYERS = '<svg viewBox="0 0 12 12"><rect x="1" y="1" width="4.5" height="10" rx="1" fill="none" stroke="currentColor"/><rect x="6.5" y="1" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor"/><rect x="6.5" y="6.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor"/></svg>';
+
+function clickCard(id) {
+  var c = card(id);
+  openMenu = null;
+  if (rule() === 'old' && c.in.length) { goLayout(c.in[0], id); say('click ' + c.t + ' → jumped into ' + c.in[0]); return; }
+  S.from = S.mode === 'layout' ? S.ws : S.from;
+  S.mode = 'solo'; S.card = id;
+  say('click ' + c.t + ' → alone' + (c.in.length ? ' (still in ' + c.in.join(', ') + ')' : ''));
+  draw();
+}
+function goLayout(name, forward) {
+  S.mode = 'layout'; S.ws = name; S.card = forward || S.card; openMenu = null;
+  if (forward) say('open ' + name + ', ' + card(forward).t + ' forward');
+  draw();
+}
+function layMark(id) {
+  var c = card(id);
+  if (c.in.length === 1) return goLayout(c.in[0], id);
+  openMenu = openMenu === id ? null : id; draw();
+}
+
+function draw() {
+  var side = '<h2>Cards</h2>';
+  CARDS.forEach(function (c) {
+    var front = S.mode === 'solo' && S.card === c.id;
+    side += '<div class="row' + (front ? ' front' : '') + '" data-card="' + c.id + '"><span class="dot" style="--c:' + c.c + '"></span><span class="t">' + c.t + '</span>';
+    if (opt('oBadge') && c.in.length) side += '<button class="lay" data-lay="' + c.id + '" title="In ' + c.in.join(', ') + '">' + LAYERS + (c.in.length > 1 ? c.in.length : '') + '</button>';
+    if (opt('oMenu')) side += '<button class="lay" data-dots="' + c.id + '">···</button>';
+    if (openMenu === c.id) {
+      side += '<div class="menu">';
+      c.in.forEach(function (n) { side += '<div data-go="' + n + '" data-for="' + c.id + '">Show in ' + n + '</div>'; });
+      side += '<hr><div data-beside="' + c.id + '">Open in a Tile Beside</div></div>';
+    }
+    side += '</div>';
+  });
+  side += '<h2>Layouts</h2>';
+  Object.keys(WS).forEach(function (n) {
+    var front = S.mode === 'layout' && S.ws === n;
+    side += '<div class="row wsrow' + (front ? ' front' : '') + '" data-ws="' + n + '"><span class="dot" style="--c:var(--ink-3)"></span><span class="t">' + n + '</span><span style="color:var(--ink-3);font-size:11px">' + WS[n].length + '</span></div>';
+  });
+  $('side').innerHTML = side;
+
+  var cap = '', grid = '';
+  if (S.mode === 'layout') {
+    cap = '<b style="color:var(--ink)">' + S.ws + '</b><span class="grow"></span><span>' + WS[S.ws].length + ' tiles</span>';
+    grid = '';
+    $('grid').style.gridTemplateColumns = 'repeat(' + WS[S.ws].length + ', minmax(0,1fr))';
+    WS[S.ws].forEach(function (id) {
+      var c = card(id);
+      grid += '<div class="tile"><div class="h"><span class="dot" style="--c:' + c.c + '"></span>' + c.t + '</div><div class="b"></div></div>';
+    });
+  } else {
+    var c = card(S.card);
+    cap = '<b style="color:var(--ink)">' + c.t + '</b><span class="grow"></span>';
+    if (opt('oCap')) {
+      if (opt('oBack') && S.from && c.in.indexOf(S.from) > -1) {
+        cap += '<button class="pill" data-go="' + S.from + '" data-for="' + c.id + '">← ' + S.from + '</button>';
+        c.in.filter(function (n) { return n !== S.from; }).forEach(function (n) { cap += '<button class="pill" data-go="' + n + '" data-for="' + c.id + '">' + n + '</button>'; });
+      } else if (c.in.length) {
+        cap += '<span style="color:var(--ink-3)">In</span>';
+        c.in.forEach(function (n) { cap += '<button class="pill" data-go="' + n + '" data-for="' + c.id + '">' + n + '</button>'; });
+      }
+    }
+    $('grid').style.gridTemplateColumns = 'minmax(0,1fr)';
+    grid = '<div class="tile solo"><div class="h"><span class="dot" style="--c:' + c.c + '"></span>' + c.t + '</div><div class="b"></div></div>';
+  }
+  $('cap').innerHTML = cap; $('grid').innerHTML = grid;
+  $('log').textContent = S.log.length ? S.log.join('\n') : 'Nothing yet.';
+  $('note').textContent = S.mode === 'solo'
+    ? 'Alone. The layouts are untouched, so the page you left in them is the same page here; only one pane runs it at a time.'
+    : 'A layout. Click a card on the left to open it alone.';
+}
+
+$('side').addEventListener('click', function (e) {
+  var t = e.target;
+  var go = t.closest('[data-go]'), lay = t.closest('[data-lay]'), dots = t.closest('[data-dots]'), ws = t.closest('[data-ws]'), beside = t.closest('[data-beside]'), row = t.closest('[data-card]');
+  if (go) return goLayout(go.dataset.go, go.dataset.for);
+  if (beside) { say('tile beside (unchanged by this design)'); openMenu = null; return draw(); }
+  if (lay) return layMark(lay.dataset.lay);
+  if (dots) { openMenu = openMenu === dots.dataset.dots ? null : dots.dataset.dots; return draw(); }
+  if (ws) return goLayout(ws.dataset.ws);
+  if (row) clickCard(row.dataset.card);
+});
+$('side').addEventListener('contextmenu', function (e) {
+  var row = e.target.closest('[data-card]');
+  if (row && opt('oMenu')) { e.preventDefault(); openMenu = row.dataset.card; draw(); }
+});
+$('cap').addEventListener('click', function (e) {
+  var go = e.target.closest('[data-go]');
+  if (go) goLayout(go.dataset.go, go.dataset.for);
+});
+['oBadge', 'oMenu', 'oCap', 'oBack'].forEach(function (id) { $(id).addEventListener('change', draw); });
+document.querySelectorAll('input[name=rule]').forEach(function (r) { r.addEventListener('change', draw); });
+$('reset').addEventListener('click', reset);
+document.addEventListener('keydown', function (e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === '[' && S.mode === 'solo' && S.from) { e.preventDefault(); goLayout(S.from, S.card); }
+});
+reset();
+</script>

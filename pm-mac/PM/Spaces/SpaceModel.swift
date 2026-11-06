@@ -57,3 +57,28 @@ struct SpaceFile: Codable, Equatable {
 enum SpaceCanvas {
     static let empty = Data(#"{"nodes":[],"edges":[]}"#.utf8)
 }
+
+/// Going along the spaces and finding them by name: pure, so it's tested without a window
+/// (`SwitcherModelTests`). docs/spaces.md § Spaces menu, § Quick bar.
+enum SpaceOrder {
+    /// Spaces ▸ Next / Previous Space: along the list, wrapping; from a window that isn't a space, the
+    /// first (next) or last (previous).
+    static func step(from current: String?, by step: Int, in ids: [String]) -> String? {
+        guard !ids.isEmpty else { return nil }
+        guard let current, let at = ids.firstIndex(of: current) else { return step > 0 ? ids.first : ids.last }
+        return ids[((at + step) % ids.count + ids.count) % ids.count]
+    }
+
+    /// `@`'s spaces: titles starting with `query` first, then titles with a word that does, each in
+    /// the dock's order. Case doesn't matter.
+    static func matching(_ spaces: [(id: String, title: String)], query: String) -> [(id: String, title: String)] {
+        let q = query.lowercased()
+        guard !q.isEmpty else { return spaces }
+        let starts = spaces.filter { $0.title.lowercased().hasPrefix(q) }
+        let words = spaces.filter { space in
+            !space.title.lowercased().hasPrefix(q)
+                && space.title.lowercased().split(separator: " ").contains { $0.hasPrefix(q) }
+        }
+        return starts + words
+    }
+}

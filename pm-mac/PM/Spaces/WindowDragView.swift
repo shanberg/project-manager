@@ -72,3 +72,48 @@ final class SidebarEdgeHandle: NSControl {
         }
     }
 }
+
+/// Middle-click on whatever it is placed behind. SwiftUI has no gesture for the middle button, and a
+/// view that took the press itself would steal the row's left clicks and drags — so this one never
+/// takes a hit and listens to the window's events instead, answering only a middle-button release
+/// that lands inside its own bounds.
+struct MiddleClickArea: NSViewRepresentable {
+    var enabled = true
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> MiddleClickView { MiddleClickView() }
+    func updateNSView(_ nsView: MiddleClickView, context: Context) {
+        nsView.enabled = enabled
+        nsView.action = action
+    }
+}
+
+final class MiddleClickView: NSView {
+    var enabled = true
+    var action: () -> Void = {}
+    private var monitor: Any?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        guard window != nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseUp) { [weak self] event in
+            guard let self, self.handle(button: event.buttonNumber, in: event.window,
+                                        at: event.locationInWindow) else { return event }
+            return nil
+        }
+    }
+
+    /// A button release at `point` (window coordinates) in `eventWindow`. True when it was ours: the
+    /// middle button, over this view, in this view's window — the event is then consumed.
+    func handle(button: Int, in eventWindow: NSWindow?, at point: NSPoint) -> Bool {
+        guard enabled, button == 2, let window, eventWindow === window,
+              bounds.contains(convert(point, from: nil)) else { return false }
+        action()
+        return true
+    }
+
+    deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+}

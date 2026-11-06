@@ -2,6 +2,7 @@ import CommonCrypto
 import Foundation
 import Security
 import SQLite3
+import AppKit
 import WebKit
 
 /// Copy a site's sign-in from a browser you already use into a card's session.
@@ -11,6 +12,7 @@ import WebKit
 /// - Cookies only. Local storage stays behind: no browser offers it to another app in a readable form.
 /// - Matched on the registrable domain, the same scope `CanvasWebSession.forget` signs out of.
 /// - Reads a copy of the browser's file; the browser can stay open and nothing in it changes.
+/// - Lists the installed browsers macOS opens web links with, the default first; a profile each.
 /// - Safari: needs Full Disk Access. Chromium browsers: one Keychain prompt per browser per launch.
 /// - Session cookies (no expiry) come across as session cookies, so they last until Folio quits.
 enum CanvasCookieImport {
@@ -52,51 +54,115 @@ enum CanvasCookieImport {
     struct Source: Equatable {
         enum Kind: Equatable {
             case safari(URL)
-            case chromium(URL, keychainService: String)
+            /// Keychain services in the order tried: the first that exists unlocks the file.
+            case chromium(URL, keychainServices: [String])
             case firefox(URL)
         }
-        /// "Safari", "Chrome", "Chrome — Work".
+        /// The app's name, then the profile's when it has several: "Helium", "Google Chrome — Work".
         var title: String
         var kind: Kind
     }
 
-    /// Chromium browsers by where they keep their profiles and the Keychain item that unlocks them.
-    static let chromiumBrowsers: [(name: String, folder: String, service: String)] = [
-        ("Chrome", "Google/Chrome", "Chrome Safe Storage"),
-        ("Arc", "Arc/User Data", "Arc Safe Storage"),
-        ("Brave", "BraveSoftware/Brave-Browser", "Brave Safe Storage"),
-        ("Edge", "Microsoft Edge", "Microsoft Edge Safe Storage"),
-        ("Vivaldi", "Vivaldi", "Vivaldi Safe Storage"),
-        ("Chromium", "Chromium", "Chromium Safe Storage"),
+    /// An app macOS will open web links with.
+    struct App: Equatable {
+        var bundleID: String
+        /// As Finder shows it, without ".app".
+        var name: String
+    }
+
+    /// Where a browser keeps its cookies, under `~/Library/Application Support`.
+    enum Store: Equatable {
+        case safari
+        case chromium(folder: String, keychainService: String)
+        case firefox(folder: String)
+    }
+
+    /// Browsers whose folders aren't named after the app, by bundle id. Any other app is tried as a
+    /// Chromium browser under its bundle id or its name.
+    static let knownStores: [String: Store] = [
+        "com.apple.Safari": .safari,
+        "com.google.Chrome": .chromium(folder: "Google/Chrome", keychainService: "Chrome Safe Storage"),
+        "com.google.Chrome.beta": .chromium(folder: "Google/Chrome Beta", keychainService: "Chrome Safe Storage"),
+        "com.google.Chrome.canary": .chromium(folder: "Google/Chrome Canary", keychainService: "Chrome Safe Storage"),
+        "company.thebrowser.Browser": .chromium(folder: "Arc/User Data", keychainService: "Arc Safe Storage"),
+        "company.thebrowser.dia": .chromium(folder: "Dia/User Data", keychainService: "Dia Safe Storage"),
+        "com.brave.Browser": .chromium(folder: "BraveSoftware/Brave-Browser", keychainService: "Brave Safe Storage"),
+        "com.brave.Browser.beta": .chromium(folder: "BraveSoftware/Brave-Browser-Beta", keychainService: "Brave Safe Storage"),
+        "com.brave.Browser.nightly": .chromium(folder: "BraveSoftware/Brave-Browser-Nightly", keychainService: "Brave Safe Storage"),
+        "com.microsoft.edgemac": .chromium(folder: "Microsoft Edge", keychainService: "Microsoft Edge Safe Storage"),
+        "com.vivaldi.Vivaldi": .chromium(folder: "Vivaldi", keychainService: "Vivaldi Safe Storage"),
+        "org.chromium.Chromium": .chromium(folder: "Chromium", keychainService: "Chromium Safe Storage"),
+        "net.imput.helium": .chromium(folder: "net.imput.helium", keychainService: "Helium Storage Key"),
+        "com.operasoftware.Opera": .chromium(folder: "com.operasoftware.Opera", keychainService: "Opera Safe Storage"),
+        "org.mozilla.firefox": .firefox(folder: "Firefox"),
+        "org.mozilla.firefoxdeveloperedition": .firefox(folder: "Firefox"),
+        "org.mozilla.nightly": .firefox(folder: "Firefox"),
+        "app.zen-browser.zen": .firefox(folder: "zen"),
+        "io.gitlab.librewolf-community": .firefox(folder: "librewolf"),
     ]
 
-    /// Every browser profile with cookies on this Mac, Safari first. File checks only: no file is read
-    /// beyond each browser's small profile list.
-    static func sources(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [Source] {
-        let fm = FileManager.default
-        var found: [Source] = []
-
-        let safari = home.appending(path: "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies")
-        // Listed even when Full Disk Access hides it: choosing it is how you find out access is missing.
-        if fm.fileExists(atPath: "/Applications/Safari.app") || fm.fileExists(atPath: safari.path) {
-            found.append(Source(title: "Safari", kind: .safari(safari)))
+    /// Apps that open `https` links, one per bundle id, the default browser first, then by name.
+    /// Folio and test builds of Chrome are left out.
+    static func installedBrowsers() -> [App] {
+        let workspace = NSWorkspace.shared
+        let probe = URL(string: "https://example.com")!
+        let ownID = Bundle.main.bundleIdentifier
+        let defaultID = workspace.urlForApplication(toOpen: probe).flatMap { Bundle(url: $0)?.bundleIdentifier }
+        var seen: Set<String> = []
+        let apps: [App] = workspace.urlsForApplications(toOpen: probe).compactMap { url in
+            guard let id = Bundle(url: url)?.bundleIdentifier, id != ownID,
+                  id != "com.google.chrome.for.testing", seen.insert(id).inserted else { return nil }
+            let name = (FileManager.default.displayName(atPath: url.path) as NSString).deletingPathExtension
+            return App(bundleID: id, name: name)
         }
+        return apps.sorted { a, b in
+            if (a.bundleID == defaultID) != (b.bundleID == defaultID) { return a.bundleID == defaultID }
+            return a.name.localizedStandardCompare(b.name) == .orderedAscending
+        }
+    }
 
+    /// The installed browsers' profiles that have cookies on this Mac, in `apps` order. File checks only:
+    /// no file is read beyond each browser's small profile list. An app with no cookie store found,
+    /// or a store left behind by an app since removed, isn't listed.
+    static func sources(apps: [App] = installedBrowsers(),
+                        home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [Source] {
+        let fm = FileManager.default
         let support = home.appending(path: "Library/Application Support")
-        for browser in chromiumBrowsers {
-            let root = support.appending(path: browser.folder)
-            let profiles = chromiumProfiles(root: root)
-            for profile in profiles {
-                let title = profiles.count > 1 ? "\(browser.name) \u{2014} \(profile.name)" : browser.name
-                found.append(Source(title: title,
-                                    kind: .chromium(profile.cookies, keychainService: browser.service)))
+        var found: [Source] = []
+        for app in apps {
+            switch knownStores[app.bundleID] {
+            case .safari:
+                // Listed even when Full Disk Access hides it: choosing it is how you find out access is missing.
+                let file = home.appending(
+                    path: "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies")
+                found.append(Source(title: app.name, kind: .safari(file)))
+            case .chromium(let folder, let service):
+                found += chromiumSources(app.name, root: support.appending(path: folder), services: [service])
+            case .firefox(let folder):
+                let profiles = firefoxProfiles(root: support.appending(path: folder))
+                for profile in profiles {
+                    let title = profiles.count > 1 ? "\(app.name) \u{2014} \(profile.name)" : app.name
+                    found.append(Source(title: title, kind: .firefox(profile.cookies)))
+                }
+            case nil:
+                // Chromium browsers name the folder after the bundle id or the app, and the Keychain
+                // item "<Name> Safe Storage" unless they renamed it, as Helium did.
+                let folder = [app.bundleID, app.name].map { support.appending(path: $0) }
+                    .first { fm.fileExists(atPath: $0.appending(path: "Local State").path) }
+                guard let folder else { continue }
+                found += chromiumSources(app.name, root: folder,
+                                         services: ["\(app.name) Safe Storage", "\(app.name) Storage Key"])
             }
         }
-
-        for profile in firefoxProfiles(root: support.appending(path: "Firefox")) {
-            found.append(Source(title: profile.title, kind: .firefox(profile.cookies)))
-        }
         return found
+    }
+
+    private static func chromiumSources(_ name: String, root: URL, services: [String]) -> [Source] {
+        let profiles = chromiumProfiles(root: root)
+        return profiles.map { profile in
+            let title = profiles.count > 1 ? "\(name) \u{2014} \(profile.name)" : name
+            return Source(title: title, kind: .chromium(profile.cookies, keychainServices: services))
+        }
     }
 
     /// Profile folders holding a cookie file, named as the browser names them in `Local State`.
@@ -123,7 +189,7 @@ enum CanvasCookieImport {
     }
 
     /// Firefox profiles from `profiles.ini`, those with a cookie file.
-    static func firefoxProfiles(root: URL) -> [(title: String, cookies: URL)] {
+    static func firefoxProfiles(root: URL) -> [(name: String, cookies: URL)] {
         // read: a browser's local profile folder, for Copy Sign-In From.
         guard let ini = try? String(contentsOf: root.appending(path: "profiles.ini"), encoding: .utf8) else {
             return []
@@ -145,9 +211,7 @@ enum CanvasCookieImport {
             if line.hasPrefix("IsRelative=") { relative = line.hasSuffix("1") }
         }
         flush()
-        return found.map { profile in
-            (found.count > 1 ? "Firefox \u{2014} \(profile.0)" : "Firefox", profile.1)
-        }
+        return found
     }
 
     // MARK: Reading
@@ -166,8 +230,8 @@ enum CanvasCookieImport {
                 throw Failure.needsFullDiskAccess
             }
             return try parseBinaryCookies(data).filter { matches($0.domain, domain) }
-        case .chromium(let file, let service):
-            let key = try chromiumKey(service: service)
+        case .chromium(let file, let services):
+            let key = try chromiumKey(services: services)
             return try readChromium(file, domain: domain, key: key)
         case .firefox(let file):
             return try readFirefox(file, domain: domain)
@@ -192,6 +256,15 @@ enum CanvasCookieImport {
         let secondLevel = ["co", "com", "org", "net", "ac", "gov", "edu", "ne", "or", "go"]
         let keep = labels.last!.count == 2 && secondLevel.contains(labels[labels.count - 2]) ? 3 : 2
         return labels.suffix(keep).joined(separator: ".")
+    }
+
+    /// Whether `page` is a step of signing in rather than the site itself: another site's page (the
+    /// identity provider's), or a path on the site with a sign-in word as one of its parts.
+    static func isSignInStep(_ page: URL, domain: String) -> Bool {
+        guard let host = page.host(), matches(host, domain) else { return true }
+        let words: Set<String> = ["login", "signin", "sign-in", "sign_in", "auth", "oauth", "oauth2",
+                                  "sso", "callback", "authorize"]
+        return page.pathComponents.contains { words.contains($0.lowercased()) }
     }
 
     // MARK: Safari
@@ -258,21 +331,31 @@ enum CanvasCookieImport {
     private static var keys: [String: Data] = [:]
     private static let keysLock = NSLock()
 
-    static func chromiumKey(service: String) throws -> Data {
+    /// The key from the first of `services` the Keychain holds. Asking for each one's attributes
+    /// prompts nothing; only reading the one that exists does.
+    static func chromiumKey(services: [String]) throws -> Data {
         keysLock.lock(); defer { keysLock.unlock() }
-        if let key = keys[service] { return key }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-            kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let password = result as? Data else {
-            throw Failure.keychainRefused(service)
+        for service in services {
+            if let key = keys[service] { return key }
         }
-        let key = deriveChromiumKey(password: password)
-        keys[service] = key
-        return key
+        for service in services {
+            let exists: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                kSecMatchLimit as String: kSecMatchLimitOne,
+            ]
+            if services.count > 1, SecItemCopyMatching(exists as CFDictionary, nil) == errSecItemNotFound { continue }
+            var query = exists
+            query[kSecReturnData as String] = true
+            var result: AnyObject?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            guard status == errSecSuccess, let password = result as? Data else {
+                throw Failure.keychainRefused(service)
+            }
+            let key = deriveChromiumKey(password: password)
+            keys[service] = key
+            return key
+        }
+        throw Failure.keychainRefused(services.first ?? "")
     }
 
     /// PBKDF2-SHA1, salt "saltysalt", 1003 rounds, 16 bytes: Chromium's macOS cookie key.

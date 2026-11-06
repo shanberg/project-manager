@@ -80,7 +80,7 @@ extension CanvasBoardView {
         }
 
         if isTiled {
-            return tiledMouseDown(at: where_, extending: extending, clicks: event.clickCount)
+            return tiledMouseDown(at: where_, extending: extending, clicks: event.clickCount, event: event)
         }
 
         switch hitTester.hit(where_) {
@@ -139,11 +139,12 @@ extension CanvasBoardView {
     /// The grip is asked first because it is drawn *on* a tile, so a hit test on the card would answer
     /// for it; the boundary is asked next because it lies in the gap, where the card's own band would
     /// otherwise catch it.
-    private func tiledMouseDown(at where_: CanvasPoint, extending: Bool, clicks: Int) {
+    private func tiledMouseDown(at where_: CanvasPoint, extending: Bool, clicks: Int, event: NSEvent) {
         // A tile's tab strip is its title bar. A click on a tab shows it, and on its close button takes
         // that card out of the workspace; a drag on a tab slides it along the strip, or — pulled off
-        // the strip — pulls that card out; and the rest of the strip carries the tile, the way a grip
-        // does. Asked first, because the strip is not a card and nothing else answers for it.
+        // the strip — pulls that card out; and the rest of the strip is the window's to drag, as the
+        // ground around the tiles is — the tile has a grip of its own for moving it (`tileHandle(_:)`).
+        // Asked first, because the strip is not a card and nothing else answers for it.
         if let owner = tabStrip(at: where_) {
             // The +: what can go into this tile, as a tab. A menu rather than a blank tab, because a tab
             // here is a card and a card has to be some kind of card.
@@ -156,6 +157,7 @@ extension CanvasBoardView {
             let id = chip?.card ?? owner
             let wasShowing = chip != nil && showingTopTab(id) != nil
             if chip != nil { showTab(id) } else { selection = [id] }
+            if chip == nil, dragWindow(clicks: clicks, event: event) { return }
             if clicks == 2 { return toggleMaximizeTile(id) }
             guard tiling?.tileFrames[id] != nil else { return }
             gesture = chip != nil ? .slideTab(id, from: where_, wasShowing: wasShowing)
@@ -187,14 +189,23 @@ extension CanvasBoardView {
             selection = []
             // As Arc's frame, in any window's layout: the ground around the tiles is the window's to drag, and a
             // double-click there zooms it, as a title bar's does (docs/spaces.md § The frame).
-            if dragsWindowFromGround, let event = NSApp.currentEvent {
-                // The press is the window's now, and its mouse-up never comes here: end it first, or
-                // the board stays "pressed" and the pane holds every update waiting for a release.
-                isPressed = false
-                onPressEnded?()
-                if clicks == 2 { if let window { WindowDragView.titleBarDoubleClick(window) } } else { window?.performDrag(with: event) }
-            }
+            dragWindow(clicks: clicks, event: event)
         }
+    }
+
+    /// Hand a press to the window, which moves it — or, on a double-click, does what its title bar's
+    /// double-click does. False when this board's window is not draggable from it
+    /// (`dragsWindowFromGround`), which leaves the press to the caller.
+    ///
+    /// The press is the window's now, and its mouse-up never comes here: end it first, or the board
+    /// stays "pressed" and the pane holds every update waiting for a release.
+    @discardableResult
+    func dragWindow(clicks: Int, event: NSEvent) -> Bool {
+        guard dragsWindowFromGround else { return false }
+        isPressed = false
+        onPressEnded?()
+        if clicks == 2 { if let window { WindowDragView.titleBarDoubleClick(window) } } else { window?.performDrag(with: event) }
+        return true
     }
 
     /// How long each tile in a boundary's run is right now, along the axis that run flows in.
@@ -478,7 +489,7 @@ extension CanvasBoardView {
             // click on the tile's handle, which opens its controls (`showingTopTab`).
             if let slide = tabSlide { moveTab(card, to: slide.to) }
             else if wasShowing, event.clickCount == 1, showingTopTab(card) != nil {
-                CanvasTileControls.shared.gripClicked(self, tile: card)
+                CanvasTileControls.shared.gripClicked(self, tile: card, viaTab: true)
             }
             tabSlide = nil
 

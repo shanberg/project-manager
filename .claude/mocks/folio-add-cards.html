@@ -1,0 +1,725 @@
+<title>Folio Sidebar Add</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a mocked Folio window (space or project) with the frame's sidebar; each open question about adding cards is a control in the right column (stacked below on a phone). Same tokens as folio-project-frame.html. */
+:root {
+  --page: #eceef2; --panel: #ffffff; --ink: #1d1f24; --ink-2: #5d6270; --ink-3: #9196a1;
+  --rule: #d9dce3; --accent: #2f6fe4; --chip: #eef1f6; --pick: rgba(47,111,228,.14);
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --wall-a: #9fb4d6; --wall-b: #d9c6d8; --wall-c: #f1dcc4;
+  --shadow: 0 10px 34px rgba(20,24,40,.22), 0 1px 3px rgba(20,24,40,.14);
+  --m-ink: #1c1d21; --m-ink-2: rgba(28,29,33,.62); --m-ink-3: rgba(28,29,33,.4);
+  --m-rule: rgba(28,29,33,.1); --m-hover: rgba(28,29,33,.06); --m-sel: rgba(255,255,255,.85);
+  --m-field: rgba(255,255,255,.6); --win: rgba(255,255,255,.95); --pagebg: #ffffff; --line: #e7e8ec;
+  --menu: rgba(250,250,252,.98); --hl: #2f6fe4; --hl-ink: #ffffff; --new: rgba(47,111,228,.16);
+  --c: #6a5acd;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; --pick: rgba(107,156,255,.2);
+  --wall-a: #1d2944; --wall-b: #3a2742; --wall-c: #4a3326;
+  --shadow: 0 10px 34px rgba(0,0,0,.5), 0 1px 3px rgba(0,0,0,.4);
+  --m-ink: #f2f2f4; --m-ink-2: rgba(242,242,244,.64); --m-ink-3: rgba(242,242,244,.4);
+  --m-rule: rgba(255,255,255,.1); --m-hover: rgba(255,255,255,.07); --m-sel: rgba(255,255,255,.14);
+  --m-field: rgba(0,0,0,.25); --win: rgba(34,35,40,.96); --pagebg: #1f2025; --line: #2e3036; --menu: rgba(44,45,50,.98);
+  --hl: #3d74e0; --hl-ink: #ffffff; --new: rgba(107,156,255,.22);
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; --pick: rgba(107,156,255,.2);
+  --wall-a: #1d2944; --wall-b: #3a2742; --wall-c: #4a3326;
+  --shadow: 0 10px 34px rgba(0,0,0,.5), 0 1px 3px rgba(0,0,0,.4);
+  --m-ink: #f2f2f4; --m-ink-2: rgba(242,242,244,.64); --m-ink-3: rgba(242,242,244,.4);
+  --m-rule: rgba(255,255,255,.1); --m-hover: rgba(255,255,255,.07); --m-sel: rgba(255,255,255,.14);
+  --m-field: rgba(0,0,0,.25); --win: rgba(34,35,40,.96); --pagebg: #1f2025; --line: #2e3036; --menu: rgba(44,45,50,.98);
+  --hl: #3d74e0; --hl-ink: #ffffff; --new: rgba(107,156,255,.22);
+  color-scheme: dark;
+}
+body { background: var(--page); color: var(--ink); font-family: var(--ui); }
+.wrap { display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: 20px; padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1420px; margin: 0 auto; }
+@media (max-width: 980px) { .wrap { grid-template-columns: minmax(0,1fr); } }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; text-wrap: balance; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 10px; line-height: 1.45; max-width: 86ch; }
+.bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; font-size: 12px; color: var(--ink-2); }
+.tog { display: inline-flex; background: var(--chip); border-radius: 8px; padding: 2px; gap: 2px; }
+.tog button { border: 0; background: none; border-radius: 6px; padding: 4px 10px; font: 12px var(--ui); color: var(--ink-2); cursor: pointer; }
+.tog button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.tog button:focus-visible, .reset:focus-visible { outline: 2px solid var(--accent); }
+.reset { border: 1px solid var(--rule); background: var(--panel); color: var(--ink); font: 12px var(--ui); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+.hint { font-size: 11.5px; color: var(--ink-3); }
+
+.stage { position: relative; border-radius: 12px; overflow: hidden; height: 700px; color: var(--m-ink);
+  background: radial-gradient(120% 90% at 10% 0%, var(--wall-a), transparent 60%), radial-gradient(90% 80% at 100% 30%, var(--wall-b), transparent 65%), linear-gradient(160deg, var(--wall-b), var(--wall-c)); }
+.win { position: absolute; inset: 18px; border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); display: flex;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 18%, var(--win)), color-mix(in srgb, var(--c) 8%, var(--win))); }
+.side { width: 250px; flex: none; display: flex; flex-direction: column; min-height: 0; padding: 8px; position: relative; }
+.lights { display: flex; gap: 7px; align-items: center; height: 22px; padding-left: 4px; }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--m-rule); }
+.lights .grow { flex: 1; }
+.ib { width: 24px; height: 22px; border: 0; background: none; border-radius: 6px; display: grid; place-items: center; color: var(--m-ink-2); cursor: pointer; padding: 0; font: 15px var(--ui); line-height: 1; }
+.ib:hover, .ib.open { background: var(--m-hover); color: var(--m-ink); }
+.ib svg { width: 14px; height: 14px; }
+.head { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; padding: 5px 6px; border-radius: 8px; font: 600 13px var(--ui); }
+.head .sq { width: 18px; height: 18px; border-radius: 5px; background: var(--c); flex: none; }
+.head .chev { margin-left: auto; color: var(--m-ink-3); font-size: 10px; }
+.url { margin: 4px 0 8px; height: 30px; border-radius: 8px; background: var(--m-field); display: flex; align-items: center; gap: 7px; padding: 0 9px; font-size: 12px; color: var(--m-ink-2); cursor: text; }
+.url.focus { box-shadow: 0 0 0 2px var(--accent); background: var(--m-sel); color: var(--m-ink); }
+.url input { border: 0; background: none; font: 12px var(--ui); color: var(--m-ink); flex: 1; min-width: 0; outline: none; padding: 0; }
+.favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px; }
+.fav { height: 38px; border-radius: 9px; background: var(--m-hover); display: grid; place-items: center; }
+.list { overflow-y: auto; min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.list .fill { flex: 1; min-height: 30px; }
+.rule { font-size: 11px; font-weight: 600; color: var(--m-ink-3); padding: 9px 8px 3px; display: flex; align-items: center; gap: 6px; min-height: 18px; }
+.rule .grow { flex: 1; height: 1px; background: var(--m-rule); }
+.rule .act { font-weight: 500; color: var(--m-ink-3); opacity: 0; transition: opacity .12s; }
+.side:hover .rule .act { opacity: 1; }
+.rule .plus { border: 0; background: var(--m-hover); color: var(--m-ink-2); width: 18px; height: 18px; border-radius: 5px; font: 600 13px var(--ui); line-height: 1; cursor: pointer; padding: 0; display: grid; place-items: center; }
+.rule .plus:hover, .rule .plus.open { background: var(--m-sel); color: var(--m-ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.row { display: flex; align-items: center; gap: 8px; min-height: 29px; padding: 0 6px 0 8px; border-radius: 8px; font-size: 12.5px; user-select: none; cursor: default; position: relative; }
+.row:hover { background: var(--m-hover); }
+.row.on { background: var(--m-sel); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.row.dim .t { color: var(--m-ink-2); }
+.row.fresh { animation: fresh 1.6s ease-out; }
+@keyframes fresh { 0% { background: var(--new); } 70% { background: var(--new); } }
+@media (prefers-reduced-motion: reduce) { .row.fresh { animation: none; background: var(--new); } }
+.row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .m { font-size: 11px; color: var(--m-ink-3); font-variant-numeric: tabular-nums; }
+.row.child { padding-left: 26px; }
+.row .rplus { opacity: 0; border: 0; background: none; color: var(--m-ink-2); width: 18px; height: 18px; border-radius: 5px; font: 600 13px var(--ui); line-height: 1; cursor: pointer; padding: 0; }
+.row:hover .rplus, .row .rplus.open { opacity: 1; }
+.row .rplus:hover, .row .rplus.open { background: var(--m-sel); color: var(--m-ink); }
+.row.door { cursor: pointer; }
+.gl { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center; color: #fff; font-size: 9.5px; font-weight: 700; background: var(--f); }
+.gl.plain { background: none; color: var(--m-ink-2); font-size: 13px; font-weight: 500; }
+.fav .gl { width: 20px; height: 20px; border-radius: 5px; }
+.foot { border-top: 1px solid var(--m-rule); padding: 7px 4px 0; font-size: 11.5px; color: var(--m-ink-2); display: flex; gap: 7px; align-items: center; }
+.foot b { color: var(--m-ink); font-weight: 600; }
+.foot .tm { margin-left: auto; font-variant-numeric: tabular-nums; }
+.chk { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--m-ink-3); flex: none; }
+
+/* Menus and the gallery: absolutely placed inside .win, at the door that opened them. */
+.pop { position: absolute; z-index: 6; border-radius: 9px; background: var(--menu); box-shadow: var(--shadow); padding: 5px; border: 1px solid var(--m-rule); font-size: 12.5px; color: var(--m-ink); }
+.menu { min-width: 228px; }
+.mi { display: flex; align-items: center; gap: 8px; padding: 3px 8px; min-height: 22px; border-radius: 5px; cursor: default; white-space: nowrap; }
+.mi:hover, .mi.hov { background: var(--hl); color: var(--hl-ink); }
+.mi:hover .k, .mi.hov .k, .mi:hover .sub2, .mi.hov .sub2 { color: inherit; opacity: .8; }
+.mi .k { margin-left: auto; color: var(--m-ink-3); font-size: 11.5px; padding-left: 14px; }
+.mi .sub2 { color: var(--m-ink-3); font-size: 11px; }
+.mi .gl { width: 15px; height: 15px; font-size: 9px; }
+.mh { font-size: 11px; font-weight: 600; color: var(--m-ink-3); padding: 6px 8px 2px; }
+.ms { height: 1px; background: var(--m-rule); margin: 4px 6px; }
+.gal { width: 300px; padding: 8px; display: grid; gap: 8px; }
+.gal .mh { padding: 0 2px; }
+.gg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.gt { border: 0; background: var(--m-hover); border-radius: 9px; padding: 8px 2px 6px; display: grid; justify-items: center; gap: 5px; font: 11px var(--ui); color: var(--m-ink); cursor: pointer; }
+.gt:hover { background: var(--m-sel); box-shadow: 0 0 0 1px var(--m-rule), 0 1px 2px rgba(0,0,0,.08); }
+.gt:focus-visible { outline: 2px solid var(--accent); }
+.gt .gl { width: 24px; height: 24px; border-radius: 6px; font-size: 12px; }
+.gal .back { border: 0; background: none; font: 11.5px var(--ui); color: var(--accent); cursor: pointer; padding: 0 2px; justify-self: start; }
+.sugg { left: 8px; right: 8px; width: auto; }
+.toast { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); background: var(--menu); color: var(--m-ink); border: 1px solid var(--m-rule); box-shadow: var(--shadow); border-radius: 9px; padding: 7px 12px; font-size: 12px; z-index: 7; max-width: 80%; text-align: center; }
+
+.content { flex: 1; min-width: 0; padding: 8px 8px 8px 0; display: grid; gap: 6px; }
+.tile { min-width: 0; min-height: 0; border-radius: 10px; overflow: hidden; background: var(--pagebg); box-shadow: 0 0 0 1px var(--m-rule), 0 1px 3px rgba(0,0,0,.08); display: flex; flex-direction: column; cursor: default; }
+.tile.focus { box-shadow: 0 0 0 2px var(--c), 0 1px 3px rgba(0,0,0,.08); }
+.tile.fresh { animation: tfresh 1.2s ease-out; }
+@keyframes tfresh { from { box-shadow: 0 0 0 3px var(--accent); } }
+@media (prefers-reduced-motion: reduce) { .tile.fresh { animation: none; } }
+.tile .nav { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); font-size: 11.5px; color: var(--m-ink-2); flex: none; white-space: nowrap; overflow: hidden; }
+.tile .nav b { color: var(--m-ink); }
+.tile .b { padding: 12px 14px; display: grid; gap: 8px; align-content: start; font-size: 12px; min-height: 0; overflow: hidden; }
+.tile h2 { font-size: 15px; margin: 0; }
+.ln { height: 7px; border-radius: 4px; background: var(--line); }
+.frow { display: flex; gap: 8px; align-items: center; font-size: 12px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.frow .d { margin-left: auto; color: var(--m-ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.trow { display: grid; grid-template-columns: 96px 1fr 44px; gap: 8px; align-items: center; font-size: 11.5px; }
+.trow .bar2 { height: 9px; border-radius: 3px; background: var(--f); }
+.trow .h { text-align: right; font-variant-numeric: tabular-nums; color: var(--m-ink-2); }
+.seat { display: grid; gap: 3px; padding: 6px 8px; border-radius: 7px; background: var(--m-hover); font-size: 11.5px; }
+
+.panel { display: grid; gap: 12px; align-content: start; }
+.q { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 12px; display: grid; gap: 8px; margin: 0; }
+.q h3 { margin: 0; font-size: 12.5px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+.q h3 span { font: 11px var(--mono); color: var(--ink-3); }
+.q p { margin: 0; font-size: 11.5px; color: var(--ink-2); line-height: 1.45; }
+.opts { display: grid; gap: 4px; }
+.opt { display: grid; grid-template-columns: 16px 1fr; gap: 6px; align-items: start; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 12px; line-height: 1.35; }
+.opt:hover { background: var(--chip); }
+.opt input { margin: 2px 0 0; accent-color: var(--accent); }
+.opt small { display: block; color: var(--ink-2); font-size: 11px; }
+.opt:has(input:checked) { background: var(--pick); }
+.opt:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chips { display: flex; gap: 4px; padding: 4px 4px 6px; border-bottom: 1px solid var(--m-rule); margin-bottom: 4px; }
+.chip { border: 0; background: var(--m-hover); border-radius: 7px; width: 28px; height: 26px; display: grid; place-items: center; cursor: pointer; padding: 0; color: var(--m-ink-2); font: 600 12px var(--ui); }
+.chip:hover { background: var(--m-sel); box-shadow: 0 0 0 1px var(--m-rule); }
+.chip .gl { width: 16px; height: 16px; }
+dl.dec { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 11.5px; }
+dl.dec dt { color: var(--ink-3); }
+dl.dec dd { margin: 0; color: var(--ink-2); }
+textarea#note { font: 12px/1.4 var(--ui); color: var(--ink); background: var(--chip); border: 1px solid var(--rule); border-radius: 8px; padding: 7px; resize: vertical; min-height: 54px; }
+textarea#note:focus-visible { outline: 2px solid var(--accent); }
+.copy { display: flex; gap: 8px; align-items: center; }
+.copy button { font: 12px var(--ui); padding: 6px 10px; border-radius: 8px; border: 1px solid var(--rule); background: var(--chip); color: var(--ink); cursor: pointer; }
+.copy button:focus-visible { outline: 2px solid var(--accent); }
+.copy span { font-size: 11.5px; color: var(--ink-2); }
+pre#summary { margin: 0; font: 11px/1.5 var(--mono); white-space: pre-wrap; color: var(--ink-2); background: var(--chip); border-radius: 8px; padding: 8px; overflow-x: auto; }
+@media (max-width: 640px) { .stage { height: 660px; } .content { display: none; } .side { width: 100%; } .win { inset: 10px; } }
+</style>
+
+<div class="wrap">
+  <div style="min-width:0">
+    <h1>Adding a folder, a Time view or any card from the sidebar · decided</h1>
+    <p class="sub">Decided after two rounds; recorded in docs/spaces.md (Adding cards from the sidebar). The controls still switch the mock. Click the field (⌘T / ⌘L in the app), type “time”, “folder”, “+day” or “~/Do”, use ↑↓ and Return.</p>
+    <div class="bar">
+      <span>Window</span>
+      <div class="tog" role="group" aria-label="Window"><button id="w-space" data-win="space">Space · Home</button><button id="w-project" data-win="project">Project · Folio</button></div>
+      <button class="reset" id="reset">Reset the window</button>
+      <span class="hint" id="doorhint"></span>
+    </div>
+    <div class="stage">
+      <div class="win" id="win">
+        <div class="side" id="side"></div>
+        <div class="content" id="content"></div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="panel"></div>
+</div>
+
+<script>
+/* Round 1, decided 2026-11-05. */
+const DECIDED = [
+  ['The door', 'The address field (⌘T / ⌘L): type a kind’s name. New Tab stays the web row.'],
+  ['Right-click the sidebar', 'The add list, as a menu.'],
+  ['The list’s shape', 'File ▸ New Card’s menu, views in a submenu (folder’s +, right-click).'],
+  ['Where it shows', 'In the tile you’re in.'],
+  ['Where it’s listed', 'Where you asked: a folder’s + (on hover) adds into that frame.'],
+  ['Choosing the folder', 'Recent folders first, then Choose….'],
+  ['“Folder”', 'Keep both: frames are sidebar folders, New Folder… is a Finder folder.'],
+  ['The empty field', 'Lists the kinds under “Make a card”, below recent pages.'],
+  ['Return on a name', 'The whole name makes the card, filled in as you type; an address fills in first.'],
+  ['Paths', '~ or / lists folders and files.'],
+  ['“folder”', 'Recent folders are the rows; one Return.'],
+  ['From the field', 'Top of Today / Cards.'],
+];
+const Q = [
+  { id: 'empty', n: 'Q8', title: 'The empty field', why: '⌘T or a click opens the field with nothing typed. Today it lists nothing until you type.',
+    opts: [
+      ['kinds', 'Lists the kinds', 'Every kind under “Make a card”, below recent pages. Taller, but you see what’s there.'],
+      ['chips', 'A row of kind icons', 'One line of icons over the suggestions (Web, Text, File, Folder, Time, Day, …); click one, or type its name.'],
+      ['hint', 'A hint only', 'The placeholder says “Search, address, or a card: time, folder…”. Kinds appear once you type.'],
+    ]},
+  { id: 'enter', n: 'Q9', title: 'Return on a kind’s name', why: 'Words that aren’t an address are a search today. “time” could be either.',
+    opts: [
+      ['exact', 'The whole name makes the card', '“time” ↩ is a Time view, filled in as you type (“ti” → time). “time zones” ↩ searches.'],
+      ['search', 'Search stays first', 'Kinds are rows under the search; ↓ ↩ picks one. Nothing about Return changes.'],
+      ['prefix', 'Only after +', '“+time” ↩ makes the view; plain words search as today. A + typed alone lists every kind.'],
+    ]},
+  { id: 'paths', n: 'Q10', title: 'Typing a path', why: 'A folder or file is a place on disk: ~ or / could find it directly.',
+    opts: [
+      ['yes', 'Paths list folders and files', '“~/Do” lists Documents, Downloads; ↩ makes a folder or file card. Tab goes into a folder.'],
+      ['no', 'No paths', 'Folders come from the folder kind’s recents and Choose….'],
+    ]},
+  { id: 'fstep', n: 'Q11', title: 'Typing “folder”', why: 'Recent folders come first (Q6). How many steps to one?',
+    opts: [
+      ['inline', 'Recents are the rows', '“folder” lists Folder · project-manager, Folder · Downloads, …, Choose Folder…. One ↩.'],
+      ['two', 'Then a second list', '“folder” ↩, then the list turns into recent folders. Two ↩.'],
+    ]},
+  { id: 'alands', n: 'Q12', title: 'Where a card from the field is listed', why: 'The field has no place of its own. A folder’s + already says where.',
+    opts: [
+      ['top', 'Top of Today / Cards', 'As ⌘T’s web cards.'],
+      ['focused', 'Beside the card in front', 'Into the folder (or Pinned) of the card in the tile you’re in. Click a Recipes card, then make one.'],
+    ]},
+];
+const DEFAULT = { door: 'address', ctx: 'yes', shape: 'menu', shows: 'here', lands: 'context', folder: 'recents', naming: 'keep',
+  empty: 'kinds', enter: 'exact', paths: 'yes', fstep: 'inline', alands: 'top' };
+const pick = { ...DEFAULT };
+let note = '';
+try { { const saved = JSON.parse(localStorage.getItem('fa-pick2') || '{}'); for (const q of Q) if (saved[q.id]) pick[q.id] = saved[q.id]; } note = localStorage.getItem('fa-note') || ''; } catch (e) {}
+let win = 'space';
+try { win = localStorage.getItem('fa-win') || 'space'; } catch (e) {}
+
+const gl = (t, f) => `<span class="gl" style="--f:${f}">${t}</span>`;
+const plain = t => `<span class="gl plain">${t}</span>`;
+const FOLDER_SYM = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 4.5h4l1.3 1.5H14v6.5H2z"/></svg>';
+const FRAME_SYM = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.6"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/></svg>';
+
+/* Every kind CanvasAddCommand offers, with what its card looks like here. */
+const KINDS = {
+  web:     { menu: 'New Web Card…', tile: 'Web', g: gl('◎', '#2f6fe4'), group: 'cards', words: 'web page tab site url' },
+  card:    { menu: 'New Card', tile: 'Text', g: gl('¶', '#8a7a62'), group: 'cards', words: 'card text note' },
+  file:    { menu: 'New File…', tile: 'File', g: gl('▤', '#6b7280'), group: 'cards', words: 'file document' },
+  folder:  { menu: 'New Folder…', tile: 'Folder', g: gl('▰', '#3b82f6'), group: 'cards', words: 'folder finder directory' },
+  private: { menu: 'New Private Web Card…', tile: 'Private', g: gl('◌', '#4b5563'), group: 'cards', words: 'private web incognito' },
+  day:     { menu: 'Day', tile: 'Day', g: gl('D', '#d08a1e'), group: 'views', sub: 'Today’s sittings', words: 'day today journal' },
+  left:    { menu: 'Leftovers', tile: 'Leftovers', g: gl('L', '#9a6b3f'), group: 'views', sub: 'Left open', words: 'leftovers open' },
+  coming:  { menu: 'Coming Up', tile: 'Coming Up', g: gl('C', '#c0392b'), group: 'views', sub: 'Due soon', words: 'coming up due deadline' },
+  projects:{ menu: 'Projects', tile: 'Projects', g: gl('P', '#3f7d58'), group: 'views', sub: 'Every project', words: 'projects portfolio' },
+  time:    { menu: 'Time', tile: 'Time', g: gl('T', '#0e8f8f'), group: 'views', sub: 'Where the time went', words: 'time hours spent' },
+  waiting: { menu: 'Waiting', tile: 'Waiting', g: gl('W', '#7c5cbf'), group: 'views', sub: 'Waiting on', words: 'waiting blocked' },
+  search:  { menu: 'Search', tile: 'Search', g: gl('S', '#5b6bd6'), group: 'views', sub: 'Tasks matching', words: 'search find' },
+  frame:   { menu: 'New Frame', tile: 'Frame', g: plain(FRAME_SYM), group: 'frame', words: 'frame group' },
+};
+function kindName(k) {
+  if (k === 'folder' && pick.naming === 'arc') return 'Finder Folder…';
+  if (k === 'frame' && pick.naming === 'arc') return 'New Folder';
+  if (KINDS[k].group === 'views' && pick.shape !== 'menu') return 'New ' + KINDS[k].menu + ' View';
+  return KINDS[k].menu;
+}
+function tileName(k) {
+  if (k === 'folder' && pick.naming === 'arc') return 'Finder';
+  if (k === 'frame' && pick.naming === 'arc') return 'Folder';
+  return KINDS[k].tile;
+}
+function frameIcon() { return plain(pick.naming === 'groups' ? FRAME_SYM : FOLDER_SYM); }
+function finderIcon() { return pick.naming === 'arc' ? gl('☺', '#3b82f6') : KINDS.folder.g; }
+
+/* The two windows' starting state. Card ids map to tile bodies below. */
+const SEED = {
+  space: {
+    name: 'Home', color: '#6a5acd',
+    favs: [gl('M', '#d44638'), gl('C', '#1a73e8'), gl('♪', '#fa2d48'), gl('N', '#000')],
+    workspaces: [['Trip planning', [gl('M', '#34a853'), gl('A', '#ff5a5f')]]],
+    pinned: [{ id: 'gm', t: 'Mail', g: gl('M', '#d44638'), kind: 'web' }, { id: 'cal', t: 'Calendar', g: gl('C', '#1a73e8'), kind: 'web' }],
+    folders: [{ id: 'f1', t: 'Recipes', open: true, rows: [{ id: 'r1', t: 'Serious Eats — Ragù', g: gl('S', '#c0392b'), kind: 'web' }, { id: 'r2', t: 'NYT Cooking', g: gl('N', '#111'), kind: 'web' }] }],
+    loose: [{ id: 'arc', t: 'Arc — sidebar teardown', g: gl('A', '#e5484d'), kind: 'web' }, { id: 'wx', t: 'Weather — Chicago', g: gl('W', '#0ea5e9'), kind: 'web' }],
+    tiles: ['arc', 'wx'], focus: 0,
+  },
+  project: {
+    name: 'Folio', color: '#3f7d58',
+    favs: null,
+    workspaces: [['Release', [gl('G', '#24292f'), gl('A', '#6b7280'), gl('M', '#3b82f6')]]],
+    pinned: [{ id: 'tf', t: 'TestFlight', g: gl('T', '#0ea5e9'), kind: 'web' }, { id: 'fg', t: 'Figma — Frame v3', g: gl('F', '#a259ff'), kind: 'web' }],
+    folders: [{ id: 'f2', t: 'Sidebar research', open: true, rows: [{ id: 'ar', t: 'Arc — sidebar teardown', g: gl('A', '#e5484d'), kind: 'web' }, { id: 'hn', t: 'HN thread on Arc', g: gl('Y', '#f97316'), kind: 'web' }] }],
+    loose: [{ id: 'pr', t: 'GitHub — #412 Frame for projects', g: gl('G', '#24292f'), kind: 'web' }, { id: 'sp', t: 'docs/spaces.md', g: gl('M', '#3b82f6'), kind: 'file' }],
+    tiles: ['pr', 'sp'], focus: 0,
+  },
+};
+let S;
+function reset() { S = JSON.parse(JSON.stringify(SEED[win])); S.seq = 0; S.fresh = null; S.freshTile = null; S.popup = null; S.query = ''; S.toast = ''; }
+reset();
+
+function allRows() { return [...S.pinned, ...S.folders.flatMap(f => f.rows), ...S.loose]; }
+function cardById(id) { return allRows().find(r => r.id === id); }
+
+/* Adding: the one place a kind becomes a card, as CanvasBoardView.add(_:at:). */
+const RECENT_FOLDERS = () => win === 'project'
+  ? [['project-manager', 'This project’s folder'], ['pm-mac', '~/dev/project-manager'], ['Downloads', '~']]
+  : [['Downloads', '~'], ['Recipes', '~/Documents'], ['Taxes 2026', '~/Documents']];
+function add(kind, extra = {}) {
+  closePop(); S.query = ''; S.sel = null;
+  if (kind === 'frame') {
+    const t = pick.naming === 'arc' ? 'Untitled Folder' : 'Untitled Frame';
+    const f = { id: 'nf' + (++S.seq), t, open: true, rows: [] };
+    S.folders.unshift(f); S.fresh = f.id;
+    toast(pick.naming === 'arc' ? 'A new folder, named as you type. On the board it’s a frame.' : 'A frame on the board, a folder in the sidebar.');
+    return render();
+  }
+  let title = {
+    web: 'New Tab', card: 'Untitled card', file: 'notes/2026-11-05.md', private: 'Private — New Tab',
+    day: 'Today', left: 'Leftovers', coming: 'Coming Up · Next 7 Days', projects: 'Projects', time: 'Time · Today', waiting: 'Waiting', search: 'Search',
+  }[kind];
+  if (kind === 'folder') title = extra.name || (win === 'project' ? 'project-manager' : 'Downloads');
+  else if (extra.name) title = extra.name;
+  const id = 'n' + (++S.seq);
+  const row = { id, t: title, g: kind === 'folder' ? finderIcon() : KINDS[kind].g, kind };
+  const into = extra.into && S.folders.find(f => f.id === extra.into);
+  if (extra.into === 'pinned') S.pinned.push(row);
+  else if (into) { into.rows.unshift(row); into.open = true; } else S.loose.unshift(row);
+  S.fresh = id;
+  if (pick.shows === 'here') { S.tiles[S.focus] = id; S.freshTile = S.focus; }
+  else if (pick.shows === 'beside') { S.tiles.splice(S.focus + 1, 0, id); S.focus = S.focus + 1; S.freshTile = S.focus; if (S.tiles.length > 4) S.tiles.shift(), S.focus--; }
+  else { S.freshTile = null; toast('Listed. Click it to show it.'); }
+  render();
+}
+function chooseFolder(into) {
+  if (pick.folder === 'panel') {
+    toast(win === 'project' ? 'Open panel, starting in ~/dev/project-manager…' : 'Open panel, starting where it was last…');
+    setTimeout(() => add('folder', { into }), 900);
+    closePop(); return;
+  }
+}
+
+/* The doors. */
+function doorRowLabel() { return pick.door === 'newrow' ? 'New…' : 'New Tab'; }
+function ruleHTML() {
+  const name = win === 'space' ? 'Today' : 'Cards';
+  const clear = win === 'space' ? '<span class="act">Clear</span>' : '';
+  const plus = pick.door === 'plus' ? `<button class="plus ${S.popup?.anchor === 'rule' ? 'open' : ''}" data-door="rule" aria-label="Add a card" aria-haspopup="menu">+</button>` : '';
+  return `<div class="rule" data-ctx="rule">${name}<span class="grow"></span>${clear}${plus}</div>`;
+}
+function rowHTML(r, opts = {}) {
+  const on = S.tiles[S.focus] === r.id ? 'on' : '';
+  const fresh = S.fresh === r.id ? 'fresh' : '';
+  const icon = r.kind === 'folder' ? finderIcon() : r.g;
+  return `<div class="row ${opts.child ? 'child' : ''} ${on} ${fresh}" data-card="${r.id}">${icon}<span class="t">${r.t}</span></div>`;
+}
+function folderHTML(f) {
+  const plusBtn = pick.lands === 'context' && pick.door !== 'none'
+    ? `<button class="rplus ${S.popup?.anchor === 'f:' + f.id ? 'open' : ''}" data-door="f:${f.id}" aria-label="Add a card to ${f.t}">+</button>` : '';
+  let h = `<div class="row ${S.fresh === f.id ? 'fresh' : ''}" data-fold="${f.id}">${frameIcon()}<span class="t">${f.t}</span>${plusBtn}</div>`;
+  if (f.open) h += f.rows.map(r => rowHTML(r, { child: true })).join('') || `<div class="row child dim"><span class="t" style="font-size:11.5px">Empty: drag cards here</span></div>`;
+  return h;
+}
+function side() {
+  let h = `<div class="lights"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="grow"></span>`;
+  if (pick.door === 'titlebar') h += `<button class="ib ${S.popup?.anchor === 'title' ? 'open' : ''}" data-door="title" aria-label="Add a card" aria-haspopup="menu">+</button>`;
+  h += `<button class="ib" aria-label="Fold the sidebar" tabindex="-1"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M6 3v10"/></svg></button></div>`;
+  if (win === 'project') h += `<div class="head"><span class="sq"></span>Folio<span class="chev">▾</span></div>`;
+  const focusCard = cardById(S.tiles[S.focus]);
+  const addr = focusCard && focusCard.kind === 'web' ? (win === 'space' ? 'seriouseats.com/sidebar' : 'github.com/shanberg/project-manager/pull/412') : '';
+  if (pick.door === 'address' && S.popup?.anchor === 'addr') {
+    h += `<label class="url focus"><span style="color:var(--m-ink-3)">⌕</span><input id="addr" aria-label="Address or card kind" value="${S.query.replace(/"/g, '&quot;')}" placeholder="${pick.empty === 'hint' ? (pick.enter === 'prefix' ? 'Search, address, or + for a card' : 'Search, address, or a card: time, folder…') : 'Search or enter address'}" autocomplete="off"></label>`;
+  } else {
+    h += `<div class="url" data-door="${pick.door === 'address' ? 'addr' : ''}">${addr || '<span style="color:var(--m-ink-3)">Search or enter address</span>'}</div>`;
+  }
+  if (S.favs) h += `<div class="favs">${S.favs.map(f => `<div class="fav">${f}</div>`).join('')}</div>`;
+  h += `<div class="list" id="list">`;
+  if (win === 'project') h += `<div class="row">${plain('¶')}<span class="t">Notes</span></div>`;
+  h += `<div class="row dim">${plain('▦')}<span class="t">Board</span><span class="m">${allRows().length}</span></div>`;
+  for (const [n, icons] of S.workspaces) h += `<div class="row"><span style="display:flex;gap:2px">${icons.join('')}</span><span class="t">${n}</span></div>`;
+  h += S.pinned.map(r => rowHTML(r)).join('');
+  h += ruleHTML();
+  h += `<div class="row dim door ${S.popup?.anchor === 'newrow' ? 'on' : ''}" data-door="newrow">${plain('+')}<span class="t">${doorRowLabel()}</span><span class="m">⌘T</span></div>`;
+  h += S.folders.map(folderHTML).join('');
+  h += S.loose.map(r => rowHTML(r)).join('');
+  h += `<div class="fill" data-ctx="empty"></div></div>`;
+  h += win === 'project'
+    ? `<div class="foot"><span class="chk"></span><b style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Sidebar: adding cards</b><span class="tm">0:42</span></div>`
+    : `<div class="foot"><span class="gl" style="--f:var(--c)"></span><b>Home</b><span class="tm">⌘S</span></div>`;
+  return h;
+}
+
+/* The list, in the shape Q3 picks. */
+function menuItems(into, hovViews) {
+  const k = id => `<div class="mi" role="menuitem" data-kind="${id}" data-into="${into || ''}">${id === 'folder' ? finderIcon() : KINDS[id].g}<span>${kindName(id)}</span>${id === 'web' ? '<span class="k">⌘T</span>' : ''}${id === 'folder' && pick.folder === 'recents' ? '<span class="k">▸</span>' : ''}</div>`;
+  let h = `<div class="mh">Cards</div>` + ['web', 'card', 'file', 'folder', 'private'].map(k).join('');
+  const views = ['day', 'left', 'coming', 'projects', 'time', 'waiting', 'search'];
+  if (pick.shape === 'menu') h += `<div class="ms"></div><div class="mi ${hovViews ? 'hov' : ''}" data-sub="views">${plain('◫')}<span>New View</span><span class="k">▸</span></div>`;
+  else h += `<div class="mh">Views</div>` + views.map(k).join('');
+  h += `<div class="ms"></div>` + k('frame');
+  return h;
+}
+function viewSubmenu(into) {
+  return ['day', 'left', 'coming', 'projects', 'time', 'waiting', 'search'].map(id =>
+    `<div class="mi" data-kind="${id}" data-into="${into || ''}">${KINDS[id].g}<span>${KINDS[id].menu}</span><span class="k sub2">${KINDS[id].sub}</span></div>`).join('');
+}
+function folderSubmenu(into) {
+  return RECENT_FOLDERS().map(([n, where]) => `<div class="mi" data-folder="${n}" data-into="${into || ''}">${finderIcon()}<span>${n}</span><span class="k sub2">${where}</span></div>`).join('')
+    + `<div class="ms"></div><div class="mi" data-folder="" data-into="${into || ''}"><span style="width:15px"></span><span>Choose…</span></div>`;
+}
+function gallery(into) {
+  if (S.popup.galleryFolder) {
+    return `<button class="back" data-galback="1">‹ All kinds</button><div class="mh">${pick.naming === 'arc' ? 'Finder folder' : 'Folder'}</div>`
+      + `<div>${folderSubmenu(into)}</div>`;
+  }
+  const t = id => `<button class="gt" data-kind="${id}" data-into="${into || ''}">${id === 'folder' ? finderIcon() : KINDS[id].g}<span>${tileName(id)}</span></button>`;
+  return `<div class="mh">Cards</div><div class="gg">${['web', 'card', 'file', 'folder'].map(t).join('')}</div>`
+    + `<div class="mh">Views</div><div class="gg">${['day', 'left', 'coming', 'projects', 'time', 'waiting', 'search'].map(t).join('')}${t('frame')}</div>`
+    + `<div class="mi" data-kind="private" data-into="${into || ''}" style="margin-top:-2px">${KINDS.private.g}<span>New Private Web Card…</span></div>`;
+}
+/* The field's rows: each {html, act}. The first act is what Return does unless a row is chosen. */
+const FS = ['~/Documents/', '~/Downloads/', '~/Desktop/', '~/dev/', '~/dev/project-manager/', '~/dev/project-manager/docs/', '~/dev/project-manager/docs/spaces.md', '~/dev/project-manager/README.md', '~/Documents/Recipes/', '~/Documents/Taxes 2026/'];
+const HISTORY = () => win === 'project' ? [['github.com/shanberg/project-manager', 'GitHub'], ['developer.apple.com/documentation/appkit', 'AppKit']] : [['seriouseats.com', 'Serious Eats'], ['weather.com/chicago', 'Weather']];
+function kindRow(k, label) {
+  const name = label || kindName(k).replace(/^New /, '').replace('…', '');
+  return { html: `${k === 'folder' ? finderIcon() : KINDS[k].g}<span>${name}</span><span class="k sub2">${KINDS[k].group === 'views' ? 'View' : KINDS[k].group === 'frame' ? 'Frame' : 'Card'}</span>`, act: { kind: k } };
+}
+function folderRows() {
+  return RECENT_FOLDERS().map(([n, where]) => ({ html: `${finderIcon()}<span>Folder · ${n}</span><span class="k sub2">${where}</span>`, act: { kind: 'folder', name: n } }))
+    .concat([{ html: `${finderIcon()}<span>Choose Folder…</span>`, act: { choose: true } }]);
+}
+const ORDER = ['web', 'card', 'file', 'folder', 'day', 'left', 'coming', 'projects', 'time', 'waiting', 'search', 'frame', 'private'];
+const NAMES = { web: ['web', 'tab'], card: ['card', 'text', 'note'], file: ['file'], folder: ['folder'], day: ['day'], left: ['leftovers'], coming: ['coming up'], projects: ['projects'], time: ['time'], waiting: ['waiting'], search: ['search'], frame: ['frame'], private: ['private'] };
+function matchKinds(q) { return ORDER.filter(k => NAMES[k].some(n => n.startsWith(q))); }
+function rows() {
+  const raw = S.query, q0 = raw.trim().toLowerCase();
+  const search = { html: `${plain('⌕')}<span>Search for “${raw.trim().replace(/</g, '&lt;')}”</span>`, act: { search: raw.trim() } };
+  const hist = HISTORY().map(([u, t]) => ({ html: `${gl('◎', '#2f6fe4')}<span>${t}</span><span class="k sub2">${u}</span>`, act: { url: u, title: t } }));
+  if (S.popup?.galleryFolder) return { rows: folderRows(), head: 'Recent folders' };
+  if (!q0) {
+    if (pick.enter === 'prefix' || pick.empty !== 'kinds') return { rows: hist, chips: pick.empty === 'chips' };
+    return { rows: hist, kinds: ORDER.map(k => kindRow(k)) };
+  }
+  // Paths
+  if (pick.paths === 'yes' && (q0.startsWith('~') || q0.startsWith('/'))) {
+    const hits = FS.filter(p => p.toLowerCase().startsWith(q0) && p.slice(q0.length).replace(/\/$/, '').indexOf('/') < 0 && p !== q0);
+    return { rows: hits.map(p => { const dir = p.endsWith('/'); const n = p.replace(/\/$/, '').split('/').pop();
+      return { html: `${dir ? finderIcon() : KINDS.file.g}<span>${n}</span><span class="k sub2">${p.replace(/[^/]*\/?$/, '')}</span>`, act: dir ? { kind: 'folder', name: n } : { kind: 'file', name: p } }; }), head: 'On this Mac' };
+  }
+  let q = q0, prefixed = false;
+  if (pick.enter === 'prefix') { if (q.startsWith('+')) { prefixed = true; q = q.slice(1).trim(); } }
+  const kinds = (pick.enter !== 'prefix' || prefixed) ? (q ? matchKinds(q) : ORDER) : [];
+  let kr = [];
+  for (const k of kinds) { if (k === 'folder' && pick.fstep === 'inline') kr.push(...folderRows()); else kr.push(kindRow(k)); }
+  if (prefixed) return { rows: kr, head: 'Make a card' };
+  const looksURL = q0.includes('.');
+  const url = looksURL ? [{ html: `${gl('◎', '#2f6fe4')}<span>${q0}</span>`, act: { url: q0, title: q0 } }] : [];
+  const exact = pick.enter === 'exact' && kinds.length && kinds.some(k => NAMES[k].some(n => n === q0 || (n.startsWith(q0) && q0.length >= 2)));
+  if (exact) {
+    const fill = kinds.map(k => NAMES[k].find(n => n.startsWith(q0))).find(Boolean);
+    return { rows: kr, after: [search, ...url], head: 'Make a card', fill: fill && fill !== q0 ? fill.slice(q0.length) : '' };
+  }
+  return { rows: [...url, search], kinds: kr };
+}
+function suggestions() {
+  const r = rows();
+  S.list = [...r.rows, ...(r.kinds || []), ...(r.after || [])];
+  let i = 0;
+  const item = x => { const idx = i++; const lit = S.sel === idx || (S.sel == null && idx === 0 && S.query.trim()); return `<div class="mi ${lit ? 'hov' : ''}" data-row="${idx}">${x.html}${idx === 0 && S.query.trim() ? '<span class="k">↩</span>' : ''}</div>`; };
+  let h = '';
+  if (r.chips) h += `<div class="chips">${['web', 'card', 'file', 'folder', 'time', 'day', 'coming', 'waiting'].map(k => `<button class="chip" data-chip="${k}" title="${kindName(k)}">${k === 'folder' ? finderIcon() : KINDS[k].g}</button>`).join('')}<button class="chip more" data-chip="more" title="Every kind">…</button></div>`;
+  if (r.head) h += `<div class="mh">${r.head}</div>`;
+  h += r.rows.map(item).join('');
+  if (r.kinds && r.kinds.length) h += `<div class="mh">${S.query.trim() ? 'Make a card' : 'Make a card: type its name'}</div>` + r.kinds.map(item).join('');
+  if (r.after && r.after.length) h += `<div class="ms"></div>` + r.after.map(item).join('');
+  if (!S.list.length && !r.chips) h += `<div class="mi" style="color:var(--m-ink-3)">Nothing found</div>`;
+  S.fill = r.fill || '';
+  return h;
+}
+function doRow(x) {
+  const a = x.act; const into = pick.alands === 'focused' ? focusedPlace() : null;
+  if (a.choose) return chooseFolder(into);
+  if (a.kind === 'folder' && !a.name && pick.fstep === 'two') { S.popup.galleryFolder = true; S.query = ''; S.sel = null; return render(); }
+  if (a.kind === 'file' && a.name) return add('file', { into, name: a.name.split('/').pop() });
+  if (a.kind) return add(a.kind, { into, name: a.name });
+  if (a.search) return add('web', { into, name: 'Search: ' + a.search });
+  if (a.url) return add('web', { into, name: a.title });
+}
+function focusedPlace() {
+  const id = S.tiles[S.focus];
+  const f = S.folders.find(f => f.rows.some(r => r.id === id));
+  if (f) return f.id;
+  if (S.pinned.some(r => r.id === id)) return 'pinned';
+  return null;
+}
+function popupHTML() {
+  const p = S.popup; if (!p) return '';
+  if (p.anchor === 'addr') return `<div class="pop menu sugg" id="pop" role="listbox" style="top:${p.y}px">${suggestions()}</div>`;
+  const into = p.into;
+  let h = '';
+  if (pick.shape === 'gallery' && !p.ctx) h = `<div class="pop gal" id="pop" role="dialog" aria-label="Add a card" style="left:${p.x}px;top:${p.y}px">${gallery(into)}</div>`;
+  else h = `<div class="pop menu" id="pop" role="menu" style="left:${p.x}px;top:${p.y}px">${pick.shape === 'gallery' ? menuItems(into).replace(/data-sub="views"/, '') : menuItems(into, p.sub === 'views')}</div>`;
+  if (p.sub === 'views' && p.subY != null) h += `<div class="pop menu" id="sub" role="menu" style="left:${p.subX}px;top:${p.subY}px">${viewSubmenu(into)}</div>`;
+  if (p.sub === 'folder' && p.subY != null) h += `<div class="pop menu" id="sub" role="menu" style="left:${p.subX}px;top:${p.subY}px">${folderSubmenu(into)}</div>`;
+  return h;
+}
+
+/* Tile bodies. */
+function tileBody(id) {
+  const c = cardById(id); if (!c) return '';
+  const nav = (a, b) => `<div class="nav"><b>${a}</b>${b ? ' ' + b : ''}</div>`;
+  const lines = ws => ws.map(w => `<div class="ln" style="width:${w}%"></div>`).join('');
+  switch (c.kind) {
+    case 'folder': {
+      const files = win === 'project' ? [['▰', 'docs', '2 min'], ['▰', 'pm-mac', '1 h'], ['▰', 'pm-cli', 'Mon'], ['▤', 'README.md', 'Tue'], ['▤', 'RELEASE.md', 'Oct 30']]
+        : [['▤', 'Boarding pass.pdf', '9:12'], ['▤', 'IMG_4410.HEIC', 'Yesterday'], ['▰', 'Statements', 'Mon'], ['▤', 'lease-renewal.pdf', 'Nov 1']];
+      return nav(c.t, '· Folder') + `<div class="b">${files.map(([g, n, d]) => `<div class="frow"><span style="color:var(--m-ink-3)">${g}</span>${n}<span class="d">${d}</span></div>`).join('')}</div>`;
+    }
+    case 'time': {
+      const rows = [['Folio', '#3f7d58', 92, '3:41'], ['Kitchen reno', '#c2793b', 38, '1:32'], ['Tax 2026', '#5b6bd6', 20, '0:48'], ['Away', '#9196a1', 9, '0:22']];
+      return nav('Time', '· Today') + `<div class="b"><div style="font-size:11px;color:var(--m-ink-3)">6:23 counted · 0:22 away to answer</div>${rows.map(([n, f, w, hrs]) => `<div class="trow"><span>${n}</span><span class="bar2" style="--f:${f};width:${w}%"></span><span class="h">${hrs}</span></div>`).join('')}</div>`;
+    }
+    case 'day': return nav('Day', '· Today') + `<div class="b"><div class="seat"><b>9:10 · Folio</b>Sidebar: adding cards</div><div class="seat"><b>13:30 · Kitchen reno</b>Order the worktop</div></div>`;
+    case 'card': return nav('Card') + `<div class="b"><span style="color:var(--m-ink-3)">Type…</span></div>`;
+    case 'file': return nav(c.t) + `<div class="b"><h2>${c.t.replace(/^.*\//, '')}</h2>${lines([80, 60, 90, 45])}</div>`;
+    case 'web': case 'private':
+      if (c.t === 'New Tab' || c.t.startsWith('Private')) return nav(c.kind === 'private' ? 'Private' : 'New Tab') + `<div class="b"><span style="color:var(--m-ink-3)">The sidebar’s address field has the keys.</span></div>`;
+      return nav(c.t.split(' — ')[0].toLowerCase().replace(/\s/g, '') + '.com', c.t.split(' — ')[1] || '') + `<div class="b"><h2>${c.t.split(' — ').pop()}</h2>${lines([70, 90, 55, 80, 62])}</div>`;
+    default: return nav(KINDS[c.kind]?.tile || c.t, '· View') + `<div class="b">${lines([60, 80, 50])}</div>`;
+  }
+}
+function content() {
+  const n = S.tiles.length;
+  const el = document.getElementById('content');
+  el.style.gridTemplateColumns = n === 1 ? '1fr' : n === 2 ? '1.3fr 1fr' : n === 3 ? '1.2fr 1fr 1fr' : '1fr 1fr';
+  el.style.gridTemplateRows = n === 4 ? '1fr 1fr' : '1fr';
+  return S.tiles.map((id, i) => `<div class="tile ${i === S.focus ? 'focus' : ''} ${S.freshTile === i ? 'fresh' : ''}" data-tile="${i}">${tileBody(id)}</div>`).join('');
+}
+
+/* Panel. */
+function panel() {
+  let h = `<div class="q"><h3><span>R1–2</span>Decided</h3><dl class="dec">${DECIDED.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></div>`;
+  for (const q of Q) {
+    h += `<fieldset class="q"><legend style="padding:0"><h3><span>${q.n}</span>${q.title}</h3></legend><p>${q.why}</p><div class="opts">`;
+    for (const [v, l, d] of q.opts) h += `<label class="opt"><input type="radio" name="${q.id}" id="${q.id}-${v}" value="${v}" ${pick[q.id] === v ? 'checked' : ''}><span>${l}<small>${d}</small></span></label>`;
+    h += `</div></fieldset>`;
+  }
+  h += `<div class="q"><h3>Your picks</h3><label for="note" style="font-size:11.5px;color:var(--ink-2)">Notes for the next round</label><textarea id="note" placeholder="What felt wrong, what’s missing…"></textarea><pre id="summary"></pre><div class="copy"><button id="copy">Copy picks</button><span id="copied" aria-live="polite"></span></div></div>`;
+  return h;
+}
+function summary() {
+  const lines = ['Round 2'].concat(Q.map(q => `${q.n} ${q.title}: ${q.opts.find(o => o[0] === pick[q.id])[1]}`));
+  if (note.trim()) lines.push('', 'Note: ' + note.trim());
+  return lines.join('\n');
+}
+function hint() {
+  return { kinds: 'Try: click the address field, or type “time”, “folder”, “~/Do”.', chips: 'Try: click the address field; the icons make a card.', hint: 'Try: type “time” or “folder” in the address field.' }[pick.empty]
+    + (pick.enter === 'prefix' ? ' (Q9: start with +)' : '') + ' Hover a folder for its +.';
+}
+function render() {
+  document.getElementById('side').innerHTML = side();
+  document.getElementById('content').innerHTML = content();
+  const old = document.getElementById('popwrap'); if (old) old.remove();
+  const wrap = document.createElement('div'); wrap.id = 'popwrap'; wrap.innerHTML = popupHTML() + (S.toast ? `<div class="toast" role="status">${S.toast}</div>` : '');
+  document.getElementById('win').appendChild(wrap);
+  const s = document.getElementById('summary'); if (s) s.textContent = summary();
+  document.getElementById('doorhint').textContent = hint();
+  document.getElementById('w-space').classList.toggle('on', win === 'space');
+  document.getElementById('w-project').classList.toggle('on', win === 'project');
+  document.getElementById('win').style.setProperty('--c', S.color);
+  const a = document.getElementById('addr');
+  if (a) { a.focus(); a.setSelectionRange(a.value.length, a.value.length); }
+  S.fresh = null; S.freshTile = null;
+}
+function closePop() { S.popup = null; }
+let toastTimer;
+function toast(t) { S.toast = t; clearTimeout(toastTimer); toastTimer = setTimeout(() => { S.toast = ''; render(); }, 2600); }
+
+function relPos(el) {
+  const w = document.getElementById('win').getBoundingClientRect(), r = el.getBoundingClientRect();
+  return { x: r.left - w.left, y: r.top - w.top, w: r.width, h: r.height, right: r.right - w.left, bottom: r.bottom - w.top };
+}
+function openAt(anchor, el, into, ctx) {
+  const p = relPos(el);
+  const winH = document.getElementById('win').clientHeight;
+  let x = Math.min(p.x, 250 - 30), y = p.bottom + 4;
+  if (anchor === 'title') x = Math.max(8, p.right - 228);
+  if (anchor === 'addr') { S.popup = { anchor, y: p.bottom + 4 }; return render(); }
+  const est = pick.shape === 'flat' ? 420 : pick.shape === 'gallery' ? 250 : 230;
+  if (y + est > winH - 8) y = Math.max(8, winH - est - 8);
+  S.popup = { anchor, x, y, into, ctx };
+  render();
+}
+
+document.getElementById('side').addEventListener('click', e => {
+  e.fromSide = true; // the window's own click handler below sees this event after the sidebar re-rendered
+  const door = e.target.closest('[data-door]');
+  if (door && door.dataset.door) {
+    const d = door.dataset.door;
+    if (S.popup && S.popup.anchor === d) { closePop(); return render(); }
+    if (d === 'newrow') { if (pick.door === 'newrow') return openAt('newrow', door); return add('web'); }
+    if (d === 'rule' || d === 'title') return openAt(d, door);
+    if (d === 'addr') return openAt('addr', door);
+    if (d.startsWith('f:')) { e.stopPropagation(); return openAt(d, door, d.slice(2)); }
+  }
+  if (S.popup && !e.target.closest('#addr')) { closePop(); render(); }
+  const fold = e.target.closest('[data-fold]');
+  if (fold) { const f = S.folders.find(x => x.id === fold.dataset.fold); f.open = !f.open; return render(); }
+  const c = e.target.closest('[data-card]');
+  if (c) { S.tiles[S.focus] = c.dataset.card; render(); }
+});
+document.getElementById('side').addEventListener('contextmenu', e => {
+  const zone = e.target.closest('[data-ctx]');
+  if (!zone || pick.ctx !== 'yes') return;
+  e.preventDefault();
+  const w = document.getElementById('win').getBoundingClientRect();
+  const winH = document.getElementById('win').clientHeight;
+  const est = pick.shape === 'flat' ? 420 : 230;
+  S.popup = { anchor: 'ctx', ctx: true, x: Math.min(e.clientX - w.left, 30), y: Math.min(e.clientY - w.top, winH - est - 8) };
+  render();
+});
+document.getElementById('win').addEventListener('mouseover', e => {
+  const p = S.popup; if (!p) return;
+  const sub = e.target.closest('[data-sub]'), fk = e.target.closest('.menu [data-kind="folder"]');
+  const item = e.target.closest('#pop .mi');
+  if (sub && p.sub !== 'views') { const r = relPos(sub); p.sub = 'views'; p.subX = Math.min(r.right + 2, document.getElementById('win').clientWidth - 240); p.subY = r.y - 5; return render(); }
+  if (fk && pick.folder === 'recents' && p.sub !== 'folder') { const r = relPos(fk); p.sub = 'folder'; p.subX = Math.min(r.right + 2, document.getElementById('win').clientWidth - 260); p.subY = r.y - 5; return render(); }
+  if (item && !sub && !fk && p.sub) { p.sub = null; p.subY = null; render(); }
+});
+document.getElementById('win').addEventListener('click', e => {
+  if (e.fromSide) return;
+  if (S.skipClick) { S.skipClick = false; return; }
+  const k = e.target.closest('[data-kind]');
+  if (k && e.target.closest('.pop')) {
+    const into = k.dataset.into || (S.popup?.into) || null;
+    if (k.dataset.kind === 'folder') {
+      if (pick.folder === 'recents') {
+        if (pick.shape === 'gallery' && e.target.closest('.gal')) { S.popup.galleryFolder = true; return render(); }
+        if (S.popup?.anchor === 'addr') { S.popup.galleryFolder = true; return render(); }
+        return; /* the submenu is open on hover */
+      }
+      return chooseFolder(into);
+    }
+    return add(k.dataset.kind, { into });
+  }
+  const f = e.target.closest('[data-folder]');
+  if (f) {
+    const into = f.dataset.into || null;
+    if (!f.dataset.folder) { pick.folder = 'panel'; chooseFolder(into); pick.folder = 'recents'; return; }
+    return add('folder', { into, name: f.dataset.folder });
+  }
+  if (e.target.closest('[data-galback]')) { S.popup.galleryFolder = false; return render(); }
+  const t = e.target.closest('[data-tile]');
+  if (t && !S.popup) { S.focus = +t.dataset.tile; render(); }
+  if (S.popup && !e.target.closest('.pop') && !e.target.closest('#side')) { closePop(); render(); }
+});
+document.getElementById('side').addEventListener('input', e => {
+  if (e.target.id !== 'addr') return;
+  S.query = e.target.value; S.sel = null;
+  const pop = document.getElementById('pop'); if (pop) pop.innerHTML = suggestions();
+  // Filled in after the caret, as the real field fills in an address (CanvasAddressTextField).
+  if (S.fill && !/^delete/.test(e.inputType || '')) { const n = S.query.length; e.target.value = S.query + S.fill; e.target.setSelectionRange(n, n + S.fill.length); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S.popup) { closePop(); S.query = ''; S.sel = null; render(); }
+  if (e.target.id !== 'addr' || !S.list) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = S.list.length; if (!n) return;
+    S.sel = S.sel == null ? (e.key === 'ArrowDown' ? (S.query.trim() ? 1 : 0) : n - 1) : Math.min(Math.max(S.sel + (e.key === 'ArrowDown' ? 1 : -1), 0), n - 1);
+    document.getElementById('pop').innerHTML = suggestions();
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (S.fill) { S.query = e.target.value; document.getElementById('pop').innerHTML = suggestions(); }
+    const x = S.list[S.sel ?? 0];
+    if (x && (S.query.trim() || S.sel != null)) doRow(x); else if (!S.query.trim()) { closePop(); add('web', { into: pick.alands === 'focused' ? focusedPlace() : null }); }
+  }
+});
+document.getElementById('win').addEventListener('mousedown', e => {
+  if (e.target.closest('#pop [data-row], #pop [data-chip]')) S.skipClick = true; // its click lands on a re-rendered list
+  // Rows and chips act on press so the field keeps focus, as the real suggestion panel does.
+  const r = e.target.closest('#pop [data-row]');
+  if (r && S.list) { e.preventDefault(); return doRow(S.list[+r.dataset.row]); }
+  const c = e.target.closest('#pop [data-chip]');
+  if (c) {
+    e.preventDefault();
+    if (c.dataset.chip === 'more') { const y = S.popup.y; S.popup = { anchor: 'ctx', ctx: true, x: 8, y }; return render(); }
+    const k = c.dataset.chip, into = pick.alands === 'focused' ? focusedPlace() : null;
+    if (k === 'folder') { S.popup.galleryFolder = true; return render(); }
+    return add(k, { into });
+  }
+});
+document.getElementById('panel').innerHTML = panel();
+document.getElementById('note').value = note;
+document.getElementById('panel').addEventListener('change', e => {
+  if (!e.target.name) return;
+  pick[e.target.name] = e.target.value; closePop();
+  try { localStorage.setItem('fa-pick2', JSON.stringify(pick)); } catch (err) {}
+  render();
+});
+document.getElementById('panel').addEventListener('input', e => {
+  if (e.target.id !== 'note') return;
+  note = e.target.value; try { localStorage.setItem('fa-note', note); } catch (err) {}
+  document.getElementById('summary').textContent = summary();
+});
+document.getElementById('panel').addEventListener('click', e => {
+  if (e.target.id !== 'copy') return;
+  const text = summary(), out = document.getElementById('copied');
+  navigator.clipboard.writeText(text).then(() => out.textContent = 'Copied', () => {
+    const r = document.createRange(); r.selectNodeContents(document.getElementById('summary'));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); out.textContent = 'Selected: press ⌘C';
+  });
+});
+document.querySelector('.bar').addEventListener('click', e => {
+  const w = e.target.closest('[data-win]');
+  if (w) { win = w.dataset.win; try { localStorage.setItem('fa-win', win); } catch (err) {} reset(); return render(); }
+  if (e.target.id === 'reset') { reset(); render(); }
+});
+render();
+</script>

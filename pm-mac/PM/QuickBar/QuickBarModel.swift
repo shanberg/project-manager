@@ -361,6 +361,10 @@ enum QuickBarAction: Equatable {
     /// Switch to capture, keeping what's been typed — for a task you went looking for and didn't find.
     case captureHere(String)
     case newProject
+    /// `@`: a space, beside the projects (docs/spaces.md § Quick bar).
+    case goToSpace(id: String, title: String)
+    /// `@` with nothing answering: a space named for what was typed.
+    case newSpace(String)
     /// Put back the line the last summon was closed on. See `QuickBarModel.restorable`.
     case restore(String)
     /// Capture with nothing focused: add the line to the end of this project's current session.
@@ -371,6 +375,8 @@ enum QuickBarAction: Equatable {
         case .findProject: return "action:findProject"
         case .captureHere: return "action:captureHere"
         case .newProject: return "action:newProject"
+        case .goToSpace(let id, _): return "action:space:\(id)"
+        case .newSpace: return "action:newSpace"
         case .restore: return "action:restore"
         case .captureTo(let target): return "action:captureTo:\(target.key)"
         }
@@ -381,6 +387,8 @@ enum QuickBarAction: Equatable {
         case .findProject: return "Go to a project…"
         case .captureHere(let text): return "Add “\(QuickBarModel.truncate(text, 38))” as a task"
         case .newProject: return "New Project…"
+        case .goToSpace(_, let title): return title
+        case .newSpace(let name): return "New Space “\(QuickBarModel.truncate(name, 38))”"
         case .restore(let text): return "Pick up “\(QuickBarModel.truncate(text, 38))”"
         case .captureTo(let target): return "Add to \(target.displayName)"
         }
@@ -391,6 +399,8 @@ enum QuickBarAction: Equatable {
         case .findProject: return "Then this line has somewhere to go"
         case .captureHere: return nil
         case .newProject: return nil
+        case .goToSpace: return "Space"
+        case .newSpace: return nil
         case .restore: return "What you were typing last time"
         case .captureTo: return "End of its current session"
         }
@@ -401,6 +411,8 @@ enum QuickBarAction: Equatable {
         case .findProject: return "magnifyingglass"
         case .captureHere: return "plus.circle"
         case .newProject: return "plus.square"
+        case .goToSpace: return "square.on.square"
+        case .newSpace: return "plus.rectangle.on.rectangle"
         case .restore: return "arrow.uturn.backward"
         case .captureTo: return "plus"
         }
@@ -770,6 +782,9 @@ final class QuickBarModel {
     var recents: [ProjectIndex.Recent] = []
     @ObservationIgnored
     var allProjects: [ProjectIndex.ProjectEntry] = []
+    /// Every space, open or not, for `@`; empty when the bar is picking a project for something.
+    @ObservationIgnored
+    var spaces: [(id: String, title: String)] = []
 
     /// Every open task the bar can search, supplied by the controller from the project index with the
     /// focused project's own tasks read live over the top. See `QuickBarController.seed`.
@@ -1086,25 +1101,42 @@ final class QuickBarModel {
             return RowSet.capped(matches) { .task($0) }
 
         case .goToProject:
-            if argument.trimmingCharacters(in: .whitespaces).isEmpty {
-                return RowSet(rows: recents.prefix(Self.rowLimit).map {
+            let typed = argument.trimmingCharacters(in: .whitespaces)
+            if typed.isEmpty {
+                let projects: [QuickBarRow] = recents.prefix(Self.rowLimit).map {
                     .project(key: $0.projectKey, name: $0.name,
                              shortName: ProjectCodes.shortName(of: $0.name), domain: "", isArchived: false)
-                })
+                }
+                // Spaces after the recent projects, in the dock's order.
+                let room = max(0, Self.rowLimit - projects.count)
+                return RowSet(rows: projects + spaces.prefix(room).map { .action(.goToSpace(id: $0.id, title: $0.title)) },
+                              overflow: max(0, spaces.count - room))
             }
             let matches = ProjectSearch.rank(allProjects, query: argument) { entry in
                 ProjectSearch.Candidate(name: entry.name, shortName: entry.shortName,
                                         code: entry.code, isArchived: entry.isArchived)
             }
-            // No project answers to it — so the useful reading of what you typed is a name for one
-            // that doesn't exist yet.
-            if matches.isEmpty { return RowSet(rows: [.action(.newProject)]) }
-            return RowSet.capped(matches) {
+            let spaceRows: [QuickBarRow] = SpaceOrder.matching(spaces, query: typed)
+                .map { .action(.goToSpace(id: $0.id, title: $0.title)) }
+            // Nothing answers to it — so the useful reading of what you typed is a name for a project or
+            // a space that doesn't exist yet. Picking a project for something offers no space.
+            if matches.isEmpty, spaceRows.isEmpty {
+                return RowSet(rows: [.action(.newProject)] + (offersSpaces ? [.action(.newSpace(typed))] : []))
+            }
+            var set = RowSet.capped(matches) {
                 .project(key: $0.projectKey, name: $0.name, shortName: $0.shortName,
                          domain: $0.domain, isArchived: $0.isArchived)
             }
+            let room = max(0, Self.rowLimit - set.rows.count)
+            set.rows += spaceRows.prefix(room)
+            set.overflow += max(0, spaceRows.count - room)
+            return set
         }
     }
+
+    /// Whether `@` offers spaces at all: off while the bar picks a project for something.
+    @ObservationIgnored
+    var offersSpaces = true
 
     /// Whether a placement is on offer for the line as it currently reads.
     private func isOffered(_ placement: CapturePlacement) -> Bool {
@@ -1292,6 +1324,9 @@ final class QuickBarModel {
     /// be misread: nothing here lights up.
     private func commandPreview() -> SessionPreview? {
         guard let (command, argument) = previewCommand, focusedProjectName != nil else { return nil }
+        // A command that isn't about the project in hand draws nothing under the field: the session
+        // there would read as what it acts on.
+        guard command.actsOnFocusedProject else { return nil }
         // A note is prose at the head of the session, not a line among the tasks — the same shape the
         // capture placement draws, with the verb's own text in it.
         if command == .sessionNote {

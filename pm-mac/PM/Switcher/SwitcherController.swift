@@ -7,7 +7,8 @@ import SwiftUI
 /// docs/spaces.md § Switcher.
 ///
 /// - Hold ⌥, press Tab: opens on the card after the front window's. Tab again / ⇧Tab, ← →: along the row.
-///   ↓ ↑: into a card's list. Let go of ⌥: jump. Return or a click also jumps; Esc stays put.
+///   ↓ ↑: into a card's list. Space: the overview, the cards growing into its grid.
+///   Let go of ⌥: jump. Return or a click also jumps; Esc stays put.
 /// - A quick tap switches to the next window without drawing anything (`SwitcherHold.revealDelay`).
 /// - Cards come from the dock's groups, ordered by where their windows are in the stack.
 /// - ⌥⇧Tab isn't a hotkey of its own: the panel is key while it's up, so the keystroke reaches it.
@@ -30,6 +31,8 @@ final class SwitcherController {
     private var keyMonitor: Any?
     private var resignObserver: NSObjectProtocol?
     private var revealed = false
+    /// Each card's frame in the panel's content, top-down, for the overview's entrance.
+    private var cardFrames: [String: CGRect] = [:]
 
     /// The hotkey: open held, or step along when already open.
     func trigger() {
@@ -93,7 +96,7 @@ final class SwitcherController {
             + open.filter { $0.space != nil }.sorted { depth($0) < depth($1) }
         let focusedKey = PMFiles.focusedProjectKey()
         looks = [:]
-        return groups.map { group in
+        return SwitcherModel.withNewSpace(groups.map { group in
             looks[group.key] = Look(color: group.color ?? .systemGray, icon: group.icon)
             let controller = Self.controller(for: group)
             var card = SwitcherModel.Card(key: group.key, title: group.title)
@@ -114,7 +117,7 @@ final class SwitcherController {
                 if case .tile(_, let id) = card.entries[index].target { card.entries[index].playing = sounding.contains(id) }
             }
             return card
-        }
+        })
     }
 
     /// Each workspace with its tiles, named the way a tile's tab names its card.
@@ -180,6 +183,7 @@ final class SwitcherController {
         case 124: model?.move(by: 1)                                                   // →
         case 125: model?.moveEntry(by: 1)                                              // ↓
         case 126: model?.moveEntry(by: -1)                                             // ↑
+        case 49: openOverview(); return true                                           // Space
         case 36, 76: commit(); return true                                             // Return
         case 53: close(); return true                                                  // Esc
         default: return true
@@ -194,6 +198,11 @@ final class SwitcherController {
         guard let model, let card = model.selectedCard else { return close() }
         let entry = model.selectedEntry
         close()
+        if card.isNewSpace {
+            Log.write("switcher: new space")
+            Spaces.shared.newSpace()
+            return
+        }
         guard let group = CanvasSatelliteDock.shared.groups.first(where: { $0.key == card.key }) else { return }
         Log.write("switcher: \(card.title)\(entry.map { " · \($0.title)" } ?? "")")
         let controller = Self.controller(for: group)
@@ -207,6 +216,24 @@ final class SwitcherController {
         case .tile(let name, let id):
             if let controller { controller.show(workspace: name, tile: id) } else { CanvasSatelliteDock.shared.show(group) }
         }
+    }
+
+    /// Space: the overview, on the card picked, each card growing into its tile.
+    private func openOverview() {
+        guard let model, let panel, let host else { return }
+        let picked = model.selectedCard.map { $0.isNewSpace ? OverviewModel.plusKey : $0.key }
+        var from: [String: NSRect] = [:]
+        if revealed {
+            for (key, rect) in cardFrames {
+                // SwiftUI's frames are top-down; the host may not be.
+                let local = host.isFlipped ? rect : NSRect(x: rect.minX, y: host.bounds.height - rect.maxY,
+                                                           width: rect.width, height: rect.height)
+                let screen = panel.convertToScreen(host.convert(local, to: nil))
+                from[key == SwitcherModel.Card.newSpace.key ? OverviewModel.plusKey : key] = screen
+            }
+        }
+        close()
+        OverviewController.shared.show(selecting: picked, from: from)
     }
 
     func close() {
@@ -238,7 +265,7 @@ final class SwitcherController {
         let glass = NSGlassEffectView()
         glass.cornerRadius = 22
         glass.style = .regular
-        let host = NSHostingView(rootView: SwitcherView(model: nil, looks: [:], point: { _, _ in }, go: {}))
+        let host = NSHostingView(rootView: SwitcherView(model: nil, looks: [:], point: { _, _ in }, go: {}, frames: { _, _ in }))
         host.sizingOptions = [.intrinsicContentSize]
         glass.contentView = host
         panel.contentView = glass
@@ -253,7 +280,8 @@ final class SwitcherController {
                                          self?.model?.point(at: card, entry: entry)
                                          self?.render()
                                      },
-                                     go: { [weak self] in self?.commit() })
+                                     go: { [weak self] in self?.commit() },
+                                     frames: { [weak self] key, rect in self?.cardFrames[key] = rect })
         if let panel { place(panel) }
     }
 
@@ -277,8 +305,11 @@ struct SwitcherView: View {
     let looks: [String: SwitcherController.Look]
     let point: (Int, Int?) -> Void
     let go: () -> Void
+    /// A card's frame in the view, top-down: where the overview's tiles grow from.
+    let frames: (String, CGRect) -> Void
 
     static let cardWidth: CGFloat = 208
+    private static let space = "switcher"
 
     @Environment(\.colorScheme) private var scheme
 
@@ -298,17 +329,54 @@ struct SwitcherView: View {
                     .padding(.horizontal, 2)
                 }
                 .scrollDisabled(false)
-                Text("Tab, ⇧Tab ← →  projects   ↓ ↑  workspaces   let go of ⌥ to jump   Esc stays")
+                Text("Tab, ⇧Tab ← →  projects   ↓ ↑  workspaces   Space  Overview   let go of ⌥ to jump   Esc stays")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
             .padding(14)
             .fixedSize()
+            .coordinateSpace(.named(Self.space))
         }
     }
 
     @ViewBuilder
     private func cardView(_ card: SwitcherModel.Card, index: Int, model: SwitcherModel) -> some View {
+        Group {
+            if card.isNewSpace { newSpaceCard(index: index, model: model) } else { placeCard(card, index: index, model: model) }
+        }
+        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(Self.space)) }) { frames(card.key, $0) }
+    }
+
+    /// The last card: a dashed + that makes a space.
+    private func newSpaceCard(index: Int, model: SwitcherModel) -> some View {
+        let picked = index == model.index
+        return VStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.secondary.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                Image(systemName: "plus").font(.system(size: 15, weight: .medium)).foregroundStyle(.secondary)
+            }
+            .frame(width: 34, height: 34)
+            Text("New Space").font(.system(size: 12, weight: .semibold))
+        }
+        .padding(10)
+        .frame(width: 104, height: 104)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(picked ? Color.accentColor.opacity(0.16) : .clear)
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(picked ? Color.accentColor.opacity(0.7) : .clear, lineWidth: 2))
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 14))
+        .onHover { if $0, model.index != index { point(index, nil) } }
+        .onTapGesture { point(index, nil); go() }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("New Space")
+        .accessibilityAddTraits(picked ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func placeCard(_ card: SwitcherModel.Card, index: Int, model: SwitcherModel) -> some View {
         let look = looks[card.key] ?? .init(color: .systemGray, icon: nil)
         let color = Color(nsColor: look.color)
         let inkColor = SwitcherInk.legible(look.color, dark: scheme == .dark)

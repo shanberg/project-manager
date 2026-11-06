@@ -105,6 +105,17 @@ enum SpaceCardMarks {
         }
     }
 
+    /// New cards onto the board, in order from slot `index` of `list` (whose cards are `members`).
+    static func insert(_ nodes: [CanvasNode], into list: List, at index: Int, members: [String],
+                       in document: inout CanvasDocument) {
+        var order = members
+        for (offset, node) in nodes.enumerated() {
+            document.nodes.append(node)
+            move(node.id, to: list, at: index + offset, members: order, in: &document)
+            order.insert(node.id, at: min(index + offset, order.count))
+        }
+    }
+
     /// Put a card inside a frame (under the cards already in it, the frame growing to hold it), or out
     /// of every frame (right of everything on the board, where a new card goes).
     static func relocate(_ id: String, into frameID: String?, in document: inout CanvasDocument) {

@@ -36,6 +36,31 @@ final class CanvasPageTitlesTests: XCTestCase {
         XCTAssertEqual(CanvasPageTitles.of("https://wiki.example.com/q3"), "Q3 Planning")
     }
 
+    // MARK: A card with no view
+
+    /// A tab for a card in a tile that isn't showing has no `CanvasLinkNodeView` to ask. A page that
+    /// wandered off its address is remembered under where it wandered, and the tab must still find it.
+    @MainActor
+    func testACardWithNoViewIsNamedByWhereItWanderedTo() {
+        let canvas = URL(fileURLWithPath: "/tmp/titles-test.canvas")
+        let card = "card-1"
+        let wandered = "https://example.com/browse/PM-9999"
+        CanvasPageTitles.remember("Renamed under you", for: wandered)
+        XCTAssertNil(CanvasPageTitles.ofCard(card, on: canvas, address: address))
+
+        let key = CanvasPageHandover.key(canvas: canvas, card: card)
+        CanvasPageHandover.resumes[key] = .init(state: nil, url: URL(string: wandered))
+        defer { CanvasPageHandover.resumes[key] = nil }
+        XCTAssertEqual(CanvasPageTitles.ofCard(card, on: canvas, address: address), "Renamed under you")
+    }
+
+    @MainActor
+    func testACardThatNeverWanderedIsNamedByItsAddress() {
+        CanvasPageTitles.remember("Billing rollover", for: address)
+        XCTAssertEqual(CanvasPageTitles.ofCard("card-2", on: URL(fileURLWithPath: "/tmp/t2.canvas"),
+                                               address: address), "Billing rollover")
+    }
+
     // MARK: Names that say nothing
 
     /// WebKit reports a page with no `<title>` as its own URL, and the card is already showing that.

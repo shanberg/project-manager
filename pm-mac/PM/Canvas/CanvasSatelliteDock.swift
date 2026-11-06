@@ -154,14 +154,34 @@ final class CanvasSatelliteDock: NSObject {
         group.workspaces.first?.board?.showWorkspaceWindow()
     }
 
+    /// Where the dock is on screen, while it shows: the overview keeps clear of it.
+    var frame: NSRect? { panel?.isVisible == true ? panel?.frame : nil }
+
+    private static let projectOrderKey = "PMDockProjectOrder"
+
+    /// The projects' marks in the order the overview's drags left them (`DockOrder`).
+    func setProjectOrder(_ keys: [String]) {
+        let previous = UserDefaults.standard.stringArray(forKey: Self.projectOrderKey) ?? []
+        UserDefaults.standard.set(DockOrder.remembered(keys, previous: previous), forKey: Self.projectOrderKey)
+        refresh()
+    }
+
+    private static func ordered(_ found: [Group]) -> [Group] {
+        let preferred = UserDefaults.standard.stringArray(forKey: projectOrderKey) ?? []
+        guard !preferred.isEmpty else { return found }
+        let keys = DockOrder.sorted(found.map(\.key), preferred: preferred)
+        return keys.compactMap { key in found.first { $0.key == key } }
+    }
+
     private func rebuild() {
-        groups = Self.withSpaces(Self.groups(projects: openProjects(), open: CanvasSatelliteWindow.open)).map { group in
+        groups = Self.withSpaces(Self.ordered(Self.groups(projects: openProjects(), open: CanvasSatelliteWindow.open))).map { group in
             var group = group
             group.isPlaying = group.canvas.map { !CanvasLinkNodeView.playingCards(onCanvas: $0).isEmpty } ?? false
             return group
         }
         guard !groups.isEmpty else {
             closeFlyout()
+            hidePlus(now: true)
             panel?.orderOut(nil)
             return
         }
@@ -182,14 +202,17 @@ final class CanvasSatelliteDock: NSObject {
                 over ? openFlyout(for: mark.groupKey, beside: mark) : scheduleFlyoutHide()
             }
             mark.onClick = { [weak self] key in
+                if OverviewController.shared.isOpen { return OverviewController.shared.go(to: key) }
                 guard let self, let found = self.group(key) else { return }
                 show(found)
             }
             mark.rowDrop = { [weak self] in self?.group(group.key).flatMap(Self.rowDrop(onto:)) }
+            mark.onDrag = { [weak self] over in over ? self?.revealPlus() : self?.schedulePlusHide() }
             column.addArrangedSubview(mark)
         }
         place(panel)
         panel.orderFront(nil)
+        if plusPanel?.isVisible == true { placePlus() }
         if let flyoutKey {
             if group(flyoutKey) == nil { closeFlyout() } else { fillFlyout(flyoutKey) }
         }
@@ -290,6 +313,118 @@ final class CanvasSatelliteDock: NSObject {
         NSMenu.popUpContextMenu(menu, with: event, for: view)
     }
 
+    /// Right-click on the + or the dock's glass: what can be made from here.
+    func showDockMenu(with event: NSEvent, in view: NSView) {
+        closeFlyout()
+        NSMenu.popUpContextMenu(Self.dockMenu(), with: event, for: view)
+    }
+
+    private static func dockMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(MarkMenuItem(title: "New Space") { Spaces.shared.newSpace() })
+        menu.addItem(MarkMenuItem(title: "New Project…") {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.sendAction(#selector(AppDelegate.newProject), to: nil, from: nil)
+        })
+        return menu
+    }
+
+    // MARK: The +
+
+    /// The + for a new space, in a panel of its own just past the dock's end, so the dock never changes
+    /// size for it: shown while the pointer is on the dock or the +, or a drag is over a mark or the +.
+    /// docs/spaces.md § The dock.
+    private var plusPanel: NSPanel?
+    private var plusHide: DispatchWorkItem?
+    /// The marks' own spacing, so the + reads as the next thing in the column.
+    private static var plusGap: CGFloat { markSpacing }
+    private static var plusSide: CGFloat { markSize + 2 * dockInset }
+
+    // A tracking area sends its owner `mouseEntered:` / `mouseExited:`; Swift's default names for these
+    // (`mouseEnteredWithEvent:`) would never be called.
+    @objc(mouseEntered:) func dockEntered(_ event: NSEvent) {
+        revealPlus()
+    }
+    @objc(mouseExited:) func dockExited(_ event: NSEvent) { schedulePlusHide() }
+
+    private func revealPlus() {
+        plusHide?.cancel()
+        guard let dock = panel, dock.isVisible else { return }
+        let plus = plusPanel ?? makePlusPanel()
+        placePlus()
+        guard !plus.isVisible || plus.alphaValue < 1 else { return }
+        if !plus.isVisible { plus.alphaValue = 0 }
+        plus.orderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Motion.Tempo.quick
+            plus.animator().alphaValue = 1
+        }
+    }
+
+    /// Gone a moment after the pointer is off both the dock and the +. Asked again while it's still on
+    /// one of them, since a drag over the dock sends no exits.
+    private func schedulePlusHide() {
+        plusHide?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let pointer = NSEvent.mouseLocation
+            let over = [panel, plusPanel].contains { $0?.isVisible == true && $0?.frame.insetBy(dx: -2, dy: -2).contains(pointer) == true }
+            over ? schedulePlusHide() : hidePlus(now: false)
+        }
+        plusHide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+    }
+
+    private func hidePlus(now: Bool) {
+        plusHide?.cancel()
+        guard let plus = plusPanel, plus.isVisible else { return }
+        CanvasDockTip.shared.hide()
+        if now { return plus.orderOut(nil) }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = Motion.Tempo.quick
+            plus.animator().alphaValue = 0
+        }, completionHandler: { [weak plus] in
+            MainActor.assumeIsolated {
+                guard let plus, plus.alphaValue == 0 else { return }
+                plus.orderOut(nil)
+            }
+        })
+    }
+
+    private func makePlusPanel() -> NSPanel {
+        let plus = Self.floatingPanel()
+        let mark = NewSpaceMark()
+        mark.onMenu = { [weak self] event, view in self?.showDockMenu(with: event, in: view) }
+        mark.onHover = { [weak self] over in over ? self?.revealPlus() : self?.schedulePlusHide() }
+        // A square the dock's width, the mark in its middle: the same inset on every side. A stack view
+        // here fitted to the mark's height without its insets, so the plate came out wider than tall.
+        let side = Self.plusSide
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: side, height: side))
+        mark.translatesAutoresizingMaskIntoConstraints = true
+        mark.frame = NSRect(x: Self.dockInset, y: Self.dockInset, width: Self.markSize, height: Self.markSize)
+        holder.addSubview(mark)
+        let glass = Self.glass(radius: Self.dockRadius, holding: holder)
+        // `glass` sizes its content to the fitting size, which a plain view doesn't have: set both again.
+        let square = NSRect(x: 0, y: 0, width: side, height: side)
+        holder.frame = square
+        glass.frame = square
+        plus.contentView = glass
+        plus.setAccessibilityLabel("New Space")
+        plusPanel = plus
+        return plus
+    }
+
+    /// Under the dock, centred on it; above it when the dock is too near the screen's foot.
+    private func placePlus() {
+        guard let dock = panel, let plus = plusPanel else { return }
+        let size = NSSize(width: Self.plusSide, height: Self.plusSide)
+        let visible = dock.screen?.visibleFrame ?? .infinite
+        var y = dock.frame.minY - Self.plusGap - size.height
+        if y < visible.minY { y = dock.frame.maxY + Self.plusGap }
+        let x = (dock.frame.midX - size.width / 2).rounded()
+        plus.setFrame(NSRect(x: x, y: y.rounded(), width: size.width, height: size.height), display: true)
+    }
+
     // MARK: The column
 
     private func makePanel() -> NSPanel {
@@ -309,11 +444,16 @@ final class CanvasSatelliteDock: NSObject {
                 self.place(panel)
             }
         }
+        column.menu = Self.dockMenu()
         column.orientation = .vertical
         column.spacing = Self.markSpacing
         let inset = Self.dockInset
         column.edgeInsets = NSEdgeInsets(top: inset, left: inset, bottom: inset, right: inset)
-        panel.contentView = Self.glass(radius: Self.dockRadius, holding: column)
+        let glass = Self.glass(radius: Self.dockRadius, holding: column)
+        // The pointer anywhere on the dock shows the + past its end (`revealPlus`).
+        glass.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                             owner: self, userInfo: nil))
+        panel.contentView = glass
         panel.setAccessibilityLabel("Satellite windows")
         self.panel = panel
         return panel
@@ -375,6 +515,7 @@ final class CanvasSatelliteDock: NSObject {
                           middle: Double((panel.frame.midY - visible.minY) / max(1, visible.height)))
         if let data = try? JSONEncoder().encode(place) { UserDefaults.standard.set(data, forKey: Self.placeKey) }
         closeFlyout()
+        if plusPanel?.isVisible == true { placePlus() }
     }
 
     static func clamp(_ frame: NSRect, into visible: NSRect) -> NSRect {
@@ -750,6 +891,8 @@ private final class DockMark: NSView {
     var onMenu: (String, NSEvent, NSView) -> Void = { _, _, _ in }
     /// What a sidebar row let go here would do, asked as it arrives — see `CanvasSatelliteDock.rowDrop`.
     var rowDrop: () -> (() -> Void)? = { nil }
+    /// A drag has come over this mark, or left it: the dock shows its + for the drag to go on to.
+    var onDrag: (Bool) -> Void = { _ in }
     /// Making sound: a dot under the icon, as the Mac's Dock marks a running app.
     private var isPlaying = false
 
@@ -925,15 +1068,165 @@ private final class DockMark: NSView {
         return allowed.contains(.move) ? .move : allowed.contains(.copy) ? .copy : .generic
     }
 
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { rowOperation(sender) }
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        onDrag(true)
+        return rowOperation(sender)
+    }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { rowOperation(sender) }
-    override func draggingExited(_ sender: NSDraggingInfo?) { hovered = false }
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        hovered = false
+        onDrag(false)
+    }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         hovered = false
+        onDrag(false)
         guard SpaceRowDrag.isRow(sender), let drop = rowDrop() else { return false }
         SpaceRowDrag.end()
         drop()
+        return true
+    }
+}
+
+/// The dock's +, on its own glass plate past the dock's end. A click makes a space; a sidebar
+/// row let go here makes one holding that card (off the board it came from); a web link from anywhere
+/// makes one on that page. docs/spaces.md § The dock.
+@MainActor
+private final class NewSpaceMark: NSView {
+    var onMenu: (NSEvent, NSView) -> Void = { _, _ in }
+    /// The pointer or a drag over it, or gone: keeps its panel up while it's there.
+    var onHover: (Bool) -> Void = { _ in }
+    private var hovered = false { didSet { needsDisplay = true } }
+    private var press: NSEvent?
+    private var dragging = false
+
+    init() {
+        let side = CanvasSatelliteDock.markSize
+        super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([widthAnchor.constraint(equalToConstant: side),
+                                     heightAnchor.constraint(equalToConstant: side)])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("New Space")
+        toolTip = "New Space"
+        registerForDraggedTypes([SpaceRowDrag.pasteboardType, .URL])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirty: NSRect) {
+        let tile = bounds.insetBy(dx: 3, dy: 3)
+        let radius = DockMark.cornerRadius * (tile.width / (bounds.width - 4))
+        let shape = NSBezierPath(roundedRect: tile, xRadius: radius, yRadius: radius)
+        if hovered {
+            NSColor.labelColor.withAlphaComponent(0.1).setFill()
+            shape.fill()
+        }
+        // The glass plate is the button; no outline of its own.
+        let config = NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)
+            .applying(.init(paletteColors: [NSColor.labelColor.withAlphaComponent(hovered ? 0.85 : 0.55)]))
+        if let plus = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?.withSymbolConfiguration(config) {
+            let size = plus.size
+            plus.draw(in: NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
+                                 width: size.width, height: size.height),
+                      from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovered = true
+        onHover(true)
+        CanvasDockTip.shared.show("New Space", below: self)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = false
+        onHover(false)
+        CanvasDockTip.shared.hide()
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    // A press that moves drags the dock, as on any mark; one that doesn't is a click.
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) { return onMenu(event, self) }
+        press = event
+        dragging = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !dragging, let press, let window else { return }
+        let start = press.locationInWindow, now = event.locationInWindow
+        guard hypot(now.x - start.x, now.y - start.y) > 3 else { return }
+        dragging = true
+        CanvasDockTip.shared.hide()
+        window.performDrag(with: press)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { press = nil }
+        guard press != nil, !dragging, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        CanvasDockTip.shared.hide()
+        Log.write("dock: new space")
+        Spaces.shared.newSpace()
+    }
+
+    override func rightMouseDown(with event: NSEvent) { onMenu(event, self) }
+
+    // MARK: Drops
+
+    /// What a drop here would make: a space holding the row, or a space on the web link.
+    private func drop(_ sender: NSDraggingInfo) -> (() -> Void)? {
+        if SpaceRowDrag.isRow(sender), let row = SpaceRowDrag.current {
+            return { Spaces.shared.newSpace(moving: row.card, fromCanvas: row.canvas) }
+        }
+        guard let url = NewSpaceMark.webURL(on: sender.draggingPasteboard) else { return nil }
+        return { Spaces.shared.newSpace(opening: url) }
+    }
+
+    /// An http(s) address on the pasteboard. Files and other schemes aren't taken.
+    static func webURL(on pasteboard: NSPasteboard) -> URL? {
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] ?? []
+        return urls.first { ["http", "https"].contains($0.scheme?.lowercased() ?? "") }
+    }
+
+    private func operation(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard drop(sender) != nil else {
+            hovered = false
+            return []
+        }
+        hovered = true
+        let allowed = sender.draggingSourceOperationMask
+        if SpaceRowDrag.isRow(sender) { return allowed.contains(.move) ? .move : allowed.contains(.copy) ? .copy : .generic }
+        return allowed.contains(.copy) ? .copy : .generic
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        onHover(true)
+        return operation(sender)
+    }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { operation(sender) }
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        hovered = false
+        onHover(false)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        hovered = false
+        guard let run = drop(sender) else { return false }
+        if SpaceRowDrag.isRow(sender) { SpaceRowDrag.end() }
+        Log.write("dock: new space from a drop")
+        run()
         return true
     }
 }

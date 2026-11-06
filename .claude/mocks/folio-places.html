@@ -1,0 +1,590 @@
+<title>Folio Places</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a mocked Mac desktop (menubar, a window, Folio's dock at the leading edge, a flyout beside it); controls in a column to the right, stacked below on a phone. */
+:root {
+  --page: #eceef2; --panel: #ffffff; --ink: #1d1f24; --ink-2: #5d6270; --ink-3: #9196a1;
+  --rule: #d9dce3; --accent: #2f6fe4; --chip: #eef1f6; --good: #1f8a4c;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* the mocked Mac, light */
+  --wall-a: #9fb4d6; --wall-b: #d9c6d8; --wall-c: #f1dcc4;
+  --glass: rgba(246, 247, 250, 0.72); --glass-edge: rgba(255, 255, 255, 0.75);
+  --glass-shadow: 0 10px 34px rgba(20, 24, 40, 0.22), 0 1px 3px rgba(20, 24, 40, 0.14);
+  --m-ink: #1c1d21; --m-ink-2: rgba(28, 29, 33, 0.62); --m-ink-3: rgba(28, 29, 33, 0.38);
+  --m-rule: rgba(28, 29, 33, 0.1); --m-hover: rgba(28, 29, 33, 0.06);
+  --m-field: rgba(255, 255, 255, 0.6); --win: rgba(255, 255, 255, 0.92); --board: #f4f5f7;
+  --card: #ffffff; --menu: rgba(250, 250, 252, 0.96);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; --good: #4cc27d; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; --good: #4cc27d; color-scheme: dark;
+}
+.mac-dark {
+  --wall-a: #1d2944; --wall-b: #3a2742; --wall-c: #4a3326;
+  --glass: rgba(40, 41, 46, 0.7); --glass-edge: rgba(255, 255, 255, 0.12);
+  --glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --m-ink: #f2f2f4; --m-ink-2: rgba(242, 242, 244, 0.64); --m-ink-3: rgba(242, 242, 244, 0.38);
+  --m-rule: rgba(255, 255, 255, 0.1); --m-hover: rgba(255, 255, 255, 0.07);
+  --m-field: rgba(0, 0, 0, 0.25); --win: rgba(34, 35, 40, 0.94); --board: #1b1c20; --card: #2a2b31;
+  --menu: rgba(44, 45, 50, 0.97);
+}
+
+body { background: var(--page); color: var(--ink); font-family: var(--ui); }
+.wrap { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 20px; padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1320px; margin: 0 auto; }
+@media (max-width: 900px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; text-wrap: balance; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 12px; max-width: 70ch; line-height: 1.45; }
+
+/* stage */
+.stage { position: relative; border-radius: 12px; overflow: hidden; min-height: 760px; color: var(--m-ink);
+  background: radial-gradient(120% 90% at 10% 0%, var(--wall-a), transparent 60%),
+              radial-gradient(90% 80% at 100% 30%, var(--wall-b), transparent 65%),
+              linear-gradient(160deg, var(--wall-b), var(--wall-c)); }
+.menubar { height: 24px; background: var(--glass); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  display: flex; align-items: center; gap: 16px; padding: 0 12px; font-size: 12.5px; }
+.menubar b { font-weight: 600; }
+.menubar .grow { flex: 1; }
+.focuschip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 1px 8px; border-radius: 6px; background: var(--m-hover); }
+.focuschip i { width: 9px; height: 9px; border-radius: 3px; background: var(--c); display: inline-block; }
+.focuschip.flash { animation: flash .9s ease; }
+@keyframes flash { 0%, 100% { background: var(--m-hover); } 30% { background: color-mix(in srgb, var(--c) 35%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .focuschip.flash { animation: none; } }
+
+/* the app window */
+.win { position: absolute; left: 86px; right: 22px; top: 44px; bottom: 22px; border-radius: 14px; background: var(--win);
+  box-shadow: var(--glass-shadow); display: flex; flex-direction: column; overflow: hidden; }
+.tb { height: 30px; flex: none; display: flex; align-items: center; gap: 7px; padding: 0 10px; font-size: 12px; color: var(--m-ink-2); border-bottom: 1px solid var(--m-rule); }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--m-rule); flex: none; }
+.tb .ttl { margin-left: 8px; font-weight: 600; color: var(--m-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb .kind { font-size: 10.5px; padding: 1px 6px; border-radius: 9px; background: var(--m-hover); white-space: nowrap; }
+.tb .tabs { display: flex; gap: 2px; margin-left: 10px; min-width: 0; overflow: hidden; }
+.tb .tab { font-size: 11.5px; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+.tb .tab.on { background: var(--m-hover); color: var(--m-ink); }
+.addr { height: 30px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--m-rule); }
+.addr .field { flex: 1; min-width: 0; height: 22px; border-radius: 6px; background: var(--m-field); border: 1px solid var(--m-rule); font-size: 11.5px; display: flex; align-items: center; gap: 6px; padding: 0 8px; color: var(--m-ink-2); white-space: nowrap; overflow: hidden; }
+.addr .field b { color: var(--m-ink); font-weight: 500; }
+.winbody { flex: 1; min-height: 0; position: relative; background: var(--board); }
+
+/* project window: notes + tasks, abbreviated */
+.projbody { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0; height: 100%; }
+.projbody > div { padding: 14px 16px; overflow: hidden; }
+.projbody > div + div { border-left: 1px solid var(--m-rule); }
+.projbody h3 { font-size: 13px; margin: 0 0 8px; }
+.projbody p { font-size: 12px; line-height: 1.45; margin: 0 0 6px; color: var(--m-ink-2); }
+.trow { display: flex; gap: 8px; font-size: 12.5px; padding: 3px 0; align-items: flex-start; }
+.trow .bx { width: 13px; height: 13px; border-radius: 4px; border: 1.25px solid var(--m-ink-3); flex: none; margin-top: 2px; }
+.links { margin-top: 10px; }
+.links .lk { font-size: 12px; color: var(--accent); padding: 2px 0; }
+.links .lk.new { animation: flash2 1.4s ease; border-radius: 4px; }
+@keyframes flash2 { 0% { background: color-mix(in srgb, var(--accent) 25%, transparent); } 100% { background: transparent; } }
+
+/* boards */
+.board { position: absolute; inset: 0; padding: 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; align-content: start; overflow: auto; }
+.wcard { background: var(--card); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.12); overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.wcard.hl { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wcard .wh { display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 11px; color: var(--m-ink-2); border-bottom: 1px solid var(--m-rule); min-width: 0; }
+.wcard .wh span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fav { width: 14px; height: 14px; border-radius: 4px; flex: none; display: grid; place-items: center; color: #fff; font-size: 9px; font-weight: 700; background: var(--f); }
+.wcard .thumb { height: 110px; background: var(--t); }
+.wcard .wt { font-size: 12px; padding: 6px 8px 8px; font-weight: 500; }
+
+/* a music page, generic */
+.music { position: absolute; inset: 0; display: grid; grid-template-columns: 150px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 56px; background: #1e1d24; color: #f3f1f7; }
+.music .side { padding: 14px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid rgba(255,255,255,.07); }
+.music .side .sel { color: #ff6b81; font-weight: 600; }
+.music .main { padding: 16px; overflow: hidden; }
+.music .main h2 { font-size: 18px; margin: 0 0 12px; }
+.albums { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px; }
+.albums div { aspect-ratio: 1; border-radius: 8px; max-width: 100%; }
+.albums small { display: block; font-size: 11px; margin-top: 4px; color: rgba(243,241,247,.7); }
+.music .bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: #29272f; font-size: 12px; }
+.music .bar .art { width: 36px; height: 36px; border-radius: 6px; background: linear-gradient(135deg, #ff8a5b, #c02c6f); }
+.music .bar .meta { min-width: 0; flex: 1; }
+.music .bar .meta div:last-child { color: rgba(243,241,247,.6); font-size: 11px; }
+.music .bar button { border: 0; background: #ff6b81; color: #fff; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; display: grid; place-items: center; }
+.music .bar button svg { width: 14px; height: 14px; }
+
+/* dock */
+.dock { position: absolute; left: 8px; top: 96px; padding: 6px; border-radius: 18px; display: flex; flex-direction: column; gap: 6px; z-index: 3;
+  background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5); }
+.dock .sep { height: 1px; margin: 1px 6px; background: var(--m-rule); }
+.mk { position: relative; width: 44px; height: 44px; border: 0; padding: 0; background: none; cursor: pointer; display: grid; place-items: center; }
+.mk .ic { width: 40px; height: 40px; border-radius: 9px; display: grid; place-items: center; color: #fff; font-weight: 600; font-size: 17px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 78%, #fff), var(--c)); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 1px 2px rgba(0,0,0,.18); }
+.mk .ic svg { width: 21px; height: 21px; }
+.mk .ic.site { background: #fff; color: var(--c); box-shadow: inset 0 0 0 1px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.18); }
+.mk .ic.site svg { width: 24px; height: 24px; }
+.mk.closed .ic { opacity: .45; filter: saturate(.4); }
+.mk.cur::before { content: ""; position: absolute; left: -5px; top: 14px; width: 3px; height: 16px; border-radius: 2px; background: var(--m-ink-2); }
+.mk .play-dot { position: absolute; bottom: -3px; left: 50%; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--m-ink-2); }
+.mk .play-badge { position: absolute; right: -2px; bottom: -2px; width: 18px; height: 18px; border-radius: 50%; background: var(--win); box-shadow: 0 1px 2px rgba(0,0,0,.25); display: grid; place-items: center; color: var(--m-ink); }
+.mk .play-badge svg { width: 11px; height: 11px; }
+.mk .stack { position: absolute; right: -3px; top: -3px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--win); font-size: 10px; font-weight: 600; color: var(--m-ink); display: grid; place-items: center; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.mk:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 11px; }
+
+/* flyout */
+.flyout { position: absolute; left: 70px; width: 300px; border-radius: 16px; overflow: hidden; z-index: 4;
+  background: linear-gradient(color-mix(in srgb, var(--c) 9%, transparent), color-mix(in srgb, var(--c) 4%, transparent)), var(--glass);
+  border: 1px solid var(--glass-edge); box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(26px) saturate(1.6); -webkit-backdrop-filter: blur(26px) saturate(1.6); }
+.fx-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; }
+.fx-head .t { font-size: 13px; font-weight: 600; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-head .t small { display: block; font-size: 11px; font-weight: 400; color: var(--m-ink-2); }
+.ib { width: 24px; height: 22px; border: 0; background: none; border-radius: 6px; display: grid; place-items: center; color: var(--m-ink-2); cursor: pointer; padding: 0; flex: none; }
+.ib:hover { background: var(--m-hover); color: var(--m-ink); }
+.ib svg { width: 15px; height: 15px; }
+.ib:focus-visible, .row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hr { height: 1px; background: var(--m-rule); }
+.cap { font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--m-ink-3); padding: 8px 14px 4px; }
+.rows { padding: 2px 0 8px; }
+.row { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 14px; margin: 0 4px; border-radius: 7px; font-size: 12.5px; position: relative; }
+.row:hover { background: var(--m-hover); }
+.row .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .nm small { display: block; font-size: 10.5px; color: var(--m-ink-3); }
+.row .act { display: flex; gap: 0; opacity: 0; }
+.row:hover .act, .row:focus-within .act { opacity: 1; }
+.np { margin: 8px 10px 4px; padding: 8px; border-radius: 10px; background: var(--m-hover); display: flex; align-items: center; gap: 10px; }
+.np .art { width: 38px; height: 38px; border-radius: 7px; background: linear-gradient(135deg, #ff8a5b, #c02c6f); flex: none; }
+.np .meta { flex: 1; min-width: 0; font-size: 12px; }
+.np .meta div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np .meta div:last-child { color: var(--m-ink-2); font-size: 11px; }
+.task { display: flex; gap: 8px; padding: 4px 10px 4px 14px; font-size: 12.5px; }
+.task .bx { width: 13px; height: 13px; border-radius: 4px; border: 1.25px solid var(--m-ink-3); flex: none; margin-top: 2px; }
+
+/* send-to menu */
+.menu { position: absolute; z-index: 6; min-width: 200px; padding: 5px; border-radius: 9px; background: var(--menu); box-shadow: var(--glass-shadow); border: 1px solid var(--m-rule); font-size: 12.5px; }
+.menu .mi { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 5px; cursor: pointer; border: 0; background: none; width: 100%; text-align: left; font: inherit; color: var(--m-ink); }
+.menu .mi:hover, .menu .mi:focus-visible { background: var(--accent); color: #fff; outline: none; }
+.menu .mh { font-size: 11px; color: var(--m-ink-3); padding: 4px 8px 2px; }
+.menu .msep { height: 1px; background: var(--m-rule); margin: 4px 2px; }
+.menu i { width: 10px; height: 10px; border-radius: 3px; background: var(--c); flex: none; }
+
+.toast { position: absolute; left: 50%; bottom: 36px; transform: translateX(-50%); z-index: 7; background: var(--menu); color: var(--m-ink); font-size: 12.5px; padding: 8px 14px; border-radius: 10px; box-shadow: var(--glass-shadow); max-width: calc(100% - 40px); }
+
+/* controls */
+.controls { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 14px; align-self: start; position: sticky; top: calc(12px + env(safe-area-inset-top, 0px)); }
+.grp { display: flex; flex-direction: column; gap: 6px; }
+.gl { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button, .btn { font: 12px var(--ui); padding: 4px 9px; border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.seg button:focus-visible, .btn:focus-visible, .copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chk { display: flex; gap: 7px; align-items: center; font-size: 12.5px; }
+.hint { font-size: 11.5px; color: var(--ink-2); margin: 0; line-height: 1.4; }
+.rules { font-size: 11.5px; color: var(--ink-2); margin: 0; padding-left: 16px; line-height: 1.5; }
+.summary { font: 11px/1.5 var(--mono); background: var(--chip); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; color: var(--ink); margin: 0; }
+.copy { font: 12px var(--ui); padding: 6px 10px; border-radius: 7px; border: 0; background: var(--accent); color: #fff; cursor: pointer; align-self: flex-start; }
+.note { width: 100%; box-sizing: border-box; min-height: 54px; font: 12px var(--ui); border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); padding: 6px 8px; resize: vertical; }
+@media (max-width: 560px) {
+  .win { left: 70px; right: 8px; }
+  .flyout { left: 64px; width: auto; right: 8px; }
+  .music { grid-template-columns: minmax(0, 1fr); }
+  .music .side { display: none; }
+  .projbody { grid-template-columns: minmax(0, 1fr); }
+  .projbody > div + div { display: none; }
+}
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>Places: Folio boards that aren't projects</h1>
+    <p class="sub">Hover a mark to open its flyout, click it to bring up its window. Clicking a place never changes the focused project (top right). Hover a page in a place's flyout and use the arrow to send it to a project. All data is example data.</p>
+    <div class="stage" id="stage">
+      <div class="menubar"><b>Folio</b><span>File</span><span>Edit</span><span>View</span><span>Window</span><span class="grow"></span>
+        <span class="focuschip" id="focuschip"><i></i><span id="focustext"></span></span></div>
+      <div class="win" id="win"></div>
+      <div class="dock" id="dock" role="toolbar" aria-label="Folio dock"></div>
+      <div class="flyout" id="flyout" hidden></div>
+      <div class="menu" id="menu" hidden role="menu"></div>
+      <div class="toast" id="toast" hidden role="status"></div>
+    </div>
+  </div>
+
+  <aside class="controls" aria-label="Mock controls">
+    <div class="grp"><span class="gl">Name</span>
+      <div class="seg" data-k="noun"><button data-v="Place">Place</button><button data-v="Room">Room</button><button data-v="Shelf">Shelf</button><button data-v="Desk">Desk</button></div>
+      <p class="hint">Taken already: project, area, session, workspace, board. Space clashes with macOS Spaces.</p>
+    </div>
+    <div class="grp"><span class="gl">Dock order</span>
+      <div class="seg" data-k="order"><button data-v="after">Projects, then places</button><button data-v="before">Places, then projects</button><button data-v="mixed">Mixed, in open order</button><button data-v="one">One Browser mark</button></div>
+    </div>
+    <div class="grp"><span class="gl">Place mark</span>
+      <div class="seg" data-k="mark"><button data-v="initial">Grey + initial (today's file mark)</button><button data-v="site">Site icon on white</button><button data-v="chosen">Icon + colour you pick</button></div>
+    </div>
+    <div class="grp"><span class="gl">A closed place</span>
+      <div class="seg" data-k="closed"><button data-v="pinned">Stays in the dock, dimmed</button><button data-v="gone">Leaves the dock</button></div>
+      <p class="hint" id="closedHint"></p>
+    </div>
+    <div class="grp"><span class="gl">One-page place opens as</span>
+      <div class="seg" data-k="single"><button data-v="app">The page, filling the window</button><button data-v="board">A board with one card</button></div>
+    </div>
+    <div class="grp"><span class="gl">Playing audio</span>
+      <div class="seg" data-k="playing"><button data-v="dot">Dot under the mark</button><button data-v="badge">Speaker badge</button><button data-v="none">Nothing</button></div>
+    </div>
+    <div class="grp"><span class="gl">Place flyout</span>
+      <div class="seg" data-k="fly"><button data-v="today">Name + Show Window (today)</button><button data-v="pages">Its pages</button><button data-v="pagesnp">Its pages + Now Playing</button></div>
+    </div>
+    <div class="grp"><span class="gl">Send to a project</span>
+      <label class="chk"><input type="checkbox" id="sendMove"> Move to Project</label>
+      <label class="chk"><input type="checkbox" id="sendCopy"> Copy to Project</label>
+      <label class="chk"><input type="checkbox" id="sendLink"> Add to Project's Links</label>
+    </div>
+    <div class="grp"><span class="gl">Links from other apps go to</span>
+      <div class="seg" data-k="links"><button data-v="front">Front project window (today)</button><button data-v="browser">The Browser place</button><button data-v="smart">Browser, unless a project window is in front</button></div>
+      <button class="btn" id="simlink" style="align-self:flex-start">Open a link from Mail</button>
+    </div>
+    <div class="grp"><span class="gl">Fixed, not options</span>
+      <ul class="rules">
+        <li>A place is never the focused project.</li>
+        <li>No sessions, tasks, notes or time tracking.</li>
+        <li>Quick capture still goes to the focused project.</li>
+        <li>Stored as a .canvas file in a places folder in the vault.</li>
+      </ul>
+    </div>
+    <div class="grp"><label class="chk"><input type="checkbox" id="macdark"> Dark Mac</label></div>
+    <div class="grp"><span class="gl">Your note</span>
+      <textarea class="note" id="note" placeholder="Anything the controls don't cover"></textarea>
+    </div>
+    <div class="grp"><span class="gl">Summary</span>
+      <pre class="summary" id="summary"></pre>
+      <button class="copy" id="copy">Copy summary</button>
+    </div>
+  </aside>
+</div>
+
+<script>
+const I = {
+  folio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h6l2 2h8v12H4z"/></svg>',
+  house: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9H3z"/><path d="M10 20v-5h4v5"/></svg>',
+  note: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17.5a2.5 2.5 0 1 1-2-2.45V6l11-2v11.5a2.5 2.5 0 1 1-2-2.45V7.3L9 8.6z"/></svg>',
+  globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c3 3 3 14 0 17M12 3.5c-3 3-3 14 0 17"/></svg>',
+  book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M4 5.5C6.5 4.5 9.5 4.5 12 6c2.5-1.5 5.5-1.5 8-.5V19c-2.5-1-5.5-1-8 .5-2.5-1.5-5.5-1.5-8-.5z"/><path d="M12 6v13.5"/></svg>',
+  open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M10 14l6-6M11 8h5v5"/></svg>',
+  send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h12M13 7l5 5-5 5"/></svg>',
+  speaker: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7z"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
+};
+
+// Example data. Projects keep notes and tasks; places hold only pages.
+const PROJECTS = [
+  { k: 'folio', title: 'Folio', color: '#3b78e7', icon: 'folio', session: 'Places design · since 2:10 PM',
+    tasks: ['Mock places in the dock', 'Decide where incoming links land', 'Copy Sign-In From for icloud.com'],
+    links: ['web-cards.md', 'Liquid Glass guidelines'] },
+  { k: 'house', title: '42 Aberdeen', color: '#d0703a', icon: 'house', session: 'Contractor walk-through · Thu',
+    tasks: ['Email the engineer for the letter', 'Pick tile for the upstairs bath'], links: ['Permit portal'] },
+];
+const PLACES = [
+  { k: 'music', title: 'Music', color: '#fa3d5b', icon: 'note', open: true, playing: true,
+    pages: [{ t: 'Listen Now', host: 'music.apple.com', f: '#fa3d5b', g: 'M', thumb: 'linear-gradient(135deg,#ff8a5b,#c02c6f)' }] },
+  { k: 'browser', title: 'Browser', color: '#5b6b82', icon: 'globe', open: true,
+    pages: [
+      { t: 'Braised short ribs', host: 'cooking.example.com', f: '#2f8f5b', g: 'C', thumb: 'linear-gradient(135deg,#e9d6b8,#b8794a)' },
+      { t: 'Swift Forums · WKWebView cookies', host: 'forums.swift.org', f: '#f05138', g: 'S', thumb: 'linear-gradient(135deg,#f6f1ee,#e9d9d2)' },
+      { t: 'Weather · Portland', host: 'weather.example.com', f: '#2f78c4', g: 'W', thumb: 'linear-gradient(160deg,#9cc6ef,#e6eef7)' },
+      { t: 'Ceramic pour-over kettles', host: 'shop.example.com', f: '#7a5cc4', g: 'S', thumb: 'linear-gradient(135deg,#ece7f6,#c9bde8)' },
+    ] },
+  { k: 'reading', title: 'Reading', color: '#8a6d3b', icon: 'book', open: false,
+    pages: [
+      { t: 'The long tail of local-first', host: 'essays.example.org', f: '#8a6d3b', g: 'E', thumb: 'linear-gradient(135deg,#f3ece0,#dccbb0)' },
+      { t: 'Designing calm interfaces', host: 'blog.example.net', f: '#4b7a6b', g: 'B', thumb: 'linear-gradient(135deg,#e3eee9,#b9d3c8)' },
+    ] },
+];
+
+const DEFAULTS = { noun: 'Place', order: 'after', mark: 'site', closed: 'pinned', single: 'app', playing: 'dot', fly: 'pagesnp',
+  links: 'smart', sendMove: true, sendCopy: true, sendLink: true, macdark: false, note: '' };
+let S = { ...DEFAULTS };
+try { Object.assign(S, JSON.parse(localStorage.getItem('places-mock') || '{}')); } catch (e) {}
+
+let front = { kind: 'place', k: 'music' };     // the window on stage
+let focused = 'folio';                          // the focused project
+let hoverKey = null, hideTimer = null, menuFor = null;
+let highlight = null, newLink = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const proj = k => PROJECTS.find(p => p.k === k);
+const place = k => PLACES.find(p => p.k === k);
+const pagesWord = n => n === 1 ? '1 page' : `${n} pages`;
+
+function markHTML(item, kind) {
+  const isCur = front.kind === kind && front.k === item.k;
+  let ic;
+  if (kind === 'project') ic = `<span class="ic" style="--c:${item.color}">${I[item.icon]}</span>`;
+  else if (S.mark === 'initial') ic = `<span class="ic" style="--c:#8e939c">${esc(item.title[0])}</span>`;
+  else if (S.mark === 'site') ic = `<span class="ic site" style="--c:${item.color}">${I[item.icon]}</span>`;
+  else ic = `<span class="ic" style="--c:${item.color}">${I[item.icon]}</span>`;
+  let extra = '';
+  if (kind === 'place' && item.playing && S.playing === 'dot') extra += '<span class="play-dot"></span>';
+  if (kind === 'place' && item.playing && S.playing === 'badge') extra += `<span class="play-badge">${I.speaker}</span>`;
+  const closed = kind === 'place' && !item.open;
+  const label = `${item.title}${kind === 'place' ? `, ${S.noun.toLowerCase()}` : ', project'}${closed ? ', closed' : ''}${item.playing ? ', playing' : ''}`;
+  return `<button class="mk ${closed ? 'closed' : ''} ${isCur ? 'cur' : ''}" data-kind="${kind}" data-k="${item.k}" aria-label="${esc(label)}">${ic}${extra}</button>`;
+}
+
+function browserMarkHTML() {
+  const open = PLACES.filter(p => p.open || S.closed === 'pinned');
+  const isCur = front.kind === 'place';
+  const playing = PLACES.some(p => p.playing);
+  let extra = `<span class="stack">${open.length}</span>`;
+  if (playing && S.playing === 'dot') extra += '<span class="play-dot"></span>';
+  if (playing && S.playing === 'badge') extra += `<span class="play-badge">${I.speaker}</span>`;
+  return `<button class="mk ${isCur ? 'cur' : ''}" data-kind="all" data-k="all" aria-label="${esc(S.noun)}s">
+    <span class="ic" style="--c:#5b6b82">${I.globe}</span>${extra}</button>`;
+}
+
+function renderDock() {
+  const shownPlaces = PLACES.filter(p => p.open || S.closed === 'pinned');
+  const pm = PROJECTS.map(p => markHTML(p, 'project'));
+  const pl = shownPlaces.map(p => markHTML(p, 'place'));
+  let html;
+  if (S.order === 'after') html = [...pm, pl.length ? '<div class="sep"></div>' : '', ...pl];
+  else if (S.order === 'before') html = [...pl, pl.length ? '<div class="sep"></div>' : '', ...pm];
+  else if (S.order === 'mixed') html = [pm[0], pl[0], pm[1], ...pl.slice(1)].filter(Boolean);
+  else html = [...pm, '<div class="sep"></div>', browserMarkHTML()];
+  $('dock').innerHTML = html.join('');
+}
+
+function renderWindow() {
+  const w = $('win');
+  if (front.kind === 'project') {
+    const p = proj(front.k);
+    w.innerHTML = `<div class="tb"><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      <span class="ttl">${esc(p.title)}</span><span class="tabs"><span class="tab on">Notes</span><span class="tab">Board</span><span class="tab">Release</span></span></div>
+      <div class="winbody" style="background:var(--win)"><div class="projbody">
+        <div><h3>${esc(p.session)}</h3><p>Sittings, prose and tasks live here, as they do today.</p>
+          ${p.tasks.map(t => `<div class="trow"><span class="bx"></span><span>${esc(t)}</span></div>`).join('')}</div>
+        <div><h3>Links</h3><div class="links">${p.links.map(l => `<div class="lk ${l === newLink ? 'new' : ''}">${esc(l)}</div>`).join('')}</div></div>
+      </div></div>`;
+    return;
+  }
+  const pl = place(front.k);
+  const asApp = pl.pages.length === 1 && S.single === 'app';
+  const tb = `<div class="tb"><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    <span class="ttl">${esc(pl.title)}</span><span class="kind">${esc(S.noun)}</span>
+    ${asApp ? '' : `<span class="tabs"><span class="tab on">Board</span></span>`}</div>`;
+  if (asApp) {
+    const pg = pl.pages[0];
+    const body = pl.k === 'music' ? musicPage(pl) : `<div class="board" style="grid-template-columns:1fr"><div class="wcard"><div class="thumb" style="--t:${pg.thumb};height:300px"></div></div></div>`;
+    w.innerHTML = tb + `<div class="addr"><span class="field">${I.lock}<b>${esc(pg.host)}</b></span></div><div class="winbody">${body}</div>`;
+    return;
+  }
+  w.innerHTML = tb + `<div class="winbody"><div class="board">${pl.pages.map((pg, i) => `
+    <div class="wcard ${highlight === pl.k + i ? 'hl' : ''}"><div class="wh"><span class="fav" style="--f:${pg.f}">${esc(pg.g)}</span><span>${esc(pg.host)}</span></div>
+    <div class="thumb" style="--t:${pg.thumb}"></div><div class="wt">${esc(pg.t)}</div></div>`).join('')}
+    ${pl.pages.length === 0 ? `<p style="font-size:12px;color:var(--m-ink-2)">No pages. Links you open here appear as cards.</p>` : ''}</div></div>`;
+}
+
+function musicPage(pl) {
+  const tiles = [['#ff8a5b', '#c02c6f', 'Late Swim'], ['#4fa3d9', '#1b3e7a', 'Harbor Lights'], ['#c9d66b', '#4e7a2a', 'Field Notes'],
+    ['#f2c14e', '#d1495b', 'Paper Suns'], ['#9b7fd1', '#3c2a7a', 'Night Bus'], ['#7ad1c3', '#2a6f7a', 'Low Tide']];
+  return `<div class="music"><div class="side"><span class="sel">Listen Now</span><span>Browse</span><span>Radio</span><span>Library</span></div>
+    <div class="main"><h2>Listen Now</h2><div class="albums">${tiles.map(([a, b, n]) => `<div style="background:linear-gradient(135deg,${a},${b})"></div>`).join('')}</div></div>
+    <div class="bar"><span class="art"></span><span class="meta"><div>Late Swim</div><div>The Example Quartet</div></span>
+    <button id="pp" aria-label="${pl.playing ? 'Pause' : 'Play'}">${pl.playing ? I.pause : I.play}</button></div></div>`;
+}
+
+function flyoutHTML(kind, k) {
+  if (kind === 'project') {
+    const p = proj(k);
+    return { c: p.color, html: `<div class="fx-head"><span class="t">${esc(p.title)}<small>${esc(p.session)}</small></span>
+      <button class="ib" aria-label="New Task">${I.plus}</button><button class="ib" data-show="project:${p.k}" aria-label="Show Window">${I.open}</button></div>
+      <div class="hr"></div><div class="cap">Open tasks</div>${p.tasks.map(t => `<div class="task"><span class="bx"></span><span>${esc(t)}</span></div>`).join('')}<div style="height:8px"></div>` };
+  }
+  const list = kind === 'all' ? PLACES.filter(p => p.open || S.closed === 'pinned') : [place(k)];
+  const one = list[0];
+  const head = kind === 'all'
+    ? `<div class="fx-head"><span class="t">${esc(S.noun)}s<small>${list.length} ${esc(S.noun.toLowerCase())}s</small></span><button class="ib" aria-label="New ${esc(S.noun)}">${I.plus}</button></div>`
+    : `<div class="fx-head"><span class="t">${esc(one.title)}<small>${esc(S.noun)} · ${pagesWord(one.pages.length)}${one.open ? '' : ' · closed'}</small></span>
+       <button class="ib" data-show="place:${one.k}" aria-label="${one.open ? 'Show Window' : 'Open'}">${I.open}</button></div>`;
+  if (S.fly === 'today' && kind !== 'all') return { c: one.color, html: head };
+  let body = '';
+  for (const pl of list) {
+    if (S.fly === 'pagesnp' && pl.playing) {
+      body += `<div class="np"><span class="art"></span><span class="meta"><div>Late Swim</div><div>The Example Quartet · ${esc(pl.title)}</div></span>
+        <button class="ib" data-pp="${pl.k}" aria-label="${pl.playing ? 'Pause' : 'Play'}">${pl.playing ? I.pause : I.play}</button></div>`;
+    }
+    if (kind === 'all') body += `<div class="cap">${esc(pl.title)}</div>`;
+    else body += `<div class="cap">Pages</div>`;
+    body += pl.pages.map((pg, i) => `<div class="row" tabindex="0" data-page="${pl.k}:${i}">
+      <span class="fav" style="--f:${pg.f}">${esc(pg.g)}</span><span class="nm">${esc(pg.t)}<small>${esc(pg.host)}</small></span>
+      <span class="act">${anySend() ? `<button class="ib" data-send="${pl.k}:${i}" aria-label="Send ${esc(pg.t)} to a project" aria-haspopup="menu">${I.send}</button>` : ''}</span></div>`).join('');
+  }
+  return { c: kind === 'all' ? '#5b6b82' : one.color, html: head + '<div class="hr"></div><div class="rows">' + body + '</div>' };
+}
+
+const anySend = () => S.sendMove || S.sendCopy || S.sendLink;
+
+function openFlyout(kind, k, markEl) {
+  clearTimeout(hideTimer);
+  hoverKey = kind + ':' + k;
+  const { c, html } = flyoutHTML(kind, k);
+  const fx = $('flyout');
+  fx.style.setProperty('--c', c);
+  fx.innerHTML = html;
+  fx.hidden = false;
+  const top = markEl.offsetTop + $('dock').offsetTop - 6;
+  fx.style.top = Math.max(30, Math.min(top, $('stage').clientHeight - fx.offsetHeight - 10)) + 'px';
+}
+function scheduleHide() {
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => { if (!menuFor) { $('flyout').hidden = true; hoverKey = null; } }, 300);
+}
+
+function show(kind, k) {
+  if (kind === 'place') { const pl = place(k); pl.open = true; }
+  front = { kind, k };
+  if (kind === 'project' && focused !== k) {
+    focused = k;
+    const chip = $('focuschip'); chip.classList.remove('flash'); void chip.offsetWidth; chip.classList.add('flash');
+  }
+  render();
+}
+
+function toast(text) {
+  const t = $('toast'); t.textContent = text; t.hidden = false;
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.hidden = true, 2600);
+}
+
+function openMenu(ref, btn) {
+  const [pk, i] = ref.split(':');
+  menuFor = { pk, i: +i };
+  const m = $('menu');
+  const items = [];
+  const verb = [S.sendMove && ['move', 'Move to'], S.sendCopy && ['copy', 'Copy to'], S.sendLink && ['link', 'Add to Links of']].filter(Boolean);
+  verb.forEach(([v, label], vi) => {
+    if (vi) items.push('<div class="msep"></div>');
+    items.push(`<div class="mh">${label}</div>`);
+    PROJECTS.forEach(p => items.push(`<button class="mi" role="menuitem" data-do="${v}:${p.k}"><i style="--c:${p.color}"></i>${esc(p.title)}${p.k === focused ? ' (focused)' : ''}</button>`));
+  });
+  m.innerHTML = items.join('');
+  m.hidden = false;
+  const r = btn.getBoundingClientRect(), s = $('stage').getBoundingClientRect();
+  m.style.left = Math.min(r.right - s.left + 4, s.width - 210) + 'px';
+  m.style.top = Math.min(r.top - s.top, s.height - m.offsetHeight - 8) + 'px';
+  m.querySelector('.mi')?.focus();
+}
+function closeMenu() { $('menu').hidden = true; menuFor = null; }
+
+function doSend(action) {
+  const [v, k] = action.split(':');
+  const pl = place(menuFor.pk), pg = pl.pages[menuFor.i], p = proj(k);
+  if (v === 'move') { pl.pages.splice(menuFor.i, 1); toast(`Moved “${pg.t}” to ${p.title}'s board.`); }
+  if (v === 'copy') toast(`Copied “${pg.t}” to ${p.title}'s board. It stays in ${pl.title} too.`);
+  if (v === 'link') { if (!p.links.includes(pg.t)) p.links.push(pg.t); newLink = pg.t; toast(`Added “${pg.t}” to ${p.title}'s Links.`); }
+  closeMenu(); $('flyout').hidden = true; hoverKey = null;
+  render();
+}
+
+function simulateLink() {
+  const pg = { t: 'Shipping update: your order', host: 'track.example.com', f: '#c4572f', g: 'T', thumb: 'linear-gradient(135deg,#f5e6dc,#e0b9a1)' };
+  const toBrowser = S.links === 'browser' || (S.links === 'smart' && front.kind !== 'project');
+  if (toBrowser) {
+    const b = place('browser'); b.pages.push(pg); b.open = true;
+    front = { kind: 'place', k: 'browser' }; highlight = 'browser' + (b.pages.length - 1);
+    toast(`Opened in Browser. The focused project is still ${proj(focused).title}.`);
+  } else {
+    const p = proj(front.kind === 'project' ? front.k : focused);
+    front = { kind: 'project', k: p.k };
+    toast(`Opened on ${p.title}'s board.`);
+  }
+  render();
+  setTimeout(() => { highlight = null; }, 1500);
+}
+
+function summary() {
+  const name = (k, v) => document.querySelector(`.seg[data-k="${k}"] button[data-v="${v}"]`).textContent;
+  const send = [S.sendMove && 'Move', S.sendCopy && 'Copy', S.sendLink && 'Add to Links'].filter(Boolean).join(', ') || 'none';
+  return [
+    `Name: ${S.noun}`,
+    `Dock order: ${name('order', S.order)}`,
+    `Place mark: ${name('mark', S.mark)}`,
+    `Closed place: ${name('closed', S.closed)}`,
+    `One-page place: ${name('single', S.single)}`,
+    `Playing audio: ${name('playing', S.playing)}`,
+    `Place flyout: ${name('fly', S.fly)}`,
+    `Send to project: ${send}`,
+    `Incoming links: ${name('links', S.links)}`,
+    S.note.trim() ? `Note: ${S.note.trim()}` : null,
+  ].filter(Boolean).join('\n');
+}
+
+function render() {
+  $('stage').classList.toggle('mac-dark', S.macdark);
+  const fp = proj(focused);
+  $('focuschip').style.setProperty('--c', fp.color);
+  $('focustext').textContent = `Focused: ${fp.title}`;
+  renderDock(); renderWindow();
+  document.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', S[seg.dataset.k] === b.dataset.v)));
+  ['sendMove', 'sendCopy', 'sendLink', 'macdark'].forEach(k => $(k).checked = S[k]);
+  if ($('note').value !== S.note) $('note').value = S.note;
+  $('closedHint').textContent = S.closed === 'pinned'
+    ? 'Reading is closed and still in the dock. Click it to open.'
+    : `Reading is closed, so it isn't in the dock. Reopen it from File ▸ Open ${S.noun}.`;
+  $('summary').textContent = summary();
+  try { localStorage.setItem('places-mock', JSON.stringify(S)); } catch (e) {}
+}
+
+// controls
+document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  S[seg.dataset.k] = b.dataset.v; $('flyout').hidden = true; render();
+}));
+['sendMove', 'sendCopy', 'sendLink', 'macdark'].forEach(k => $(k).addEventListener('change', e => { S[k] = e.target.checked; render(); }));
+$('note').addEventListener('input', e => { S.note = e.target.value; $('summary').textContent = summary(); try { localStorage.setItem('places-mock', JSON.stringify(S)); } catch (err) {} });
+$('simlink').addEventListener('click', simulateLink);
+
+// dock
+const dock = $('dock');
+dock.addEventListener('mouseover', e => { const b = e.target.closest('.mk'); if (b && hoverKey !== b.dataset.kind + ':' + b.dataset.k) openFlyout(b.dataset.kind, b.dataset.k, b); });
+dock.addEventListener('focusin', e => { const b = e.target.closest('.mk'); if (b) openFlyout(b.dataset.kind, b.dataset.k, b); });
+dock.addEventListener('mouseleave', scheduleHide);
+dock.addEventListener('click', e => {
+  const b = e.target.closest('.mk'); if (!b) return;
+  if (b.dataset.kind === 'all') { const first = PLACES.find(p => p.open) || PLACES[0]; show('place', first.k); }
+  else show(b.dataset.kind, b.dataset.k);
+  openFlyout(b.dataset.kind, b.dataset.k, dock.querySelector(`[data-k="${b.dataset.k}"]`) || b);
+});
+
+// flyout
+const fx = $('flyout');
+fx.addEventListener('mouseenter', () => clearTimeout(hideTimer));
+fx.addEventListener('mouseleave', scheduleHide);
+fx.addEventListener('click', e => {
+  const s = e.target.closest('[data-show]');
+  if (s) { const [kind, k] = s.dataset.show.split(':'); show(kind, k); fx.hidden = true; hoverKey = null; return; }
+  const pp = e.target.closest('[data-pp]');
+  if (pp) { const pl = place(pp.dataset.pp); pl.playing = !pl.playing; render(); const m = dock.querySelector(`[data-k="${hoverKey.split(':')[1]}"]`); if (m) openFlyout(...hoverKey.split(':'), m); return; }
+  const sd = e.target.closest('[data-send]');
+  if (sd) { e.stopPropagation(); openMenu(sd.dataset.send, sd); return; }
+  const row = e.target.closest('[data-page]');
+  if (row) { const [k] = row.dataset.page.split(':'); show('place', k); fx.hidden = true; hoverKey = null; }
+});
+
+// menu
+$('menu').addEventListener('click', e => { const mi = e.target.closest('[data-do]'); if (mi) doSend(mi.dataset.do); });
+document.addEventListener('click', e => { if (menuFor && !e.target.closest('#menu') && !e.target.closest('[data-send]')) { closeMenu(); scheduleHide(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (menuFor) closeMenu(); else { fx.hidden = true; hoverKey = null; } } });
+
+// the music page's own button
+$('win').addEventListener('click', e => { if (e.target.closest('#pp')) { const m = place('music'); m.playing = !m.playing; render(); } });
+
+$('copy').addEventListener('click', () => {
+  const text = summary(), pre = $('summary');
+  const fallback = () => { const r = document.createRange(); r.selectNodeContents(pre); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); };
+  try { navigator.clipboard.writeText(text).then(() => { $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy summary', 1400); }, fallback); } catch (err) { fallback(); }
+});
+
+render();
+</script>

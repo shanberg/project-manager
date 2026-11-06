@@ -428,6 +428,8 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         index.warmAllProjects()
         model.recents = index.recents
         model.allProjects = index.allProjects
+        model.offersSpaces = projectPicked == nil
+        model.spaces = model.offersSpaces ? Spaces.shared.all.map { ($0.id, $0.title) } : []
         refreshContext()
         model.allTasks = searchableTasks(from: index)
         // Only capture lines are worth catching, and only for a while: a sentence you abandoned ten
@@ -675,6 +677,15 @@ final class QuickBarController: NSObject, NSWindowDelegate {
         case .newProject:
             hide(restoringFocus: false)
             ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
+        case .goToSpace(let id, _):
+            hide(restoringFocus: false)
+            // A page carried in from a browser goes into the space, as a link from another app does.
+            if let page = model.page { return Spaces.shared.openIncoming(page.url, in: id) }
+            Spaces.shared.go(to: id)
+        case .newSpace(let name):
+            hide(restoringFocus: false)
+            let id = Spaces.shared.newSpace(named: name)
+            if let page = model.page { Spaces.shared.openIncoming(page.url, in: id) }
         case .captureTo(let target):
             guard !isRunning, !model.reading.text.isEmpty else { return }
             isRunning = true
@@ -1009,7 +1020,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     /// these commands were given a global shortcut for in the first place.
     private func staysInPM(_ command: QuickBarCommand, argument: String) -> Bool {
         switch command {
-        case .openWindow, .settings, .newProject, .projectSettings, .showEvents, .addLink, .editDetails,
+        case .openWindow, .settings, .newProject, .newSpace, .showOverview, .projectSettings, .showEvents, .addLink, .editDetails,
              .takeMeetingNotes: return true
         // Given text it just writes the note; given none it opens the place that edits it.
         case .sessionNote: return argument.isEmpty
@@ -1220,6 +1231,11 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             PMStore.clearGlobalFocus()
         case .newProject:
             ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
+        case .newSpace:
+            Spaces.shared.newSpace(named: argument)
+        case .showOverview:
+            // Once the bar has gone: its panel giving up key would otherwise close the overview.
+            DispatchQueue.main.async { OverviewController.shared.show() }
         case .settings:
             PMContract.performAffordance(.appSettings, store: store)
         }

@@ -52,6 +52,10 @@ enum PMCommand: String, CaseIterable, Identifiable {
     // The app. Placed in the File menu by hand — see `menuSection` — but named here so the quick bar
     // and the menu bar can't come to call them different things.
     case newProject
+    /// A space: an empty board in its window, named if `>space <name>` gave one. docs/spaces.md.
+    case newSpace
+    /// Every project and space at once. docs/spaces.md § Overview.
+    case showOverview
     case settings
 
     var id: String { rawValue }
@@ -94,6 +98,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .unarchiveProject: return "Unarchive Project"
         case .unfocus: return "Unfocus Project"
         case .newProject: return "New Project…"
+        case .newSpace: return "New Space"
+        case .showOverview: return "Overview"
         case .settings: return "Settings…"
         }
     }
@@ -141,6 +147,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .unarchiveProject: return "arrow.up.bin"
         case .unfocus: return "circle.slash"
         case .newProject: return "plus.square"
+        case .newSpace: return "plus.rectangle.on.rectangle"
+        case .showOverview: return "square.grid.2x2"
         case .settings: return "gearshape"
         }
     }
@@ -168,7 +176,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
         // Placed by hand or not in the bar: Open Project Window is Go's, the session is File ▸ New
         // Session and Project ▸ Write Session Note…, and Edit ▸ Undo already names Undo Complete Task.
         // Take Notes is File's, beside New Session, since it isn't about the focused project.
-        case .newProject, .settings, .openWindow, .startSession, .sessionNote, .undoLast, .takeMeetingNotes:
+        // Overview is in Spaces and Window, placed there by `MainMenu`.
+        case .newProject, .newSpace, .showOverview, .settings, .openWindow, .startSession, .sessionNote, .undoLast, .takeMeetingNotes:
             return nil
         }
     }
@@ -218,7 +227,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         // submenu — they're the reason the menu gets opened. The menu builds those itself. Drop isn't
         // one of those reasons: it's a decision made in a list, not a glance at the menubar.
         // Unfocus sits beside Switch Project, at the top level, placed by the menu itself.
-        case .complete, .drop, .undoLast, .diveIn, .newProject, .settings, .takeMeetingNotes, .unfocus:
+        case .complete, .drop, .undoLast, .diveIn, .newProject, .newSpace, .showOverview, .settings, .takeMeetingNotes, .unfocus:
             return nil
         }
     }
@@ -254,6 +263,16 @@ enum PMCommand: String, CaseIterable, Identifiable {
 
     static var quickBarCommands: [PMCommand] { allCases.filter(\.inQuickBar) }
 
+    /// Whether the command is about the focused project or task. The app's own (New Project, New
+    /// Space, Settings) and Take Notes for This Meeting aren't, so the quick bar draws no session
+    /// preview under them.
+    var actsOnFocusedProject: Bool {
+        switch self {
+        case .newProject, .newSpace, .showOverview, .settings, .takeMeetingNotes: return false
+        default: return true
+        }
+    }
+
     /// The single word that introduces this command's text, for the commands that take any.
     ///
     /// One word, and never shared between two commands, because this is what splits a typed line into
@@ -263,6 +282,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         switch self {
         case .setDue: return "due"
         case .startSession: return "session"
+        case .newSpace: return "space"
         // No verb for `sessionNote`: it isn't offered in `>` at all — see `inQuickBar`.
         default: return nil
         }
@@ -273,6 +293,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         switch self {
         case .setDue: return "tomorrow, friday, in 2w…"
         case .startSession: return "a label for today"
+        case .newSpace: return "a name, or none"
         default: return nil
         }
     }
@@ -305,6 +326,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .unarchiveProject: return ["unarchive", "restore", "reopen"]
         case .unfocus: return ["unfocus", "clear", "stop", "none", "nothing", "break", "off"]
         case .newProject: return ["create", "start"]
+        case .newSpace: return ["space", "browser", "desktop", "workspace", "create"]
+        case .showOverview: return ["overview", "mission control", "expose", "all windows", "spaces", "grid", "show all"]
         case .settings: return ["preferences", "config", "shortcuts"]
         }
     }
@@ -426,7 +449,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
     @MainActor
     func isAvailable(in context: Context) -> Bool {
         switch self {
-        case .newProject, .settings:
+        case .newProject, .newSpace, .showOverview, .settings:
             return true
         case .takeMeetingNotes:
             return MeetingNotes.current() != nil

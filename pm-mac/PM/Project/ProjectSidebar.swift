@@ -1197,7 +1197,8 @@ private struct KindMark: View {
         if let icon = entry.icon, ProjectIconMark.canDraw(icon) {
             // A chosen icon stands in for either mark. The count the ring gave up is still in the
             // row's tooltip, and in the menu bar's menu when this is the focused project.
-            ProjectIconMark(icon: icon, size: 13, tint: tint)
+            // The row's text colour, not the project's: a dark project colour vanishes on a dark sidebar.
+            ProjectIconMark(icon: icon, size: 13)
                 .frame(width: 16, height: 16)
                 .overlay(alignment: .bottomTrailing) {
                     // An emoji, or an image in its own colours, keeps them, so the project's rides beside it as a dot.

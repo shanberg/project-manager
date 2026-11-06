@@ -651,6 +651,10 @@ struct QuickBarView: View {
                         Self.switchHint(model.mode)]
             }
             if model.isEmptyState || model.rows.isEmpty { return Self.nothingMatched("command", model) }
+            // Not about the project in hand (New Space, Settings…): its name would read as the target.
+            if case .command(let command, _) = model.selectedRow, !command.actsOnFocusedProject {
+                return [Self.revealHint, Self.switchHint(model.mode)]
+            }
             return [[.text(ProjectCodes.display(project))],
                     Self.revealHint,
                     Self.switchHint(model.mode)]

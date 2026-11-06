@@ -35,6 +35,16 @@ struct SwitcherModel: Equatable {
         /// The focused task's text.
         var focusedTask: String?
         var entries: [Entry] = []
+        /// The last card, New Space: makes one rather than going anywhere.
+        var isNewSpace = false
+
+        static let newSpace = Card(key: "new-space", title: "New Space", isSpace: true, isNewSpace: true)
+    }
+
+    /// The cards with New Space after them; none when there's nothing to switch between, so a quick
+    /// ⌥Tab tap never lands on it.
+    static func withNewSpace(_ cards: [Card]) -> [Card] {
+        cards.isEmpty ? [] : cards + [.newSpace]
     }
 
     private(set) var cards: [Card]
@@ -43,10 +53,11 @@ struct SwitcherModel: Equatable {
     /// The row picked inside that card, or nil for the card itself.
     private(set) var entry: Int?
 
-    /// Opened on the card after the front one — or the only one, when there's one.
+    /// Opened on the card after the front one — or the only one, when there's one. New Space doesn't
+    /// count: with one window, a press lands on that window, not on a new space.
     init(cards: [Card]) {
         self.cards = cards
-        index = cards.count > 1 ? 1 : 0
+        index = cards.filter { !$0.isNewSpace }.count > 1 ? 1 : 0
         entry = nil
     }
 

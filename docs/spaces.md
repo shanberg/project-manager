@@ -11,6 +11,7 @@ Rebuilt 2026-11-04 on workspaces (`Spaces`, `SpaceModel`). The first build, a br
 - So it holds any tile a project's board does: web, folder, file, note, view. Workspaces, tabs in tiles, pop-outs, the address bar, Copy Sign-In From all work as they do on a project.
 - `~/.config/pm/spaces.json` keeps what a file can't: name, icon, colour.
 - File ▸ New Space: untitled, an empty board in its window. Named with Rename… on its dock mark; clearing the name makes it untitled again.
+- Also made from (2026-11-06, `Spaces.newSpace`): Spaces ▸ New Space, the dock's +, the switcher's New Space card, `>space` / `>space <name>` and `@`'s New Space “…” in the quick bar. A new space's window comes forward with Folio active.
 - A dock mark's right-click menu: Show Window, Rename…, Colour, Delete Space… (the canvas goes to the Trash).
 - The window is named for the space (Untitled Space until named).
 - Never the focused project: a window on a file changes nothing (concepts.md § Workspace).
@@ -26,7 +27,7 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
 - Built: the sidebar in place of the project list in a space's window (the tab row hidden); favourites, Board, workspaces among Pinned, pinned and Today cards, frames as folders (click to fold); click, ⌥-click, ⌘-click + ⌘↩ ("Tile N as a Workspace"); Pin, Favourite, Open in a Tile Beside, Close on a row's menu; the address field (⌘T) making a web card; ⌘W on the card in front.
 - Polished 2026-11-04 against renders of a real window: Arc's row and favourite styles (the card in front a raised chip), a rule between pinned and Today, workspace rows led by their tiles' icons, the space's colour and name at the foot, the window washed in the space's colour.
 - No header in a space's window (`CanvasPaneController.hidesHeader`): no title pill, tab bar or trailing controls. Tiles have the usual 6pt gap on every side, sidebar or not.
-- Dead space, as Arc: in a layout (a space's or, since 2026-11-05, a project's, and the one card filling the window in focus mode), a press in the top 96pt of a tile's page (`CanvasPageView.deadSpaceBand`; 56pt missed Apple Music's header) on nothing usable moves the window; double-click is the title bar's action. Nothing usable = WebKit's cursor is the plain arrow (not a hand or an I-beam) and its last hover report was no link, image, media or editable field (`isDeadSpace`, `hoverIsInteractive` from `mouseDidMoveOverElement`). And the page itself says nothing there is its own (`CanvasPageView.pageUses`, asked on each WebKit hover report — `mouseMoved` and the view's own tracking areas never hear the moves; a press before the answer for the latest report is the page's; "page kept a press in the band" logs one): not inside a button, form control, ARIA widget role, `tabindex` ≥ 0, `draggable`, `contenteditable` or `onclick`; not on a `canvas`, `iframe`, `video`, `embed` or `object`; not inside a dialog, or a fixed/absolute box inset from the viewport's left, right and top (a floating panel). Figma's toolbar buttons keep the arrow cursor and its Variables panel has a blank header, 2026-11-05. Whether a page is a space's tile is asked of the board it's in at the press, not the card that built it: running pages are handed between panes. A drag from a page logs "window drag from page dead space: <host>".
+- Dead space, as Arc: in a layout (a space's or, since 2026-11-05, a project's, and the one card filling the window in focus mode), a press in the top 96pt of a tile's page (`CanvasPageView.deadSpaceBand`; 56pt missed Apple Music's header) on nothing usable moves the window; double-click is the title bar's action. Nothing usable = WebKit's cursor is the plain arrow (not a hand or an I-beam) and its last hover report was no link, image, media or editable field (`isDeadSpace`, `hoverIsInteractive` from `mouseDidMoveOverElement`). And the page itself says nothing there is its own (`CanvasPageView.pageUses`, asked on each WebKit hover report — `mouseMoved` and the view's own tracking areas never hear the moves; a press before the answer for the latest report is the page's; "page kept a press in the band" logs one): not inside a button, form control, ARIA widget role, `tabindex` ≥ 0, `draggable`, `contenteditable` or `onclick`; not on a `canvas`, `iframe`, `embed` or `object`; not inside a dialog, or a fixed/absolute box inset from the viewport's left, right and top (a floating panel). Figma's toolbar buttons keep the arrow cursor and its Variables panel has a blank header, 2026-11-05. A video's picture (2026-11-05, `CanvasPageView.Press.video`) is held rather than taken: a visible `<video>` at least 200×100, above the 96pt strip along its foot (player controls), not under a control; an ancestor that only holds the video (a player's `tabindex=0` wrapper) or a layer covering the whole picture is not a control. Anywhere on it, not only in the top band. The press is not passed to the page: moved 4pt (`videoDragSlop`) it moves the window; released first, the page gets the mouse-down and mouse-up together (a click pauses, a double-click goes full screen). A hover over media no longer counts as `hoverIsInteractive` (`hoverIsMedia`; it still blocks the top band). Logs "window drag from a video: <host>". Whether a page is a space's tile is asked of the board it's in at the press, not the card that built it: running pages are handed between panes. A drag from a page logs "window drag from page dead space: <host>".
 - The window's top 3–4pt is its resize edge, so the 6pt gutter above the tiles is mostly that; the page's dead space is the handle that matters.
 - The sidebar's list fills its scroll area, so empty sidebar below the last row is drag area too. Each gutter or sidebar drag writes "window drag from …" to the log.
 - Sidebar shortcut: ⌘S in a space (Arc's), and ⌃⌘S / View ▸ Show Sidebar. A space's sidebar is a plain pane, so the split's own toggle (which only moves a sidebar-behaviour item) is replaced there (`toggleSpaceSidebar`).
@@ -50,6 +51,7 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
   - A drag held at the edge of the tiles (or over the band above the top tile) doesn't scroll them, any drag (`CanvasClipView`, 2026-11-05: it slid the layout partly out of view). Off the tiles, a drag at the board's edge still scrolls it.
   - A web row carries its address: another app, or another board, takes it as a link.
   - Onto a space's dock mark (lit while over it): the card moves to that space as Today, unpinned, off the board it came from, a space's or a project's (`CanvasSatelliteDock.rowDrop`, `Spaces.move(_:fromCanvas:to:)`). Onto a project's mark: a space's web card goes onto that project's board, as the flyout's Send ▸ Card. Its own board's mark refuses it.
+- Files from Finder (or any app) dropped on the sidebar, a space's or a project's (2026-11-06; `SpaceFrame.landFiles`, `SpaceRowDropTarget`): a file card each (a folder card for a folder), in drop order, the last one shown. Same line marks as a row: between rows, into Pinned / Today / Cards, onto a folder (first in it), onto the favourites. Onto a workspace row: the cards join that workspace. Between workspace rows: refused. Anywhere else (Notes, Board, the empty sidebar): the end of Today / Cards. Outside the vault asks Copy In / Point At It, as a drop on the board. One undo step; a copied-in file stays on undo.
 - Dragging a workspace row among the workspace rows reorders them (2026-11-05). The order is kept per board in defaults (`PMCanvasWorkspaceOrder`, `CanvasWorkspaces.ordered`); unordered ones follow alphabetically; a rename keeps its place. Menus stay alphabetical. The row carries a tab chip's type (`ProjectTabDrag`), which nothing else takes.
 - Double-click a workspace row (or its menu's Rename Layout…) to rename it in place (2026-11-05). Return or clicking away keeps it, Esc abandons; same rename as the tab chip (`ProjectSplitViewController.renameWorkspace(named:to:)`): chips follow, a taken name asks first, one ⌘Z. No drag while editing.
 - The frame for projects, decided 2026-11-05 in `.claude/mocks/folio-project-frame.html`; built the same day (`SpaceFrame` with `project`, `ProjectSplitViewController.syncFrame`). Off with `defaults write <bundle> PMProjectFrameOff -bool YES`. A window on a file that's neither a space nor a project's board has no frame. Spaces and projects behave alike unless there's a reason (one sidebar, one rule per key).
@@ -72,13 +74,14 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
 - A row is a card: web, folder, file, note, view. Frames on the board are folders in the sidebar.
 - Named workspaces are rows among Pinned, showing their tiles' icons.
 - Pinned and favourite are marks on the card, stored on the node (`pm*` keys), so the board stays the one record. The rest of a space's cards are Today; they stay until closed.
-- Clicking a card that isn't showing replaces the tile you're in, as Arc. In a named workspace of several tiles, that leaves the workspace for the card on its own.
-- Clicking a card that's in another named workspace jumps to that workspace, with the card's tile picked.
+- Clicking a card that isn't showing, and that no layout holds, replaces the tile you're in, as Arc. In a named workspace of several tiles, that leaves the workspace for the card on its own.
+- Clicking a card that a layout holds (the one on screen, or another named workspace) opens it alone, on the board's own tab; the layouts are left as they were (2026-11-05, `SpaceFrame.openAlone`; was: jumped to the workspace with the card's tile picked).
+- A card's menu has "Show in “<layout>”" for each layout holding it, in the sidebar's order: that workspace's tab with the card's tile forward (`showInLayout`). Jumps from search, the ⌥Tab switcher, ⌘1…9 and ⌃⇥ still go to the layout (`show`).
 - ⌥-click: a tile beside the one you're in. Dragging a row onto the tiles: beside, as a tab, or in place, where it's let go.
 - ⌘-click rows, then ⌘↩: tile them as a new workspace (a new Pinned row).
 - Tiles keep grid / master-and-stack, sizes, maximize, pop-out. A tile's strip shows only in a split.
 - ⌘T: a new card in Today, shown in the tile you're in (File ▸ New Tab is enabled in a space though it has no project).
-- ⌘W: the focused tile out of the layout; the card stays on the board and in the sidebar, ⌘Z puts it back. With no tile focused, the window closes. A row's Close in the sidebar still takes the card off the board (a pinned one is unpinned).
+- ⌘W: the focused tile out of the layout; the card stays on the board and in the sidebar, ⌘Z puts it back. With no tile focused, the window closes. A row's Close in the sidebar still takes the card off the board (a pinned one is unpinned). Middle-click on an unpinned row does the same (`MiddleClickArea`); on a pinned row it does nothing.
 - ⌘L: the sidebar's address field on the page in front, which Return sends there (the header's field is hidden in a space).
 - ⌘1…⌘8: the sidebar's cards in order (favourites, pinned, today), ⌘9 the last; the menu items are titled after them.
 - An unnamed tiling of several tiles offers Keep as Workspace.
@@ -87,6 +90,8 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
 
 - Projects, a divider, then every space, open or not. Same squircle marks; a closed space's is dimmed. A space's window and pop-outs belong to its mark. The dock shows whenever a space exists.
 - The focused project's mark has a ring in its colour. Built.
+- The + (2026-11-06, `NewSpaceMark`): a + on a glass plate of its own, no outline, 4pt (the marks' spacing) under the dock (above it when the dock is at the screen's foot), centred; the dock's size never changes for it. Shown while the pointer is on the dock or the +, or a drag is over a mark or the +; fades in and out (0.12s), going 0.35s after the pointer is off both. Click: a new space. A sidebar row let go on it: a new space holding that card, moved off its board and shown. A web link (http/https) from any app: a new space on that page. Files and other schemes refused. Pressing and moving drags the dock, as any mark.
+- Right-click on the + or the dock's glass: New Space, New Project….
 - Not built: a grey bar beside the mark of the window in front, apart from focus.
 - Playing sound: WebKit's own `_isPlayingAudio`, observed on the page (`CanvasPageView.isPlayingAudio`, posted as `audioChanged`) — on the page because pages move between panes. Shown as a speaker on the card's sidebar row (click: pause) and favourite tile, on the card and tile rows of the ⌥Tab switcher, a dot under the dock mark, and in the space's flyout.
 - A space's dock flyout (`SpaceDockCard`): name, card count, Show Window; a Now Playing row with pause for each card making sound; the cards, pinned first, which open in the space; a web card's menu sends it to a recent project as a card (off the space), into its Links, or as a task.
@@ -165,6 +170,28 @@ Built 2026-11-04. Facts in [concepts.md § Focus](concepts.md#focus).
 - Capture with nothing focused asks which project: a row per recent project.
 - Not in the contract yet: no `project.unfocus` for the CLI, Raycast or MCP.
 
+## Spaces menu
+
+Built 2026-11-06 (`SpacesMenu`, in MainMenu.swift), between Go and History.
+
+- New Space (no key: ⌃⌥N is Write Session Note, ⌃⌘N New Project).
+- Next Space ⌃⌥], Previous Space ⌃⌥[: the list's order, wrapping. From a window that isn't a space: the first / the last (`SpaceOrder.step`).
+- Overview first (no key; ⌥Tab then Space), then New Space.
+- Every space, open or closed, with its colour; a check on the space in front. The first nine on ⌃⌥1…⌃⌥9 (⌃1…9 are Go ▸ Frame, ⌃⌘1…6 a note's headings, ⌃←/⌃→ the system's). Past nine: listed, no key.
+- Going to a space opens it if closed and brings its window forward.
+- Rename “…”… and Delete “…”…: the space in front; dimmed when the front window isn't a space.
+
+## Quick bar
+
+Built 2026-11-06.
+
+- `>`: New Space. `>space <name>` makes it named.
+- `>` with New Project, New Space, Settings or Take Notes for This Meeting selected: no session preview under the rows, and no project name in the hint (`PMCommand.actsOnFocusedProject`).
+- `@`: spaces after the projects. Empty field: recent projects, then spaces, 7 rows in all. Typed: projects that match, then spaces whose name starts with it, then spaces with a word that does (`SpaceOrder.matching`).
+- `@` with nothing matching: New Project… and New Space “<typed>”.
+- A space row: goes to it. With a page carried in from a browser: the page goes into that space as a link from another app does.
+- Not while the bar picks a project for something (Services ▸ Send to Project): no spaces, no New Space.
+
 ## Switcher
 
 Built 2026-11-04 for projects (`SwitcherController`, `SwitcherModel`); spaces join the row when they exist.
@@ -179,6 +206,33 @@ Built 2026-11-04 for projects (`SwitcherController`, `SwitcherModel`); spaces jo
 - A quick tap (⌥ up within 0.12 s) switches without drawing the panel.
 - Bindable in Settings ▸ Shortcuts as Switch Between Projects; held by whatever modifiers it's bound with.
 - Tiles are named from the canvas file, as a tile's tab names its card. Jumping to a tile opens its workspace and brings that card forward (`showTab`).
+- New Space (2026-11-06): the last card, after the spaces; choosing it makes a space. Not shown with nothing else to switch between. Doesn't count for the first press: with one window, ⌥Tab lands on that window.
+- Space: the overview, on the card picked, the cards growing into its tiles (2026-11-06). Not ↑: that moves through a card's list.
+
+## Overview
+
+Built 2026-11-06 (`OverviewController`, `OverviewModel`, `WindowSnapshot`); designed in `.claude/mocks/folio-overview.html`.
+
+- Opened by Space in the switcher, Spaces ▸ Overview, Window ▸ Overview, or `>overview` in the quick bar (also found as mission control, exposé, all windows). No key of its own (⌃↑ is macOS Mission Control).
+- One grid in the dock's order: projects, a divider, every space, then +. As Mission Control: the fewest columns that fit, so the largest tiles; centred top to bottom.
+- A tile: the place's own window large; its windows out at half its scale, in a column beside it on the side each is on screen, top to bottom as on screen, never overlapping (a column taller than the window shrinks to its height). Name and mark under them; Focused, Closed or Playing after the name.
+- Each window picture: a one-pixel mid-grey hairline at 30% (the front window's white at 45%), so light windows show on a light desktop and dark on dark.
+- Pictures taken in the app: `cacheDisplay` for the views, WebKit's `takeSnapshot` laid over each page showing. The front window's at once; the rest as last seen, then fresh, one a turn. No Screen Recording permission.
+- A closed space: dimmed, desaturated, in its place; the picture it was closed on, or its colour and mark. Kept for the session only.
+- Behind it: the desktop, dimmed and blurred. The dock stays above it.
+- From the switcher: each card grows into its tile. From a menu: the front window zooms into its tile. Reduce Motion: a fade.
+- One selection, as the switcher: the pointer over a tile selects it; arrows and Tab clear the pointer's marks until it moves.
+- The selection is the plate: a faint panel behind the tile's windows (white at 14%), on the selected tile only. A window under the pointer, in a tile with windows out, is ringed in the accent colour. No lift on hover. Chosen in the round 3 mock.
+- The + : a plain plate, no border.
+- Click a window: only that window comes forward, key. Click the plate or the name, Return, or a dock mark: every window of the place, its own as the dock shows it, its windows out over it.
+- Going: the windows going zoom out of the tile into place and come forward once they land. A dock mark clicked: the same.
+- Pictures of the other windows wait until the entrance is over.
+- + (or Return on it): a new space, gone to.
+- Drag a tile among its kind: a drop mark, the move on drop; the dock follows. Spaces in `spaces.json`; projects in `PMDockProjectOrder`, remembered when closed.
+- Tab / ⇧Tab, arrows: the selection. Typing finds places (`SpaceOrder.matching`), hiding the +; Delete edits; Esc clears, then leaves.
+- Letting go of ⌥ does nothing.
+- Esc or a click off the tiles: back to the front window.
+- Not built: pictures kept across launches; moving cards between places.
 
 ## Command bar
 
@@ -190,3 +244,4 @@ Not built.
 - Prefixes stay: `@` projects, `/` tasks, `>` commands.
 - ⌘T in a space opens the same bar scoped to it, with "Open in <space>" first.
 - Commands include Unfocus, New Space…, Show Switcher.
+- Already in the quick bar (2026-11-06): New Space, spaces in `@`.

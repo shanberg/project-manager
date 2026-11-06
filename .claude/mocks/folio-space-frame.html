@@ -1,0 +1,636 @@
+<title>Folio Space Frame</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a mocked Folio window (Arc-style sidebar listing the board, a workspace tiling beside it) with a two-mark dock; controls in a column to the right, stacked below on a phone. */
+:root {
+  --page: #eceef2; --panel: #ffffff; --ink: #1d1f24; --ink-2: #5d6270; --ink-3: #9196a1;
+  --rule: #d9dce3; --accent: #2f6fe4; --chip: #eef1f6;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --wall-a: #9fb4d6; --wall-b: #d9c6d8; --wall-c: #f1dcc4;
+  --glass: rgba(246, 247, 250, 0.72); --glass-edge: rgba(255, 255, 255, 0.75); --glass-strong: rgba(248, 249, 251, 0.9);
+  --glass-shadow: 0 10px 34px rgba(20, 24, 40, 0.22), 0 1px 3px rgba(20, 24, 40, 0.14);
+  --m-ink: #1c1d21; --m-ink-2: rgba(28, 29, 33, 0.62); --m-ink-3: rgba(28, 29, 33, 0.38);
+  --m-rule: rgba(28, 29, 33, 0.1); --m-hover: rgba(28, 29, 33, 0.06); --m-sel: rgba(255, 255, 255, 0.8);
+  --m-field: rgba(255, 255, 255, 0.6); --win: rgba(255, 255, 255, 0.95); --pagebg: #ffffff; --menu: rgba(250, 250, 252, 0.97);
+  --line: #e7e8ec; --pick: rgba(47, 111, 228, 0.16);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; color-scheme: dark;
+}
+.mac-dark {
+  --wall-a: #1d2944; --wall-b: #3a2742; --wall-c: #4a3326;
+  --glass: rgba(40, 41, 46, 0.7); --glass-edge: rgba(255, 255, 255, 0.12); --glass-strong: rgba(40, 41, 46, 0.9);
+  --glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --m-ink: #f2f2f4; --m-ink-2: rgba(242, 242, 244, 0.64); --m-ink-3: rgba(242, 242, 244, 0.38);
+  --m-rule: rgba(255, 255, 255, 0.1); --m-hover: rgba(255, 255, 255, 0.07); --m-sel: rgba(255, 255, 255, 0.14);
+  --m-field: rgba(0, 0, 0, 0.25); --win: rgba(34, 35, 40, 0.96); --pagebg: #1f2025; --menu: rgba(44, 45, 50, 0.97);
+  --line: #2e3036; --pick: rgba(107, 156, 255, 0.24);
+}
+body { background: var(--page); color: var(--ink); font-family: var(--ui); }
+[hidden] { display: none !important; }
+.wrap { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1380px; margin: 0 auto; }
+@media (max-width: 940px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; text-wrap: balance; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 12px; max-width: 82ch; line-height: 1.45; }
+kbd { font: 11px var(--mono); padding: 0 4px; border-radius: 4px; border: 1px solid var(--rule); background: var(--chip); }
+
+.stage { position: relative; border-radius: 12px; overflow: hidden; height: 780px; color: var(--m-ink); outline: none;
+  background: radial-gradient(120% 90% at 10% 0%, var(--wall-a), transparent 60%), radial-gradient(90% 80% at 100% 30%, var(--wall-b), transparent 65%), linear-gradient(160deg, var(--wall-b), var(--wall-c)); }
+.stage:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.menubar { height: 24px; background: var(--glass); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); display: flex; align-items: center; gap: 16px; padding: 0 12px; font-size: 12.5px; }
+.menubar b { font-weight: 600; } .menubar .grow { flex: 1; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 1px 8px; border-radius: 6px; background: var(--m-hover); }
+.chip i { width: 9px; height: 9px; border-radius: 3px; background: var(--c); }
+
+/* dock */
+.dock { position: absolute; left: 8px; top: 92px; padding: 6px; border-radius: 18px; display: flex; flex-direction: column; gap: 6px; z-index: 3;
+  background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: var(--glass-shadow); backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+.dock .sep { height: 1px; margin: 2px 6px; background: var(--m-rule); }
+.mk { width: 44px; height: 44px; border: 0; padding: 0; background: none; cursor: pointer; display: grid; place-items: center; position: relative; }
+.mk .ic { width: 40px; height: 40px; border-radius: 9px; display: grid; place-items: center; color: #fff; background: linear-gradient(180deg, color-mix(in srgb, var(--c) 78%, #fff), var(--c)); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 1px 2px rgba(0,0,0,.18); }
+.mk.focused .ic { width: 35px; height: 35px; box-shadow: 0 0 0 2px var(--win), 0 0 0 4px var(--c); }
+.mk .ic svg { width: 20px; height: 20px; }
+.mk.front::before { content: ""; position: absolute; left: -5px; top: 15px; width: 3px; height: 14px; border-radius: 2px; background: var(--m-ink-3); }
+
+/* window */
+.win { position: absolute; left: 82px; right: 18px; top: 40px; bottom: 18px; border-radius: 14px; overflow: hidden; box-shadow: var(--glass-shadow); display: flex; flex-direction: column;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 20%, var(--win)), color-mix(in srgb, var(--c) 9%, var(--win))); }
+.body { flex: 1; display: flex; min-height: 0; }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--m-rule); flex: none; }
+.ib { width: 24px; height: 22px; border: 0; background: none; border-radius: 6px; display: grid; place-items: center; color: var(--m-ink-2); cursor: pointer; padding: 0; flex: none; }
+.ib:hover { background: var(--m-hover); color: var(--m-ink); }
+.ib svg { width: 14px; height: 14px; }
+.ib:focus-visible, .row:focus-visible, .fav:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* sidebar */
+.side { width: 236px; flex: none; display: flex; flex-direction: column; min-height: 0; padding: 8px 8px 8px; }
+.lights { display: flex; gap: 7px; align-items: center; height: 22px; padding-left: 4px; }
+.lights .grow { flex: 1; }
+.url { margin: 6px 0 8px; height: 30px; border-radius: 8px; background: var(--m-field); display: flex; align-items: center; gap: 7px; padding: 0 9px; font-size: 12px; color: var(--m-ink-2); cursor: text; border: 0; width: 100%; text-align: left; font-family: var(--ui); }
+.url b { color: var(--m-ink); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px; }
+.fav { height: 38px; border-radius: 9px; background: var(--m-hover); display: grid; place-items: center; border: 0; cursor: pointer; padding: 0; }
+.fav.on { background: var(--m-sel); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.list { overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 6px; }
+.sec { font-size: 10.5px; font-weight: 600; color: var(--m-ink-3); padding: 8px 6px 3px; display: flex; align-items: center; gap: 6px; }
+.sec .grow { flex: 1; height: 1px; background: var(--m-rule); }
+.row { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 4px 0 8px; border-radius: 8px; font-size: 12.5px; cursor: pointer; position: relative; user-select: none; }
+.row:hover { background: var(--m-hover); }
+.row.on { background: var(--m-sel); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.row.picked { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.row.inview::after { content: ""; position: absolute; left: 2px; top: 9px; bottom: 9px; width: 2px; border-radius: 1px; background: var(--c); }
+.row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .x { opacity: 0; }
+.row:hover .x, .row:focus-within .x { opacity: 1; }
+.row.child { padding-left: 22px; }
+.row .caret { width: 12px; color: var(--m-ink-3); font-size: 9px; }
+.row.ws .wsicons { display: flex; gap: 2px; }
+.row.new { animation: flashrow 1.3s ease; }
+@keyframes flashrow { 0% { background: color-mix(in srgb, var(--accent) 30%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .row.new { animation: none; } }
+.gl { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center; color: #fff; font-size: 9.5px; font-weight: 700; background: var(--f); }
+.gl svg { width: 11px; height: 11px; }
+.fav .gl { width: 20px; height: 20px; border-radius: 5px; }
+.foot { display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--m-rule); padding: 6px 4px 0; font-size: 11.5px; font-weight: 600; color: var(--m-ink-2); }
+.foot .hint { margin-left: auto; font-weight: 400; color: var(--m-ink-3); }
+
+/* old-style project window */
+.tabrow { height: 34px; display: flex; align-items: center; gap: 4px; padding: 0 10px; border-bottom: 1px solid var(--m-rule); flex: none; }
+.tabrow .ttl { font-weight: 600; font-size: 12px; margin: 0 10px 0 8px; display: flex; gap: 6px; align-items: center; }
+.tabrow .ttl i { width: 11px; height: 11px; border-radius: 3px; background: var(--c); }
+.ptab { padding: 3px 9px; border-radius: 6px; font-size: 12px; color: var(--m-ink-2); border: 0; background: none; cursor: pointer; font-family: var(--ui); }
+.ptab.on { background: var(--m-hover); color: var(--m-ink); }
+
+/* content: the tiling */
+.content { flex: 1; min-width: 0; position: relative; padding: 8px 8px 8px 0; display: flex; flex-direction: column; }
+.content.full { padding-left: 8px; }
+.cbar { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 4px 6px; font-size: 11.5px; color: var(--m-ink-2); }
+.cbar .nm { font-weight: 600; color: var(--m-ink); }
+.cbar .grow { flex: 1; }
+.seg2 { display: inline-flex; background: var(--m-hover); border-radius: 7px; padding: 2px; gap: 2px; }
+.seg2 button { border: 0; background: none; border-radius: 5px; padding: 2px 7px; font: 11px var(--ui); color: var(--m-ink-2); cursor: pointer; }
+.seg2 button.on { background: var(--m-sel); color: var(--m-ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.tiles { flex: 1; min-height: 0; display: grid; gap: 6px; }
+.tile { min-width: 0; min-height: 0; border-radius: 10px; overflow: hidden; background: var(--pagebg); box-shadow: 0 0 0 1px var(--m-rule), 0 1px 3px rgba(0,0,0,.08); display: flex; flex-direction: column; position: relative; }
+.tile.focus { box-shadow: 0 0 0 2px var(--c), 0 1px 3px rgba(0,0,0,.08); }
+.tile .strip { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 4px 0 8px; border-bottom: 1px solid var(--m-rule); font-size: 11.5px; flex: none; }
+.tile .strip .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .pg { flex: 1; min-height: 0; overflow: hidden; }
+.dropzone { position: absolute; inset: 34px 8px 8px 0; border: 2px dashed var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 8%, transparent); display: grid; place-items: center; font-size: 13px; color: var(--accent); pointer-events: none; }
+
+/* card pages */
+.web { height: 100%; display: flex; flex-direction: column; }
+.web .nav { height: 34px; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--line); font-size: 11.5px; color: var(--m-ink-2); flex: none; }
+.web .nav b { color: var(--m-ink); }
+.web .hero { height: 34%; min-height: 60px; background: var(--t); flex: none; }
+.web .b { padding: 12px 14px; }
+.web h2 { font-size: 16px; margin: 0 0 8px; }
+.ln { height: 7px; border-radius: 4px; background: var(--line); margin: 0 0 8px; }
+.music { height: 100%; display: flex; flex-direction: column; background: #1e1d24; color: #f3f1f7; padding: 14px; gap: 10px; }
+.music h2 { font-size: 16px; margin: 0; }
+.albums { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 10px; }
+.albums div { aspect-ratio: 1; border-radius: 7px; max-width: 100%; }
+.folder { padding: 10px 6px; font-size: 12.5px; }
+.folder .fr { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-radius: 6px; }
+.folder .fr:nth-child(odd) { background: var(--m-hover); }
+.folder .fr small { margin-left: auto; color: var(--m-ink-3); font-size: 11px; }
+.note { padding: 14px 16px; font-size: 13px; line-height: 1.5; }
+.note h3 { margin: 0 0 6px; font-size: 15px; }
+.note p { margin: 0 0 8px; }
+.view { padding: 12px 14px; font-size: 12.5px; }
+.view .vr { display: flex; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.view .bx { width: 13px; height: 13px; border-radius: 4px; border: 1.25px solid var(--m-ink-3); flex: none; margin-top: 2px; }
+.view small { margin-left: auto; color: #c76a00; }
+.notes { padding: 14px 16px; font-size: 12.5px; }
+.notes h3 { font-size: 13px; margin: 0 0 2px; } .notes .when { font-size: 11px; color: var(--m-ink-2); margin-bottom: 8px; }
+
+/* board */
+.board { position: relative; flex: 1; border-radius: 10px; background: color-mix(in srgb, var(--pagebg) 70%, transparent); box-shadow: 0 0 0 1px var(--m-rule); overflow: hidden;
+  background-image: radial-gradient(var(--m-rule) 1px, transparent 1px); background-size: 18px 18px; }
+.bframe { position: absolute; border: 1.5px dashed var(--m-ink-3); border-radius: 10px; }
+.bframe span { position: absolute; top: -9px; left: 10px; font-size: 11px; background: var(--pagebg); padding: 0 6px; color: var(--m-ink-2); border-radius: 4px; }
+.bcard { position: absolute; width: 150px; height: 96px; border-radius: 8px; background: var(--pagebg); box-shadow: 0 0 0 1px var(--m-rule), 0 2px 6px rgba(0,0,0,.08); overflow: hidden; cursor: pointer; display: flex; flex-direction: column; }
+.bcard .h { display: flex; gap: 6px; align-items: center; font-size: 11px; padding: 5px 7px; border-bottom: 1px solid var(--m-rule); white-space: nowrap; overflow: hidden; }
+.bcard .th { flex: 1; background: var(--t); }
+.bcard .badge { position: absolute; right: 5px; bottom: 5px; font-size: 9.5px; background: var(--m-sel); padding: 0 5px; border-radius: 6px; color: var(--m-ink-2); }
+
+/* overlays */
+.cmd { position: absolute; left: 50%; top: 96px; width: min(520px, calc(100% - 40px)); transform: translateX(-50%); z-index: 8; border-radius: 14px; background: var(--menu); box-shadow: 0 24px 60px rgba(0,0,0,.3), 0 0 0 1px var(--m-rule); overflow: hidden; }
+.cmd input { width: 100%; box-sizing: border-box; border: 0; background: none; font: 15px var(--ui); padding: 13px 16px; color: var(--m-ink); outline: none; }
+.cmd .h { font-size: 11px; color: var(--m-ink-3); padding: 0 16px 10px; }
+.menu { position: absolute; z-index: 9; min-width: 210px; padding: 5px; border-radius: 9px; background: var(--menu); box-shadow: var(--glass-shadow); border: 1px solid var(--m-rule); font-size: 12.5px; }
+.menu .mi { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 5px; cursor: pointer; border: 0; background: none; width: 100%; text-align: left; font: inherit; color: var(--m-ink); }
+.menu .mi:hover, .menu .mi:focus-visible { background: var(--accent); color: #fff; outline: none; }
+.menu .mh { font-size: 11px; color: var(--m-ink-3); padding: 5px 8px 2px; }
+.menu .msep { height: 1px; background: var(--m-rule); margin: 4px 2px; }
+.toast { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); z-index: 10; background: var(--menu); color: var(--m-ink); font-size: 12.5px; padding: 8px 14px; border-radius: 10px; box-shadow: var(--glass-shadow); max-width: calc(100% - 40px); }
+
+/* controls */
+.controls { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 14px; align-self: start; position: sticky; top: calc(12px + env(safe-area-inset-top, 0px)); }
+.cg { display: flex; flex-direction: column; gap: 6px; }
+.cgl { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button, .btn { font: 12px var(--ui); padding: 4px 9px; border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.seg button:focus-visible, .btn:focus-visible, .copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chk { display: flex; gap: 7px; align-items: center; font-size: 12.5px; }
+.hint { font-size: 11.5px; color: var(--ink-2); margin: 0; line-height: 1.4; }
+.how { font-size: 11.5px; color: var(--ink-2); margin: 0; padding-left: 16px; line-height: 1.55; }
+.summary { font: 11px/1.5 var(--mono); background: var(--chip); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; color: var(--ink); margin: 0; }
+.copy { font: 12px var(--ui); padding: 6px 10px; border-radius: 7px; border: 0; background: var(--accent); color: #fff; cursor: pointer; align-self: flex-start; }
+.notebox { width: 100%; box-sizing: border-box; min-height: 54px; font: 12px var(--ui); border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); padding: 6px 8px; resize: vertical; }
+@media (max-width: 620px) {
+  .stage { height: 720px; }
+  .win { left: 64px; right: 8px; }
+  .side { width: 170px; }
+}
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>An Arc-style frame over a space's workspaces</h1>
+    <p class="sub">The sidebar lists what's on the space's board; the right is the workspace. Click a row to show it, <kbd>⌥</kbd>-click to add it as a tile, <kbd>⌘</kbd>-click several then <kbd>⌘↩</kbd> to tile them as a workspace, or drag a row onto the page. Right-click a row for pin, favourite and frame. Click the stage first for <kbd>⌘T</kbd>, <kbd>⌘W</kbd>, <kbd>⇧⌘T</kbd>. The dock's second mark is a project. All data is example data.</p>
+    <div class="stage" id="stage" tabindex="0" aria-label="Mocked desktop">
+      <div class="menubar"><b>Folio</b><span>File</span><span>Edit</span><span>View</span><span>Window</span><span class="grow"></span><span class="chip" style="--c:#3b78e7"><i></i>Focused: Folio</span></div>
+      <div class="win" id="win"></div>
+      <div class="dock" id="dock"></div>
+      <div class="cmd" id="cmd" hidden></div>
+      <div class="menu" id="menu" hidden role="menu"></div>
+      <div class="toast" id="toast" hidden role="status"></div>
+    </div>
+  </div>
+
+  <aside class="controls" aria-label="Mock controls">
+    <div class="cg"><span class="cgl">1 · Clicking a card that isn't showing</span>
+      <div class="seg" data-k="click"><button data-v="replace">Replaces the tile you're in (Arc)</button><button data-v="tab">Joins that tile as a tab</button><button data-v="tile">Opens a tile beside</button></div>
+      <p class="hint">⌥-click always opens a tile beside.</p>
+    </div>
+    <div class="cg"><span class="cgl">2 · A card in another workspace</span>
+      <div class="seg" data-k="other"><button data-v="jump">Jumps to that workspace</button><button data-v="bring">Comes into this one</button></div>
+      <p class="hint">Try "Swift Forums" while the Morning workspace is up.</p>
+    </div>
+    <div class="cg"><span class="cgl">3 · Workspaces in the sidebar</span>
+      <div class="seg" data-k="wsplace"><button data-v="pinned">Among Pinned</button><button data-v="own">A section above Pinned</button></div>
+    </div>
+    <div class="cg"><span class="cgl">4 · Projects</span>
+      <div class="seg" data-k="projframe"><button data-v="frame">Same frame (Notes is a row)</button><button data-v="tabs">Keep today's tab row</button></div>
+      <p class="hint">Click the blue mark in the dock to see a project.</p>
+    </div>
+    <div class="cg"><span class="cgl">5 · Frames on the board</span>
+      <div class="seg" data-k="frames"><button data-v="folders">Sidebar folders</button><button data-v="flat">Ignored, flat list</button></div>
+    </div>
+    <div class="cg"><span class="cgl">Try</span>
+      <ul class="how">
+        <li>Click <b>Morning</b>: its three tiles come back.</li>
+        <li>⌘-click two Today rows, ⌘↩: a new workspace row.</li>
+        <li>Drag <b>Downloads</b> onto the page.</li>
+        <li>Click <b>Board</b> for the freeform overview.</li>
+      </ul>
+      <label class="chk"><input type="checkbox" id="macdark"> Dark Mac</label>
+    </div>
+    <div class="cg"><span class="cgl">Your note</span><textarea class="notebox" id="note" placeholder="Anything the controls don't cover"></textarea></div>
+    <div class="cg"><span class="cgl">Summary</span><pre class="summary" id="summary"></pre><button class="copy" id="copy">Copy summary</button></div>
+  </aside>
+</div>
+
+<script>
+const I = {
+  sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/></svg>',
+  folio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h6l2 2h8v12H4z"/></svg>',
+  folder: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>',
+  note: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 7h12M6 12h12M6 17h7"/></svg>',
+  view: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l3 3L19 7"/></svg>',
+  grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+  board: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><rect x="6.5" y="7.5" width="5" height="4" rx="1"/><rect x="13" y="11" width="5" height="5" rx="1"/></svg>',
+  notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h6M9 16h4"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  max: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
+  search: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>',
+};
+
+let uid = 100;
+const C = (title, kind, extra = {}) => ({ id: 'c' + (++uid), title, kind, ...extra });
+const web = (title, host, f, g, t, extra) => C(title, 'web', { host, f, g, t, ...extra });
+
+function freshData() {
+  const music = web('Listen Now', 'music.apple.com', '#fa3d5b', '♪', '', { music: true, fav: true });
+  const mail = web('Inbox (3)', 'mail.example.com', '#2f78c4', 'M', 'linear-gradient(135deg,#dbe8f7,#9fbfe6)', { fav: true });
+  const cal = web('November', 'calendar.example.com', '#d0453b', '4', 'linear-gradient(135deg,#f7dcd8,#e7a59c)', { fav: true });
+  const news = web('Morning Brief', 'news.example.com', '#333', 'N', 'linear-gradient(135deg,#eceae4,#c9c4b5)', { pinned: true });
+  const budget = web('Budget 2026', 'sheets.example.com', '#1f8a4c', 'B', 'linear-gradient(135deg,#dff1e6,#9fd3b4)', { pinned: true, frame: 'home' });
+  const recipes = web('Recipes', 'cooking.example.com', '#2f8f5b', 'C', 'linear-gradient(135deg,#e9d6b8,#b8794a)', { pinned: true, frame: 'home' });
+  const dl = C('Downloads', 'folder', { pinned: true, files: ['statement-oct.pdf', 'IMG_4410.HEIC', 'kettle-manual.pdf', 'tickets.pkpass'] });
+  const shop = C('Shopping list', 'note', { pinned: true, frame: 'home', text: ['Coffee beans', 'Kettle descaler', 'Batteries (AA)'] });
+  const due = C('Due this week', 'view', { pinned: true, rows: [['Pay water bill', 'Thu'], ['Renew passport photo', 'Fri'], ['Return kettle', 'Sat']] });
+  const kettles = web('Ceramic pour-over kettles', 'shop.example.com', '#7a5cc4', 'S', 'linear-gradient(135deg,#ece7f6,#c9bde8)');
+  const weather = web('Weather · Portland', 'weather.example.com', '#2f78c4', 'W', 'linear-gradient(160deg,#9cc6ef,#e6eef7)');
+  const swift = web('Swift Forums · cookies', 'forums.swift.org', '#f05138', 'S', 'linear-gradient(135deg,#f6f1ee,#e9d9d2)');
+  const cards = [music, mail, cal, news, budget, recipes, dl, shop, due, kettles, weather, swift];
+  const workspaces = [{ id: 'w1', name: 'Morning', tiles: [news.id, weather.id, swift.id], arr: 'master' }];
+  const space = { k: 'space', title: 'Personal', color: '#e0567a', icon: 'sun', cards, workspaces,
+    frames: [{ id: 'home', name: 'Home', open: true }], cur: { ws: null, tiles: [music.id], focus: 0, arr: 'grid', max: false, mode: 'tiles' } };
+
+  const pnotes = C('Notes', 'notes', { pinned: true, sys: true });
+  const gh = web('GitHub · project-manager', 'github.com', '#24292f', 'G', 'linear-gradient(135deg,#eef0f3,#cfd4db)', { pinned: true });
+  const figma = web('Figma · Spaces', 'figma.com', '#a259ff', 'F', 'linear-gradient(135deg,#efe6ff,#c9b1f5)', { pinned: true });
+  const concepts = C('concepts.md', 'note', { pinned: true, text: ['Spaces are boards that belong to no project.', 'The sidebar lists the board.'] });
+  const repo = C('pm-mac', 'folder', { pinned: true, files: ['PM/', 'PMViewTests/', 'project.yml', 'scripts/'] });
+  const pcards = [pnotes, gh, figma, concepts, repo];
+  const project = { k: 'project', title: 'Folio', color: '#3b78e7', icon: 'folio', cards: pcards,
+    workspaces: [{ id: 'w2', name: 'Spaces design', tiles: [figma.id, concepts.id], arr: 'grid' }], frames: [],
+    cur: { ws: null, tiles: [pnotes.id], focus: 0, arr: 'grid', max: false, mode: 'tiles' } };
+  return { space, project };
+}
+let D = freshData();
+
+const DEFAULTS = { click: 'replace', other: 'jump', wsplace: 'pinned', projframe: 'frame', frames: 'folders', macdark: false, note: '' };
+let S = { ...DEFAULTS };
+try { Object.assign(S, JSON.parse(localStorage.getItem('space-frame-mock') || '{}')); } catch (e) {}
+
+let which = 'space';
+let picked = new Set();
+let closed = [];
+let fresh = null;
+let menuFor = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const W = () => D[which];
+const card = id => W().cards.find(c => c.id === id);
+const toast = t => { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => el.hidden = true, 2800); };
+function glyph(c) {
+  if (c.kind === 'web') return `<span class="gl" style="--f:${c.f}">${esc(c.g)}</span>`;
+  const col = { folder: '#4a90d9', note: '#8a8f99', view: '#2f9a63', notes: W().color }[c.kind];
+  return `<span class="gl" style="--f:${col}">${I[c.kind]}</span>`;
+}
+
+/* ---------- moving things into view ---------- */
+function wsOf(id) { return W().workspaces.find(w => w.tiles.includes(id)); }
+function openWorkspace(ws, focusId) {
+  const cur = W().cur;
+  Object.assign(cur, { ws: ws.id, tiles: ws.tiles.slice(), arr: ws.arr, focus: Math.max(0, ws.tiles.indexOf(focusId)), max: false, mode: 'tiles' });
+}
+function show(id, how) {
+  const cur = W().cur;
+  cur.mode = 'tiles';
+  const at = cur.tiles.indexOf(id);
+  if (at >= 0 && how !== 'tile') { cur.focus = at; return; }
+  const home = wsOf(id);
+  if (how !== 'tile' && home && home.id !== cur.ws && S.other === 'jump') { openWorkspace(home, id); toast(`Jumped to ${home.name}.`); return; }
+  if (how === 'tile') { addTile(id); return; }
+  if (how === 'tab') { cur.tiles[cur.focus] = id; toast('In the tile you were in, as a tab beside what was there.'); return; }
+  // Replace, as Arc: a named workspace is left for this one card on its own.
+  if (cur.ws && cur.tiles.length > 1) { Object.assign(cur, { ws: null, tiles: [id], focus: 0, max: false }); return; }
+  cur.tiles[cur.focus] = id;
+  if (cur.ws) cur.ws = null;
+}
+function addTile(id) {
+  const cur = W().cur;
+  if (cur.tiles.includes(id)) { cur.focus = cur.tiles.indexOf(id); return; }
+  cur.tiles.splice(cur.focus + 1, 0, id);
+  cur.focus = cur.focus + 1;
+  saveBack();
+}
+/* A named workspace being adjusted is written back, as today's workspaces are. */
+function saveBack() { const cur = W().cur; const ws = W().workspaces.find(w => w.id === cur.ws); if (ws) { ws.tiles = cur.tiles.slice(); ws.arr = cur.arr; } }
+function tileSelection() {
+  const ids = [...picked];
+  if (!ids.length) return;
+  const n = W().workspaces.length + 1;
+  const ws = { id: 'w' + (++uid), name: n === 1 ? 'Workspace' : `Workspace ${n}`, tiles: ids, arr: 'grid' };
+  W().workspaces.push(ws);
+  openWorkspace(ws, ids[0]);
+  picked.clear(); fresh = ws.id;
+  toast(`Tiled ${ids.length} into “${ws.name}”. It's a row now; rename it from its menu.`);
+}
+function closeCard(id) {
+  const w = W(), c = card(id);
+  if (!c || c.sys) return;
+  if (c.pinned || c.fav) { c.pinned = false; c.fav = false; fresh = id; toast(`Unpinned “${c.title}”. It's in Today now.`); return; }
+  w.cards = w.cards.filter(x => x.id !== id);
+  w.workspaces.forEach(ws => ws.tiles = ws.tiles.filter(t => t !== id));
+  w.workspaces = w.workspaces.filter(ws => ws.tiles.length);
+  const cur = w.cur;
+  const at = cur.tiles.indexOf(id);
+  if (at >= 0) { cur.tiles.splice(at, 1); cur.focus = Math.max(0, Math.min(cur.focus, cur.tiles.length - 1)); }
+  if (!cur.tiles.length) { const next = w.cards.find(x => !x.sys) || w.cards[0]; if (next) cur.tiles = [next.id]; cur.ws = null; }
+  closed.push({ w: which, c });
+  toast(`Closed “${c.title}”, and took it off the board. ⇧⌘T brings it back.`);
+}
+function reopen() {
+  const last = closed.pop(); if (!last) return;
+  D[last.w].cards.push(last.c); which = last.w; show(last.c.id, 'replace'); fresh = last.c.id;
+}
+function newCard(text) {
+  const host = text.includes('.') ? text.replace(/^https?:\/\//, '').split('/')[0] : 'search.example.com';
+  const c = web(text.includes('.') ? host : `“${text}”`, host, '#6b7280', host[0].toUpperCase(), 'linear-gradient(135deg,#eceff3,#c9d0da)');
+  W().cards.push(c); fresh = c.id;
+  show(c.id, S.click === 'tile' ? 'tile' : 'replace');
+}
+
+/* ---------- render ---------- */
+function renderDock() {
+  const m = (k) => { const d = D[k]; const front = which === k; const focus = k === 'project';
+    return `<button class="mk ${front ? 'front' : ''} ${focus ? 'focused' : ''}" data-which="${k}" aria-label="${esc(d.title)}" title="${esc(d.title)}"><span class="ic" style="--c:${d.color}">${I[d.icon]}</span></button>`; };
+  $('dock').innerHTML = m('project') + '<div class="sep"></div>' + m('space');
+}
+
+function rowHTML(c, extra = '') {
+  const cur = W().cur;
+  const inview = cur.mode === 'tiles' && cur.tiles.includes(c.id);
+  const on = inview && cur.tiles[cur.focus] === c.id;
+  const kindTitle = c.sys ? 'Notes' : c.title;
+  const closeLabel = c.sys ? '' : (c.pinned ? 'Unpin' : 'Close');
+  return `<div class="row ${on ? 'on' : ''} ${inview ? 'inview' : ''} ${picked.has(c.id) ? 'picked' : ''} ${fresh === c.id ? 'new' : ''} ${extra}" tabindex="0" draggable="true" data-card="${c.id}" style="--c:${W().color}">
+    ${glyph(c)}<span class="t">${esc(kindTitle)}</span>
+    ${closeLabel ? `<button class="ib x" data-close="${c.id}" aria-label="${closeLabel} ${esc(c.title)}" title="${closeLabel}">${I.x}</button>` : ''}</div>`;
+}
+function wsRowHTML(ws) {
+  const cur = W().cur;
+  const on = cur.mode === 'tiles' && cur.ws === ws.id;
+  return `<div class="row ws ${on ? 'on' : ''} ${fresh === ws.id ? 'new' : ''}" tabindex="0" data-ws="${ws.id}" style="--c:${W().color}">
+    <span class="gl" style="--f:${W().color}">${I.grid}</span><span class="t">${esc(ws.name)}</span>
+    <span class="wsicons">${ws.tiles.slice(0, 3).map(t => card(t) ? glyph(card(t)) : '').join('')}</span></div>`;
+}
+function sidebarHTML() {
+  const w = W(), cur = w.cur;
+  const front = card(cur.tiles[cur.focus]);
+  const favs = w.cards.filter(c => c.fav);
+  const pinned = w.cards.filter(c => c.pinned && !c.fav);
+  const today = w.cards.filter(c => !c.pinned && !c.fav);
+  const grouped = list => {
+    if (S.frames === 'flat') return list.map(c => rowHTML(c)).join('');
+    const loose = list.filter(c => !c.frame).map(c => rowHTML(c)).join('');
+    const fr = w.frames.map(f => {
+      const inside = list.filter(c => c.frame === f.id);
+      if (!inside.length) return '';
+      return `<div class="row" data-frame="${f.id}"><span class="caret">${f.open ? '▼' : '▶'}</span>${I.folder.replace('<svg', '<svg width="14" height="14" style="color:var(--m-ink-3)"')}<span class="t">${esc(f.name)}</span></div>` +
+        (f.open ? inside.map(c => rowHTML(c, 'child')).join('') : '');
+    }).join('');
+    return loose + fr;
+  };
+  const wsRows = w.workspaces.map(wsRowHTML).join('');
+  const boardRow = `<div class="row ${cur.mode === 'board' ? 'on' : ''}" tabindex="0" data-board="1"><span class="gl" style="--f:#6b7280">${I.board}</span><span class="t">Board</span><span style="font-size:10.5px;color:var(--m-ink-3);padding-right:6px">${w.cards.length}</span></div>`;
+  return `<div class="side">
+    <div class="lights"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="grow"></span></div>
+    <button class="url" data-cmd="1">${I.search}<b>${esc(front?.host || (front ? front.title : 'Search or enter address'))}</b></button>
+    ${favs.length ? `<div class="favs">${favs.map(c => `<button class="fav ${cur.tiles[cur.focus] === c.id && cur.mode === 'tiles' ? 'on' : ''}" data-card="${c.id}" title="${esc(c.title)}" aria-label="${esc(c.title)}">${glyph(c)}</button>`).join('')}</div>` : ''}
+    <div class="list">
+      ${boardRow}
+      ${S.wsplace === 'own' && wsRows ? `<div class="sec">Workspaces<span class="grow"></span></div>${wsRows}` : ''}
+      <div class="sec">Pinned<span class="grow"></span></div>
+      ${S.wsplace === 'pinned' ? wsRows : ''}
+      ${grouped(pinned)}
+      ${which === 'space' ? `<div class="sec">Today<span class="grow"></span></div>
+      <div class="row" data-cmd="1" style="color:var(--m-ink-2)">${I.plus.replace('<svg', '<svg width="14" height="14"')}<span class="t">New Tab</span></div>
+      ${grouped(today)}` : (today.length ? `<div class="sec">On the board<span class="grow"></span></div>${grouped(today)}` : '')}
+    </div>
+    <div class="foot">${esc(w.title)}${picked.size ? `<span class="hint">${picked.size} picked · ⌘↩ tiles</span>` : ''}</div></div>`;
+}
+
+function page(c) {
+  if (!c) return '';
+  if (c.music) {
+    const t = [['#ff8a5b', '#c02c6f'], ['#4fa3d9', '#1b3e7a'], ['#c9d66b', '#4e7a2a'], ['#f2c14e', '#d1495b'], ['#9b7fd1', '#3c2a7a'], ['#7ad1c3', '#2a6f7a']];
+    return `<div class="music"><h2>Listen Now</h2><div class="albums">${t.map(([a, b]) => `<div style="background:linear-gradient(135deg,${a},${b})"></div>`).join('')}</div></div>`;
+  }
+  if (c.kind === 'web') return `<div class="web"><div class="nav"><b>${esc(c.host.split('.')[0])}</b><span>Home</span><span>About</span></div><div class="hero" style="--t:${c.t}"></div><div class="b"><h2>${esc(c.title)}</h2><div class="ln" style="width:90%"></div><div class="ln" style="width:80%"></div><div class="ln" style="width:65%"></div></div></div>`;
+  if (c.kind === 'folder') return `<div class="folder">${c.files.map(f => `<div class="fr">${I.notes.replace('<svg', '<svg width="13" height="13"')}${esc(f)}<small>${f.endsWith('/') ? 'Folder' : 'Today'}</small></div>`).join('')}</div>`;
+  if (c.kind === 'note') return `<div class="note"><h3>${esc(c.title)}</h3>${c.text.map(t => `<p>${esc(t)}</p>`).join('')}</div>`;
+  if (c.kind === 'view') return `<div class="view">${c.rows.map(([t, d]) => `<div class="vr"><span class="bx"></span>${esc(t)}<small>${d}</small></div>`).join('')}</div>`;
+  if (c.kind === 'notes') return `<div class="notes"><h3>Spaces design</h3><div class="when">Since 2:10 PM</div><p>The sidebar lists the board; the right is the workspace.</p><div class="vr" style="display:flex;gap:8px"><span class="bx" style="width:13px;height:13px;border-radius:4px;border:1.25px solid var(--m-ink-3)"></span>Mock the frame @</div></div>`;
+  return '';
+}
+
+function contentHTML() {
+  const w = W(), cur = w.cur;
+  if (cur.mode === 'board') {
+    const pos = (i) => ({ x: 24 + (i % 4) * 172, y: 24 + Math.floor(i / 4) * 120 });
+    const frames = S.frames === 'folders' ? w.frames.map(f => {
+      const ids = w.cards.map((c, i) => [c, i]).filter(([c]) => c.frame === f.id);
+      if (!ids.length) return '';
+      const ps = ids.map(([, i]) => pos(i));
+      const x0 = Math.min(...ps.map(p => p.x)) - 10, y0 = Math.min(...ps.map(p => p.y)) - 14, x1 = Math.max(...ps.map(p => p.x)) + 160, y1 = Math.max(...ps.map(p => p.y)) + 106;
+      return `<div class="bframe" style="left:${x0}px;top:${y0}px;width:${x1 - x0}px;height:${y1 - y0}px"><span>${esc(f.name)}</span></div>`;
+    }).join('') : '';
+    return `<div class="cbar"><span class="nm">Board</span><span>Everything in ${esc(w.title)}. Double-click a card to show it.</span></div>
+      <div class="board">${frames}${w.cards.map((c, i) => { const p = pos(i); const b = c.fav ? 'Favourite' : c.pinned ? 'Pinned' : 'Today';
+        return `<div class="bcard" data-bcard="${c.id}" style="left:${p.x}px;top:${p.y}px"><div class="h">${glyph(c)}${esc(c.sys ? 'Notes' : c.title)}</div><div class="th" style="--t:${c.t || 'var(--m-hover)'}"></div><span class="badge">${b}</span></div>`; }).join('')}</div>`;
+  }
+  const ws = w.workspaces.find(x => x.id === cur.ws);
+  const ids = cur.max ? [cur.tiles[cur.focus]] : cur.tiles;
+  const n = ids.length;
+  let style;
+  if (n === 1) style = 'grid-template-columns:1fr';
+  else if (cur.arr === 'master') style = `grid-template-columns:1.4fr 1fr;grid-template-rows:repeat(${n - 1},1fr)`;
+  else style = `grid-template-columns:repeat(${Math.min(n, 3)},minmax(0,1fr))`;
+  const tiles = ids.map((id, i) => {
+    const c = card(id); const idx = cur.tiles.indexOf(id);
+    const span = n > 1 && cur.arr === 'master' && i === 0 ? `grid-row:1 / span ${n - 1}` : '';
+    const strip = n > 1 ? `<div class="strip">${glyph(c)}<span class="t">${esc(c.sys ? 'Notes' : c.title)}</span>
+      <button class="ib" data-max="${idx}" title="Maximize" aria-label="Maximize">${I.max}</button>
+      <button class="ib" data-untile="${idx}" title="Take out of view" aria-label="Take out of view">${I.x}</button></div>` : '';
+    return `<div class="tile ${n > 1 && idx === cur.focus ? 'focus' : ''}" data-tile="${idx}" style="--c:${w.color};${span}">${strip}<div class="pg">${page(c)}</div></div>`;
+  }).join('');
+  return `<div class="cbar"><span class="nm">${ws ? esc(ws.name) : (n > 1 ? 'Unnamed workspace' : '')}</span>${cur.max ? '<span>· maximized (click Maximize again)</span>' : ''}<span class="grow"></span>
+      ${cur.tiles.length > 1 ? `<span class="seg2"><button data-arr="grid" class="${cur.arr === 'grid' ? 'on' : ''}">Grid</button><button data-arr="master" class="${cur.arr === 'master' ? 'on' : ''}">Master</button></span>` : ''}
+      ${!ws && cur.tiles.length > 1 ? `<button class="btn" data-name="1" style="font-size:11px;padding:2px 8px">Keep as Workspace</button>` : ''}</div>
+    <div class="tiles" style="${style}">${tiles}</div>
+    <div class="dropzone" id="drop" hidden>Drop to add a tile</div>`;
+}
+
+function oldProjectWindow() {
+  const w = W(), cur = w.cur;
+  const tabs = [`<button class="ptab ${cur.mode === 'tiles' && !cur.ws ? 'on' : ''}" data-ptab="notes">Notes</button>`, `<button class="ptab ${cur.mode === 'board' ? 'on' : ''}" data-ptab="board">Board</button>`,
+    ...w.workspaces.map(ws => `<button class="ptab ${cur.ws === ws.id && cur.mode === 'tiles' ? 'on' : ''}" data-pws="${ws.id}">${esc(ws.name)}</button>`)].join('');
+  return `<div class="tabrow" style="--c:${w.color}"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="ttl"><i></i>${esc(w.title)}</span>${tabs}</div>
+    <div class="body"><div class="content full" id="content">${contentHTML()}</div></div>`;
+}
+
+function render() {
+  $('stage').classList.toggle('mac-dark', S.macdark);
+  renderDock();
+  const w = W();
+  $('win').style.setProperty('--c', w.color);
+  if (which === 'project' && S.projframe === 'tabs') $('win').innerHTML = oldProjectWindow();
+  else $('win').innerHTML = `<div class="body">${sidebarHTML()}<div class="content" id="content">${contentHTML()}</div></div>`;
+  document.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', S[seg.dataset.k] === b.dataset.v)));
+  $('macdark').checked = S.macdark;
+  if ($('note').value !== S.note) $('note').value = S.note;
+  $('summary').textContent = summary();
+  try { localStorage.setItem('space-frame-mock', JSON.stringify(S)); } catch (e) {}
+  fresh = null;
+}
+function summary() {
+  const name = (k) => document.querySelector(`.seg[data-k="${k}"] button[data-v="${S[k]}"]`).textContent;
+  return [`Click on a card not showing: ${name('click')}`, `Card in another workspace: ${name('other')}`, `Workspaces in sidebar: ${name('wsplace')}`,
+    `Projects: ${name('projframe')}`, `Frames: ${name('frames')}`, S.note.trim() ? `Note: ${S.note.trim()}` : null].filter(Boolean).join('\n');
+}
+
+/* ---------- menus ---------- */
+function openMenu(items, x, y) {
+  const m = $('menu'); m.innerHTML = items.join(''); m.hidden = false;
+  const s = $('stage').getBoundingClientRect();
+  m.style.left = Math.min(x - s.left, s.width - m.offsetWidth - 8) + 'px';
+  m.style.top = Math.min(y - s.top, s.height - m.offsetHeight - 8) + 'px';
+  m.querySelector('.mi')?.focus();
+}
+function closeMenu() { $('menu').hidden = true; menuFor = null; }
+function cardMenu(id, x, y) {
+  const c = card(id); menuFor = { card: id };
+  const items = [];
+  if (!c.sys) {
+    items.push(`<button class="mi" data-do="pin">${c.pinned ? 'Unpin' : 'Pin'}</button>`);
+    items.push(`<button class="mi" data-do="fav">${c.fav ? 'Remove from Favourites' : 'Add to Favourites'}</button>`);
+  }
+  items.push(`<button class="mi" data-do="tile">Open in a Tile Beside</button>`);
+  if (W().frames.length && !c.sys) {
+    items.push('<div class="msep"></div><div class="mh">Move to frame</div>');
+    W().frames.forEach(f => items.push(`<button class="mi" data-do="frame:${f.id}">${c.frame === f.id ? '✓ ' : ''}${esc(f.name)}</button>`));
+    if (c.frame) items.push(`<button class="mi" data-do="frame:">Out of ${esc(W().frames.find(f => f.id === c.frame).name)}</button>`);
+  }
+  if (which === 'space' && !c.sys) items.push('<div class="msep"></div><button class="mi" data-do="send">Move to Project ▸ Folio</button>');
+  if (!c.sys) items.push(`<div class="msep"></div><button class="mi" data-do="close">${c.pinned || c.fav ? 'Unpin' : 'Close'}</button>`);
+  openMenu(items, x, y);
+}
+function wsMenu(id, x, y) {
+  menuFor = { ws: id };
+  openMenu([`<button class="mi" data-do="rename">Rename…</button>`, `<button class="mi" data-do="unws">Delete Workspace (cards stay)</button>`], x, y);
+}
+function doMenu(a) {
+  const st = menuFor; closeMenu(); if (!st) return;
+  if (st.ws) {
+    const ws = W().workspaces.find(w => w.id === st.ws);
+    if (a === 'rename') { ws.name = ws.name === 'Morning' ? 'Mornings' : (ws.name.startsWith('Workspace') ? 'Shopping' : ws.name + '′'); toast(`Renamed (the mock picks a name): “${ws.name}”.`); }
+    if (a === 'unws') { W().workspaces = W().workspaces.filter(w => w.id !== ws.id); if (W().cur.ws === ws.id) W().cur.ws = null; toast('Workspace gone; its cards are still on the board.'); }
+    render(); return;
+  }
+  const c = card(st.card);
+  if (a === 'pin') { c.pinned = !c.pinned; if (!c.pinned) c.fav = false; fresh = c.id; }
+  if (a === 'fav') { c.fav = !c.fav; if (c.fav) c.pinned = true; }
+  if (a === 'tile') addTile(c.id);
+  if (a.startsWith('frame:')) { c.frame = a.slice(6) || undefined; const f = W().frames.find(x => x.id === c.frame); if (f) f.open = true; fresh = c.id; }
+  if (a === 'send') { closeCard(c.id); closed.pop(); toast(`Moved “${c.title}” to Folio's board.`); }
+  if (a === 'close') closeCard(c.id);
+  render();
+}
+
+/* ---------- events ---------- */
+document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S[seg.dataset.k] = b.dataset.v; render(); }));
+$('macdark').addEventListener('change', e => { S.macdark = e.target.checked; render(); });
+$('note').addEventListener('input', e => { S.note = e.target.value; $('summary').textContent = summary(); try { localStorage.setItem('space-frame-mock', JSON.stringify(S)); } catch (err) {} });
+$('dock').addEventListener('click', e => { const b = e.target.closest('[data-which]'); if (b) { which = b.dataset.which; picked.clear(); render(); } });
+
+$('win').addEventListener('click', e => {
+  const q = s => e.target.closest(s);
+  const cur = W().cur;
+  if (q('[data-close]')) { closeCard(q('[data-close]').dataset.close); render(); return; }
+  if (q('[data-cmd]')) { openCmd(); return; }
+  if (q('[data-board]')) { cur.mode = 'board'; render(); return; }
+  if (q('[data-frame]')) { const f = W().frames.find(x => x.id === q('[data-frame]').dataset.frame); f.open = !f.open; render(); return; }
+  if (q('[data-ws]')) { openWorkspace(W().workspaces.find(w => w.id === q('[data-ws]').dataset.ws)); render(); return; }
+  if (q('[data-arr]')) { cur.arr = q('[data-arr]').dataset.arr; saveBack(); render(); return; }
+  if (q('[data-max]')) { const i = +q('[data-max]').dataset.max; cur.focus = i; cur.max = !cur.max; render(); return; }
+  if (q('[data-untile]')) { const i = +q('[data-untile]').dataset.untile; cur.tiles.splice(i, 1); cur.focus = Math.min(cur.focus, cur.tiles.length - 1); cur.max = false; saveBack(); toast('Out of view. The card is still in the sidebar.'); render(); return; }
+  if (q('[data-name]')) { const n = W().workspaces.length + 1; const ws = { id: 'w' + (++uid), name: n === 1 ? 'Workspace' : `Workspace ${n}`, tiles: cur.tiles.slice(), arr: cur.arr }; W().workspaces.push(ws); cur.ws = ws.id; fresh = ws.id; toast(`Kept as “${ws.name}”.`); render(); return; }
+  if (q('[data-ptab]')) { const t = q('[data-ptab]').dataset.ptab; if (t === 'board') cur.mode = 'board'; else { const n = W().cards.find(c => c.sys); Object.assign(cur, { mode: 'tiles', ws: null, tiles: [n.id], focus: 0 }); } render(); return; }
+  if (q('[data-pws]')) { openWorkspace(W().workspaces.find(w => w.id === q('[data-pws]').dataset.pws)); render(); return; }
+  if (q('[data-tile]')) { cur.focus = +q('[data-tile]').dataset.tile; render(); return; }
+  const r = q('[data-card]');
+  if (r) {
+    const id = r.dataset.card;
+    if (e.metaKey || e.ctrlKey) { picked.has(id) ? picked.delete(id) : picked.add(id); render(); return; }
+    picked.clear();
+    show(id, e.altKey ? 'tile' : S.click);
+    render();
+  }
+});
+$('win').addEventListener('dblclick', e => { const b = e.target.closest('[data-bcard]'); if (b) { show(b.dataset.bcard, 'replace'); render(); } });
+$('win').addEventListener('contextmenu', e => {
+  const r = e.target.closest('[data-card]'), w = e.target.closest('[data-ws]');
+  if (r) { e.preventDefault(); cardMenu(r.dataset.card, e.clientX, e.clientY); }
+  else if (w) { e.preventDefault(); wsMenu(w.dataset.ws, e.clientX, e.clientY); }
+});
+// Drag a row onto the page: a tile.
+$('win').addEventListener('dragstart', e => { const r = e.target.closest('[data-card]'); if (r) { e.dataTransfer.setData('text/plain', r.dataset.card); e.dataTransfer.effectAllowed = 'copy'; } });
+$('win').addEventListener('dragover', e => { if (e.target.closest('#content')) { e.preventDefault(); const d = $('drop'); if (d) d.hidden = false; } });
+$('win').addEventListener('dragleave', e => { if (!e.relatedTarget || !e.relatedTarget.closest?.('#content')) { const d = $('drop'); if (d) d.hidden = true; } });
+$('win').addEventListener('drop', e => { if (!e.target.closest('#content')) return; e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (card(id)) { W().cur.mode = 'tiles'; addTile(id); toast('Added as a tile beside the one you were in.'); } render(); });
+
+$('menu').addEventListener('click', e => { const mi = e.target.closest('[data-do]'); if (mi) doMenu(mi.dataset.do); });
+document.addEventListener('click', e => { if (!$('menu').hidden && !e.target.closest('#menu')) closeMenu(); if (!$('cmd').hidden && !e.target.closest('#cmd') && !e.target.closest('[data-cmd]')) $('cmd').hidden = true; });
+
+function openCmd() {
+  const c = $('cmd'); c.hidden = false;
+  c.innerHTML = `<input id="cmdq" placeholder="Search or enter an address" aria-label="New tab" autocomplete="off"><div class="h">⏎ makes a card in Today and shows it${S.click === 'tile' ? ' in a tile beside' : ''}. Esc closes.</div>`;
+  $('cmdq').focus();
+}
+$('cmd').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { const v = $('cmdq').value.trim(); $('cmd').hidden = true; if (v) { newCard(v); render(); } }
+  if (e.key === 'Escape') $('cmd').hidden = true;
+});
+document.addEventListener('keydown', e => {
+  if (e.target.matches?.('input, textarea')) return;
+  if (e.key === 'Escape') { closeMenu(); $('cmd').hidden = true; if (picked.size) { picked.clear(); render(); } return; }
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.key === 'Enter') { e.preventDefault(); tileSelection(); render(); return; }
+  if (mod && e.key.toLowerCase() === 't' && e.shiftKey) { e.preventDefault(); reopen(); render(); return; }
+  if (mod && e.key.toLowerCase() === 't') { e.preventDefault(); openCmd(); return; }
+  if (mod && e.key.toLowerCase() === 'w') { e.preventDefault(); const cur = W().cur; const id = cur.tiles[cur.focus]; if (id) { closeCard(id); render(); } }
+});
+$('copy').addEventListener('click', () => {
+  const text = summary(), pre = $('summary');
+  const fallback = () => { const r = document.createRange(); r.selectNodeContents(pre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+  try { navigator.clipboard.writeText(text).then(() => { $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy summary', 1400); }, fallback); } catch (err) { fallback(); }
+});
+render();
+</script>

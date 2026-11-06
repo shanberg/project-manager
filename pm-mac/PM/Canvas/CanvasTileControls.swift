@@ -5,8 +5,10 @@ import SwiftUI
 /// Decided in `.claude/mocks/folio-tile-grip.html`; docs/spaces.md § The frame.
 ///
 /// - Opens when the pointer rests on the grip for 0.3s, or on a click on it. A click never closes it.
-/// - A tile with tabs across its top has no grip: its showing tab is the handle, and the capsule drops
-///   from under that tab instead (`CanvasBoardView.showingTopTab`; `.claude/mocks/folio-tab-handle.html`).
+/// - A tile with tabs across its top has a grip too, on the card just under the strip, and its showing
+///   tab opens the capsule as well: opened from the tab it drops from under that tab, opened from the
+///   grip it drops from the grip (`viaTab`; `CanvasBoardView.showingTopTab`;
+///   `.claude/mocks/folio-tab-handle.html`).
 /// - The grip stays above it and still drags the tile.
 /// - Back, Forward, Reload, the site (click to edit the address, with the address field's suggestions),
 ///   then Pin, Favourite (in a space only), Maximize, Out of the layout, More (the tile's menu). A tile
@@ -35,13 +37,16 @@ final class CanvasTileControls {
     private var pointerOnGrip = false
     /// The tile whose handle — grip or showing tab — the pointer is resting on.
     private var restingOn: String?
+    /// Whether the open capsule hangs from the showing tab rather than the grip — a tile with tabs
+    /// across its top has both, and the capsule belongs under the one that was used.
+    private(set) var viaTab = false
     private var resizeWatch: NSObjectProtocol?
 
     func isOpen(on board: CanvasBoardView, tile id: String) -> Bool { self.board === board && tile == id && host != nil }
 
     // MARK: The grip
 
-    func gripEntered(_ board: CanvasBoardView, tile id: String) {
+    func gripEntered(_ board: CanvasBoardView, tile id: String, viaTab: Bool = false) {
         pointerOnGrip = true
         restingOn = id
         leave?.cancel()
@@ -49,7 +54,7 @@ final class CanvasTileControls {
         rest?.cancel()
         let work = DispatchWorkItem { [weak self, weak board] in
             guard let self, let board, self.pointerOnGrip, self.restingOn == id else { return }
-            self.open(on: board, tile: id)
+            self.open(on: board, tile: id, viaTab: viaTab)
         }
         rest = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.restDelay, execute: work)
@@ -69,22 +74,23 @@ final class CanvasTileControls {
         gripExited()
     }
 
-    func gripClicked(_ board: CanvasBoardView, tile id: String) {
+    func gripClicked(_ board: CanvasBoardView, tile id: String, viaTab: Bool = false) {
         guard board.gripOpensControls else { return }
         rest?.cancel()
         // Only ever opens: a click on the grip of an open capsule leaves it open. The press hid the grips
         // (it began a tile drag in case); the release puts them back.
-        if !isOpen(on: board, tile: id) { open(on: board, tile: id) }
+        if !isOpen(on: board, tile: id) { open(on: board, tile: id, viaTab: viaTab) }
         board.refreshTileHandles()
         board.tileGripView.needsDisplay = true
     }
 
     // MARK: Opening and closing
 
-    func open(on board: CanvasBoardView, tile id: String) {
+    func open(on board: CanvasBoardView, tile id: String, viaTab: Bool = false) {
         close()
         guard let content = board.window?.contentView else { return }
         self.board = board
+        self.viaTab = viaTab
         tile = id
         model.editing = false
         model.presented = false
@@ -146,13 +152,13 @@ final class CanvasTileControls {
     /// The board laid out or redrew: keep the capsule under its handle, or close it if the handle has gone.
     func follow(_ board: CanvasBoardView) {
         guard self.board === board, host != nil else { return }
-        guard let tile, board.tiling?.ids.contains(tile) == true, board.tileControlsAnchor(tile) != nil else { return close() }
+        guard let tile, board.tiling?.ids.contains(tile) == true, board.tileControlsAnchor(tile, viaTab: viaTab) != nil else { return close() }
         place()
     }
 
     private func place() {
         guard let board, let tile, let host, let content = host.superview,
-              let anchor = board.tileControlsAnchor(tile), let frame = board.tiling?.layout.frames[tile] else { return }
+              let anchor = board.tileControlsAnchor(tile, viaTab: viaTab), let frame = board.tiling?.layout.frames[tile] else { return }
         let grips = board.tileGripView
         let bar = content.convert(grips.convert(board.viewRect(anchor), to: nil), from: nil)
         let tileRect = content.convert(grips.convert(board.viewRect(frame), to: nil), from: nil)

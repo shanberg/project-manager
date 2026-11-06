@@ -1,0 +1,241 @@
+<title>Folio Overview</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: the overview's grid over a dimmed desktop, a few tiles large enough to judge their marks; controls to the right, below on a phone. */
+:root {
+  --page: #eceef2; --panel: #ffffff; --ink: #1d1f24; --ink-2: #5d6270; --ink-3: #9196a1;
+  --rule: #d9dce3; --accent: #2f6fe4; --chip: #eef1f6;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --sel: #2f7bf6;
+  --desk-a: #3b4a66; --desk-b: #5a4660; --dim: rgba(10, 12, 18, 0.42);
+  --win: #f6f6f8; --win-bar: #e7e8ec; --win-ink: #c9ccd3; --win-ink-2: #dfe1e6;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; color-scheme: dark;
+}
+.darkwin { --win: #26272c; --win-bar: #1d1e22; --win-ink: #3a3c43; --win-ink-2: #313238; }
+.lightdesk { --desk-a: #e9ecf2; --desk-b: #f5efe8; --dim: rgba(255, 255, 255, 0.18); }
+
+body { background: var(--page); color: var(--ink); font-family: var(--ui); }
+.wrap { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1360px; margin: 0 auto; }
+@media (max-width: 900px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; text-wrap: balance; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 12px; max-width: 78ch; line-height: 1.45; }
+kbd { font: 11px var(--mono); padding: 0 4px; border-radius: 4px; background: var(--chip); border: 1px solid var(--rule); }
+
+.stage { position: relative; border-radius: 12px; overflow: hidden; padding: 28px; outline: none; user-select: none; -webkit-user-select: none;
+  background: linear-gradient(160deg, var(--desk-a), var(--desk-b)); }
+.stage::before { content: ""; position: absolute; inset: 0; background: var(--dim); backdrop-filter: blur(10px); }
+.stage:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.hdr { position: relative; font-size: 12px; font-weight: 500; color: rgba(255,255,255,.8); margin-bottom: 18px; }
+.lightdesk .hdr, .lightdesk .tl { color: #1d1f24; text-shadow: none; }
+.grid { position: relative; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 30px 26px; }
+
+.tile { position: relative; min-width: 0; cursor: pointer; }
+.area { position: relative; aspect-ratio: 16 / 10; max-width: 100%; }
+.plate { position: absolute; inset: -6px; border-radius: 12px; background: rgba(255,255,255,.07); opacity: 0; transition: opacity .12s; pointer-events: none; }
+.lightdesk .plate { background: rgba(0,0,0,.06); }
+.plate.on { opacity: 1; }
+.plate.bright { background: rgba(255,255,255,.14); }
+.lightdesk .plate.bright { background: rgba(0,0,0,.1); }
+.ring { position: absolute; border: 3px solid var(--sel); border-radius: 14px; pointer-events: none; display: none; }
+.ring.on { display: block; }
+
+.w { position: absolute; border-radius: 8px; background: var(--win); box-shadow: 0 6px 18px rgba(0,0,0,.3); overflow: hidden; transition: opacity .12s, transform .12s, box-shadow .12s; }
+.w::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 var(--hw, 0.5px) var(--hc, rgba(128,128,128,.3)); pointer-events: none; }
+.w .bar { height: 12%; background: var(--win-bar); }
+.w .body { padding: 6%; display: flex; flex-direction: column; gap: 6%; height: 70%; box-sizing: border-box; }
+.w .body i { display: block; height: 7%; min-height: 3px; border-radius: 2px; background: var(--win-ink); }
+.w .body i:nth-child(2n) { width: 70%; background: var(--win-ink-2); }
+.w .body i.blk { height: 28%; background: var(--c); opacity: .35; }
+.w.hot-white { box-shadow: 0 6px 18px rgba(0,0,0,.3), 0 0 0 2px rgba(255,255,255,.92); }
+.w.hot-accent { box-shadow: 0 6px 18px rgba(0,0,0,.3), 0 0 0 2px var(--sel); }
+.w.hot-lift { transform: scale(1.06); z-index: 2; }
+.w.dimmed { opacity: .45; }
+
+.tl { position: relative; display: flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 12px; font-weight: 600; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.4); min-width: 0; }
+.tl .m { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(180deg, color-mix(in srgb, var(--c) 75%, #fff), var(--c)); color: #fff; font-size: 10px; display: grid; place-items: center; flex: none; text-shadow: none; }
+.tl .n { padding: 1px 6px; border-radius: 6px; margin-left: -6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl .n.pill { background: var(--sel); color: #fff; text-shadow: none; margin-left: 0; }
+.tl small { font-weight: 400; opacity: .75; }
+
+.plus .face { position: absolute; inset: 0; border-radius: 10px; background: rgba(255,255,255,.18); box-shadow: inset 0 0 0 1px rgba(255,255,255,.3); display: grid; place-items: center; color: rgba(255,255,255,.85); font-size: 30px; font-weight: 300; }
+.lightdesk .plus .face { background: rgba(0,0,0,.06); box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); color: rgba(0,0,0,.5); }
+
+.status { position: relative; margin-top: 18px; font: 11.5px var(--mono); color: rgba(255,255,255,.75); min-height: 1.4em; }
+.lightdesk .status { color: #4b4f58; }
+
+.controls { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 14px; align-self: start; position: sticky; top: calc(12px + env(safe-area-inset-top, 0px)); }
+@media (max-width: 900px) { .controls { position: static; } }
+.grp { display: flex; flex-direction: column; gap: 6px; }
+.gl { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button { font: 12px var(--ui); padding: 4px 9px; border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.seg button:focus-visible, .copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hint { font-size: 11.5px; color: var(--ink-2); margin: 0; line-height: 1.4; }
+.summary { font: 11px/1.5 var(--mono); background: var(--chip); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; color: var(--ink); margin: 0; }
+.copy { font: 12px var(--ui); padding: 6px 10px; border-radius: 7px; border: 0; background: var(--accent); color: #fff; cursor: pointer; align-self: flex-start; }
+.note { width: 100%; box-sizing: border-box; min-height: 54px; font: 12px var(--ui); border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); padding: 6px 8px; resize: vertical; }
+@media (prefers-reduced-motion: reduce) { .w, .plate { transition: none; } }
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>Overview tiles: selection and pointer marks</h1>
+    <p class="sub">Move the pointer over the tiles, or click the grid and use <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>Tab</kbd>. Folio has two satellites, one each side; Kitchen Remodel has one. Clicking reports what would come forward. All data is example data.</p>
+    <div class="stage" id="stage" tabindex="0">
+      <div class="hdr">Overview · type to find</div>
+      <div class="grid" id="grid"></div>
+      <div class="status" id="status">Nothing picked yet</div>
+    </div>
+  </div>
+
+  <aside class="controls" aria-label="Mock controls">
+    <div class="grp"><span class="gl">The selection</span>
+      <div class="seg" data-k="sel"><button data-v="plate-ring">Ring round the plate</button><button data-v="plate">Plate only, brighter</button><button data-v="win-ring">Ring round the windows</button><button data-v="name">Name in a pill</button></div>
+    </div>
+    <div class="grp"><span class="gl">A window under the pointer</span>
+      <div class="seg" data-k="hot"><button data-v="white">White ring</button><button data-v="accent">Accent ring</button><button data-v="dim">The others dim</button><button data-v="lift">Grows a little</button><button data-v="none">Nothing</button></div>
+      <p class="hint">Only in a tile with satellites. In a tile with one window, the whole tile is the target.</p>
+    </div>
+    <div class="grp"><span class="gl">The plate</span>
+      <div class="seg" data-k="plate"><button data-v="sel">On the selected tile</button><button data-v="always">Always, faint</button><button data-v="never">Never</button></div>
+    </div>
+    <div class="grp"><span class="gl">The pointer</span>
+      <div class="seg" data-k="hover"><button data-v="selects">Selects what it's over</button><button data-v="apart">Separate from the selection</button></div>
+      <p class="hint">Selects: today's build. Arrow keys hide the pointer's marks until it moves.</p>
+    </div>
+    <div class="grp"><span class="gl">Window hairline</span>
+      <div class="seg" data-k="line"><button data-v="faint">One pixel, 30%</button><button data-v="half">One pixel, 15%</button><button data-v="none">None</button></div>
+    </div>
+    <div class="grp"><span class="gl">To judge against</span>
+      <div class="seg" data-k="desk"><button data-v="dark">Dark desktop</button><button data-v="light">Light desktop</button></div>
+      <div class="seg" data-k="wins"><button data-v="light">Light windows</button><button data-v="dark">Dark windows</button></div>
+    </div>
+    <div class="grp"><span class="gl">Your note</span>
+      <textarea class="note" id="note" placeholder="Anything the controls don't cover"></textarea>
+    </div>
+    <div class="grp"><span class="gl">Summary</span>
+      <pre class="summary" id="summary"></pre>
+      <button class="copy" id="copy">Copy summary</button>
+    </div>
+  </aside>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const S = { sel: 'plate-ring', hot: 'white', plate: 'sel', hover: 'selects', line: 'faint', desk: 'dark', wins: 'light' };
+/* Window rects as fractions of the tile's 16:10 area, as the app's cluster lays them out. */
+const places = [
+  { key: 'folio', name: 'Folio', meta: 'Focused', c: '#3b74e6', wins: [
+    { id: 'folio-main', name: 'Folio', x: .2, y: .18, w: .6, h: .82 },
+    { id: 'folio-docs', name: 'Docs (out, right)', x: .83, y: .18, w: .17, h: .3 },
+    { id: 'folio-review', name: 'Review (out, left)', x: 0, y: .18, w: .17, h: .24 }] },
+  { key: 'kitchen', name: 'Kitchen Remodel', meta: '', c: '#e8833a', wins: [
+    { id: 'kit-main', name: 'Kitchen Remodel', x: 0, y: .08, w: .74, h: .92 },
+    { id: 'kit-quotes', name: 'Quotes (out)', x: .78, y: .08, w: .22, h: .4 }] },
+  { key: 'taxes', name: 'Taxes 2026', meta: '', c: '#2f9e5e', wins: [{ id: 'tax-main', name: 'Taxes 2026', x: 0, y: 0, w: 1, h: 1 }] },
+  { key: 'reading', name: 'Reading', meta: '', c: '#8a5cf0', wins: [{ id: 'read-main', name: 'Reading', x: 0, y: 0, w: 1, h: 1 }] },
+  { key: 'plus', name: 'New Space', plus: true },
+];
+let sel = 'folio', hoverKey = null, hoverWin = null, keyboard = false;
+
+function render() {
+  $('stage').className = `stage${S.desk === 'light' ? ' lightdesk' : ''}${S.wins === 'dark' ? ' darkwin' : ''}`;
+  $('stage').style.setProperty('--hw', S.line === 'none' ? '0px' : '0.5px');
+  $('stage').style.setProperty('--hc', S.line === 'half' ? 'rgba(128,128,128,.15)' : 'rgba(128,128,128,.3)');
+  $('grid').innerHTML = places.map(p => {
+    const picked = p.key === sel;
+    const hovering = p.key === hoverKey && !keyboard;
+    const multi = p.wins && p.wins.length > 1;
+    const plateOn = S.plate === 'always' || (S.plate === 'sel' && (picked || (S.hover === 'apart' && hovering)));
+    const bright = (S.sel === 'plate' && picked) || (hovering && multi && !hoverWin);
+    const ring = picked && (S.sel === 'plate-ring' || S.sel === 'win-ring');
+    let ringBox = 'inset:-8px';
+    if (picked && S.sel === 'win-ring' && p.wins) {
+      const xs = p.wins.map(w => w.x), ys = p.wins.map(w => w.y), xe = p.wins.map(w => w.x + w.w), ye = p.wins.map(w => w.y + w.h);
+      ringBox = `left:calc(${Math.min(...xs) * 100}% - 5px);top:calc(${Math.min(...ys) * 100}% - 5px);right:calc(${(1 - Math.max(...xe)) * 100}% - 5px);bottom:calc(${(1 - Math.max(...ye)) * 100}% - 5px)`;
+    }
+    const wins = p.plus ? '<div class="face">+</div>' : p.wins.map(w => {
+      let cls = 'w';
+      if (hovering && multi && hoverWin) {
+        if (w.id === hoverWin) cls += S.hot === 'white' ? ' hot-white' : S.hot === 'accent' ? ' hot-accent' : S.hot === 'lift' ? ' hot-lift' : '';
+        else if (S.hot === 'dim') cls += ' dimmed';
+      }
+      return `<div class="${cls}" data-win="${w.id}" style="left:${w.x * 100}%;top:${w.y * 100}%;width:${w.w * 100}%;height:${w.h * 100}%;--c:${p.c}"><div class="bar"></div><div class="body"><i class="blk"></i><i></i><i></i><i></i></div></div>`;
+    }).join('');
+    return `<div class="tile${p.plus ? ' plus' : ''}" data-key="${p.key}" style="--c:${p.c || '#888'}">
+      <div class="area"><div class="plate${plateOn ? ' on' : ''}${bright ? ' bright' : ''}"></div><div class="ring${ring ? ' on' : ''}" style="${ringBox}"></div>${wins}</div>
+      <div class="tl">${p.plus ? '' : `<span class="m">${p.name[0]}</span>`}<span class="n${picked && S.sel === 'name' ? ' pill' : ''}">${p.name}</span>${p.meta ? `<small>${p.meta}</small>` : ''}</div></div>`;
+  }).join('');
+  summary();
+}
+
+$('grid').addEventListener('mousemove', e => {
+  const t = e.target.closest('.tile');
+  const w = e.target.closest('.w');
+  const key = t ? t.dataset.key : null, win = w ? w.dataset.win : null;
+  if (key === hoverKey && win === hoverWin && !keyboard) return;
+  keyboard = false; hoverKey = key; hoverWin = win;
+  if (key && S.hover === 'selects') sel = key;
+  render();
+});
+$('grid').addEventListener('mouseleave', () => { hoverKey = hoverWin = null; render(); });
+$('grid').addEventListener('click', e => {
+  const t = e.target.closest('.tile'); if (!t) return;
+  const p = places.find(x => x.key === t.dataset.key);
+  const w = e.target.closest('.w');
+  if (p.plus) { $('status').textContent = 'New space'; return; }
+  const one = w && p.wins.length > 1 ? p.wins.find(x => x.id === w.dataset.win) : null;
+  $('status').textContent = one ? `Comes forward: ${one.name} only` : `Comes forward: all of ${p.name} (${p.wins.length} window${p.wins.length > 1 ? 's' : ''})`;
+});
+$('stage').addEventListener('keydown', e => {
+  const keys = places.map(p => p.key), i = keys.indexOf(sel);
+  const cols = Math.max(1, Math.round($('grid').clientWidth / ($('grid').firstElementChild.clientWidth + 26)));
+  const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols, Tab: e.shiftKey ? -1 : 1 }[e.key];
+  if (step === undefined) {
+    if (e.key === 'Enter') { const p = places[i]; $('status').textContent = p.plus ? 'New space' : `Comes forward: all of ${p.name}`; }
+    return;
+  }
+  e.preventDefault();
+  sel = keys[Math.max(0, Math.min(keys.length - 1, i + step))];
+  keyboard = true;
+  render();
+});
+
+const LABEL = {
+  sel: { 'plate-ring': 'ring round the plate', plate: 'plate only, brighter', 'win-ring': 'ring round the windows', name: 'name in a pill' },
+  hot: { white: 'white ring', accent: 'accent ring', dim: 'the others dim', lift: 'grows a little', none: 'nothing' },
+  plate: { sel: 'on the selected tile', always: 'always, faint', never: 'never' },
+  hover: { selects: 'selects what it is over', apart: 'separate from the selection' },
+  line: { faint: 'one pixel, 30%', none: 'none', half: 'one pixel, 15%' },
+};
+function summary() {
+  const lines = ['Folio overview tiles, round 3',
+    `- Selection: ${LABEL.sel[S.sel]}`,
+    `- Window under the pointer: ${LABEL.hot[S.hot]}`,
+    `- Plate: ${LABEL.plate[S.plate]}`,
+    `- Pointer: ${LABEL.hover[S.hover]}`,
+    `- Hairline: ${LABEL.line[S.line]}`];
+  const n = $('note').value.trim(); if (n) lines.push(`Note: ${n}`);
+  $('summary').textContent = lines.join('\n');
+}
+function sync() { document.querySelectorAll('.seg[data-k]').forEach(seg => seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(S[seg.dataset.k] === b.dataset.v)))); }
+document.querySelectorAll('.seg[data-k] button').forEach(b => b.addEventListener('click', () => { S[b.parentElement.dataset.k] = b.dataset.v; sync(); render(); }));
+$('note').addEventListener('input', summary);
+$('copy').addEventListener('click', () => {
+  const text = $('summary').textContent;
+  const fallback = () => { const r = document.createRange(); r.selectNodeContents($('summary')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); $('copy').textContent = 'Selected, press ⌘C'; setTimeout(() => $('copy').textContent = 'Copy summary', 1800); };
+  try { navigator.clipboard.writeText(text).then(() => { $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy summary', 1400); }, fallback); } catch (err) { fallback(); }
+});
+sync(); render();
+</script>

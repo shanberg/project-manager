@@ -141,6 +141,52 @@ final class CanvasCookieImportTests: XCTestCase {
         XCTAssertEqual(profiles[1].cookies.lastPathComponent, "Cookies")
     }
 
+    func testSignInStepsAreTheProviderOrALoginPath() {
+        let site = "ts.net"
+        func step(_ s: String) -> Bool { Import.isSignInStep(URL(string: s)!, domain: site) }
+        XCTAssertTrue(step("https://appleid.apple.com/auth/authorize?client_id=x"))
+        XCTAssertTrue(step("https://maxwell.tail0d49e3.ts.net/auth/login?return=%2Fapps%2Fhome%2F"))
+        XCTAssertTrue(step("https://app.ts.net/oauth2/callback?code=1"))
+        XCTAssertFalse(step("https://maxwell.tail0d49e3.ts.net/apps/home/"))
+        XCTAssertFalse(step("https://maxwell.tail0d49e3.ts.net/apps/authors/list"))
+    }
+
+    // MARK: Installed browsers
+
+    private func chromiumProfile(_ path: String) throws {
+        let root = folder.appending(path: "Library/Application Support").appending(path: path)
+        try FileManager.default.createDirectory(at: root.appending(path: "Default"), withIntermediateDirectories: true)
+        try Data().write(to: root.appending(path: "Default/Cookies"))
+        try Data("{}".utf8).write(to: root.appending(path: "Local State"))
+    }
+
+    /// Only installed apps are listed, in the order given, named as the app is: a store an
+    /// uninstalled browser left behind stays out, and an unknown Chromium browser is found by its
+    /// bundle id or its name.
+    func testListsInstalledBrowsersOnly() throws {
+        try chromiumProfile("Arc/User Data")             // Arc removed, its profile left behind.
+        try chromiumProfile("Google/Chrome")
+        try chromiumProfile("net.imput.helium")
+        try chromiumProfile("Thorium")                   // Unknown, folder named after the app.
+        try chromiumProfile("com.example.cookieless")    // Installed, but no cookies anywhere.
+        try FileManager.default.removeItem(at: folder.appending(
+            path: "Library/Application Support/com.example.cookieless/Default/Cookies"))
+        let apps = [
+            Import.App(bundleID: "net.imput.helium", name: "Helium"),
+            Import.App(bundleID: "com.apple.Safari", name: "Safari"),
+            Import.App(bundleID: "com.google.Chrome", name: "Google Chrome"),
+            Import.App(bundleID: "org.thorium.Thorium", name: "Thorium"),
+            Import.App(bundleID: "com.example.cookieless", name: "Cookieless"),
+            Import.App(bundleID: "com.example.notabrowser", name: "Not A Browser"),
+        ]
+        let sources = Import.sources(apps: apps, home: folder)
+        XCTAssertEqual(sources.map(\.title), ["Helium", "Safari", "Google Chrome", "Thorium"])
+        guard case .chromium(_, let helium) = sources[0].kind,
+              case .chromium(_, let thorium) = sources[3].kind else { return XCTFail("not Chromium") }
+        XCTAssertEqual(helium, ["Helium Storage Key"])
+        XCTAssertEqual(thorium, ["Thorium Safe Storage", "Thorium Storage Key"])
+    }
+
     // MARK: Firefox
 
     func testReadsAFirefoxDatabase() throws {
@@ -159,7 +205,7 @@ final class CanvasCookieImportTests: XCTestCase {
             "INSERT INTO moz_cookies VALUES ('example.com', 'x', 'v', '/', 2000000000, 0, 0, 0)",
         ])
         let profiles = Import.firefoxProfiles(root: root)
-        XCTAssertEqual(profiles.map(\.title), ["Firefox"])
+        XCTAssertEqual(profiles.map(\.name), ["default"])
         let cookies = try Import.readFirefox(profiles[0].cookies, domain: "apple.com")
         XCTAssertEqual(cookies.map(\.name), ["s", "ms"])
         XCTAssertEqual(cookies[0].expires, Date(timeIntervalSince1970: 2_000_000_000))

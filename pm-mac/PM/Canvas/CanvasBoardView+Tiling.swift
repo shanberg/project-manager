@@ -783,7 +783,12 @@ extension CanvasBoardView {
     /// the live part — an unread marker that clears as you read, a ticket renamed under you.
     func describeCard(_ id: String) -> CanvasExistingCards.Card? {
         guard let node = document.node(id: id) else { return nil }
-        let live = (nodeViews[id] as? CanvasLinkNodeView)?.liveTitle
+        var live = (nodeViews[id] as? CanvasLinkNodeView)?.liveTitle
+        // No view means the card is in a tile you are not showing, and the page's name must not
+        // depend on it being on screen. See `CanvasPageTitles.ofCard`.
+        if live == nil, case .link(let address) = node.content {
+            live = CanvasPageTitles.ofCard(id, on: store.url, address: address)
+        }
         return CanvasExistingCards.card(node, isFolder: isFolderPath, liveTitle: live)
     }
 

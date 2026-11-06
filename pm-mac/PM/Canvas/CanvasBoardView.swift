@@ -481,11 +481,11 @@ final class CanvasBoardView: NSView {
             guard hoveredTab?.card != oldValue?.card || hoveredTab?.onClose != oldValue?.onClose else { return }
             tileHandleView.hoverChanged(from: oldValue?.card, to: hoveredTab?.card)
             // Resting on the tab showing in a strip across a tile's top opens that tile's controls, as
-            // resting on a grip does — the tab is its handle (`showingTopTab`). Not on its close button.
+            // resting on a grip does — the tab is a handle for them (`showingTopTab`). Not on its close button.
             let resting = hoveredTab.flatMap { !$0.onClose && showingTopTab($0.card) != nil ? $0.card : nil }
             if let old = oldValue?.card, old != resting { CanvasTileControls.shared.handleExited(old) }
             if let resting, resting != oldValue?.card || oldValue?.onClose == true {
-                CanvasTileControls.shared.gripEntered(self, tile: resting)
+                CanvasTileControls.shared.gripEntered(self, tile: resting, viaTab: true)
             }
         }
     }

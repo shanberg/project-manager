@@ -26,6 +26,22 @@ enum CanvasPageTitles {
         return entry.title
     }
 
+    /// What a card's page was called when it was last looked at, for a card with no view to ask.
+    ///
+    /// **A tab outlives the card's view.** A card in a tile you are not showing — the other tab of a
+    /// tabbed tile, a tile of a workspace you have switched away from — has no `CanvasLinkNodeView`,
+    /// so there is no `liveTitle` to read. The card's *address* is not the answer: a page you followed
+    /// links out of is remembered under the address it wandered to (`CanvasLinkNodeView.titleChanged`),
+    /// and asking for the one on the board finds nothing, which the tab then covers with a hostname.
+    /// Where it wandered to is kept by `CanvasPageHandover` and `CanvasPageVisits`, in memory and on
+    /// disk, and neither needs the view.
+    @MainActor
+    static func ofCard(_ card: String, on canvas: URL, address: String) -> String? {
+        let key = CanvasPageHandover.key(canvas: canvas, card: card)
+        let wandered = CanvasPageHandover.resumes[key]?.url ?? CanvasPageVisits.of(key)
+        return wandered.flatMap { of($0.absoluteString) } ?? of(address)
+    }
+
     /// Every page with a name, most recently seen first — the nearest thing PM has to a history, and
     /// what the address field suggests from. See `CanvasAddressSuggestions`.
     static func remembered() -> [(address: String, title: String)] {

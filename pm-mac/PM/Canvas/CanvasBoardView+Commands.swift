@@ -173,41 +173,56 @@ extension CanvasBoardView {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let outsiders = Self.outside(files, of: store.resolver)
-            let alert = NSAlert()
-            alert.messageText = outsiders.count == 1
-                ? "\(outsiders[0].lastPathComponent) is outside your vault"
-                : "\(outsiders.count) of these files are outside your vault"
-            alert.informativeText = "A card can point at it where it is, which only Folio will be able to "
-                + "follow — Obsidian resolves a card's path inside the vault. Copying it in puts it "
-                + "beside this board, where both apps can see it."
-            alert.addButton(withTitle: "Copy In")
-            alert.addButton(withTitle: "Point At It")
-            alert.addButton(withTitle: "Cancel")
-            switch alert.runModal() {
-            case .alertFirstButtonReturn:
+            switch Self.askAboutOutsiders(outsiders) {
+            case .copyIn?:
                 let moved = Set(outsiders)
                 var copies: [URL] = []
                 commit(.files(files.map { file in
-                    guard moved.contains(file), let copy = self.copyIn(file) else { return file }
+                    guard moved.contains(file), let copy = Self.copyIn(file, besideBoardAt: self.store.url) else {
+                        return file
+                    }
                     copies.append(copy)
                     return copy
                 }), frames: frames, asking: false, into: destination)
                 registerCreatedFiles(copies)
-            case .alertSecondButtonReturn:
+            case .pointAt?:
                 commit(.files(files), frames: frames, asking: false, into: destination)
-            default:
+            case nil:
                 break
             }
         }
         return true
     }
 
-    /// Copy a dropped file into the vault, beside this board. Nil when the vault would not take it,
-    /// which leaves the card pointing at the original — a worse card than the one that was asked for,
-    /// and a better outcome than no card at all.
-    private func copyIn(_ file: URL) -> URL? {
+    /// The answer to `askAboutOutsiders`.
+    enum OutsiderAnswer { case copyIn, pointAt }
+
+    /// The question itself, modal, for `outsiders` (not empty): nil is Cancel. Also asked by the
+    /// sidebar when files are dropped on it (`SpaceFrame.landFiles`).
+    static func askAboutOutsiders(_ outsiders: [URL]) -> OutsiderAnswer? {
+        let alert = NSAlert()
+        alert.messageText = outsiders.count == 1
+            ? "\(outsiders[0].lastPathComponent) is outside your vault"
+            : "\(outsiders.count) of these files are outside your vault"
+        alert.informativeText = "A card can point at it where it is, which only Folio will be able to "
+            + "follow — Obsidian resolves a card's path inside the vault. Copying it in puts it "
+            + "beside this board, where both apps can see it."
+        alert.addButton(withTitle: "Copy In")
+        alert.addButton(withTitle: "Point At It")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .copyIn
+        case .alertSecondButtonReturn: return .pointAt
+        default: return nil
+        }
+    }
+
+    /// Copy a dropped file into the vault, beside the board at `canvas`. Nil when the vault would not
+    /// take it, which leaves the card pointing at the original — a worse card than the one that was
+    /// asked for, and a better outcome than no card at all.
+    static func copyIn(_ file: URL, besideBoardAt canvas: URL) -> URL? {
         do {
-            return try copyNoteAttachment(file, forNoteAt: store.url)
+            return try copyNoteAttachment(file, forNoteAt: canvas)
         } catch {
             Log.write("canvas file copy failed: \(error)")
             return nil

@@ -561,7 +561,8 @@ final class ProjectSplitViewController: NSSplitViewController {
         if peek != nil { return }
         let width = max(ProjectWindow.sidebarMinWidth, min(sidebarItem.viewController.view.frame.width > 1
             ? sidebarItem.viewController.view.frame.width : 240, ProjectWindow.sidebarMaxWidth))
-        let made = SidebarPeek(content: NSHostingView(rootView: AnyView(SpaceFrameSidebar(frame: frame, inPeek: true))))
+        let made = SidebarPeek(content: NSHostingView(rootView: AnyView(SpaceFrameSidebar(frame: frame, inPeek: true,
+                                                                                              focusesAddress: peekForAddress))))
         made.onExit = { [weak self] in
             guard let self, !peekForAddress else { return }
             hidePeek()

@@ -147,6 +147,11 @@ final class CanvasPageView: WKWebView {
     /// field to type in. Set by the card from its hover callback (`mouseDidMoveOverElement`).
     var hoverIsInteractive = false
 
+    /// Whether the last hover report was over media. Kept apart from `hoverIsInteractive` because the
+    /// two mean different things to a press: a link or a field is the page's, a video is the page's
+    /// only if it turns out to be a click (`Press.video`).
+    var hoverIsMedia = false
+
     /// The rule, alone so it can be tested: nothing usable under the pointer, and the plain arrow —
     /// which is what WebKit shows over dead space; a hand over anything clickable (`cursor: pointer`),
     /// an I-beam over text you could select.
@@ -169,7 +174,7 @@ final class CanvasPageView: WKWebView {
     /// ever asked about and no header moved the window. The hover report is what `hoverIsInteractive`
     /// already rode on. The answer depends only on the element and its ancestors, so it holds until
     /// the next report, wherever the pointer is within that element.
-    private var pageAnswer: (hover: Int, uses: Bool)?
+    private var pageAnswer: (hover: Int, press: Press)?
     private var pageQuestion: (hover: Int, point: NSPoint)?
     private var askingPage = false
     private var hoverReports = 0
@@ -186,8 +191,8 @@ final class CanvasPageView: WKWebView {
         Task { @MainActor [weak self] in
             while let self, let next = self.pageQuestion {
                 self.pageQuestion = nil
-                let uses = await self.pageUses(at: next.point)
-                self.pageAnswer = (next.hover, uses)
+                let press = await self.press(at: next.point)
+                self.pageAnswer = (next.hover, press)
             }
             self?.askingPage = false
         }
@@ -198,25 +203,66 @@ final class CanvasPageView: WKWebView {
     /// window that moves when you meant a button is worse than a header that didn't grab.
     func pageLeavesDeadSpace() -> Bool {
         guard let answer = pageAnswer, answer.hover == hoverReports else { return false }
-        return !answer.uses
+        return answer.press == .dead
+    }
+
+    /// Whether the page's answer, for the latest hover report, is that the pointer is on the picture of
+    /// a video. Like `pageLeavesDeadSpace`, no answer means no.
+    func pageIsOnVideo() -> Bool {
+        guard let answer = pageAnswer, answer.hover == hoverReports else { return false }
+        return answer.press == .video
     }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        pendingVideoPress = nil
         if dragsWindowFromDeadSpace(), let window,
            isInDeadSpaceBand(point),
-           Self.isDeadSpace(cursor: NSCursor.current, interactive: hoverIsInteractive),
+           Self.isDeadSpace(cursor: NSCursor.current, interactive: hoverIsInteractive || hoverIsMedia),
            pageLeavesDeadSpace() {
             if event.clickCount == 2 { return WindowDragView.titleBarDoubleClick(window) }
             Log.write("window drag from page dead space: \(url?.host() ?? "?")")
             return window.performDrag(with: event)
         }
+        // The picture of a video: the window's if it is dragged, the page's if it is clicked. Held until
+        // one or the other, because a player pauses on a click and goes full screen on a double-click,
+        // and handing the press to the window now would take both away. The page hears nothing meanwhile.
+        if dragsWindowFromDeadSpace(), window != nil,
+           Self.isDeadSpace(cursor: NSCursor.current, interactive: hoverIsInteractive),
+           pageIsOnVideo() {
+            pendingVideoPress = event
+            return
+        }
         if dragsWindowFromDeadSpace(), isInDeadSpaceBand(point),
-           Self.isDeadSpace(cursor: NSCursor.current, interactive: hoverIsInteractive) {
+           Self.isDeadSpace(cursor: NSCursor.current, interactive: hoverIsInteractive || hoverIsMedia) {
             Log.write("page kept a press in the band: \(url?.host() ?? "?"), "
                 + (pageAnswer?.hover == hoverReports ? "it uses it" : "no answer yet"))
         }
         super.mouseDown(with: event)
+    }
+
+    /// A press on a video's picture that has not yet said what it is. See `mouseDown`.
+    private var pendingVideoPress: NSEvent?
+
+    /// How far the pointer has to move, in points, before a press on a video is a drag. Past a click's
+    /// natural wobble and under the distance anyone drags a window on purpose.
+    static let videoDragSlop: CGFloat = 4
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let press = pendingVideoPress else { return super.mouseDragged(with: event) }
+        let a = press.locationInWindow, b = event.locationInWindow
+        guard hypot(b.x - a.x, b.y - a.y) >= Self.videoDragSlop, let window else { return }
+        pendingVideoPress = nil
+        Log.write("window drag from a video: \(url?.host() ?? "?")")
+        window.performDrag(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        // Never moved: it was a click, so the page gets it now, down and up together.
+        guard let press = pendingVideoPress else { return super.mouseUp(with: event) }
+        pendingVideoPress = nil
+        super.mouseDown(with: press)
+        super.mouseUp(with: event)
     }
 
     /// Which side is holding the drag right now.
@@ -676,24 +722,41 @@ final class CanvasPageView: WKWebView {
     /// The same world and shadow-root walk as `link(at:)`. A page that can't answer (no document yet)
     /// says it uses the press.
     func pageUses(at point: NSPoint) async -> Bool {
+        await press(at: point) != .dead
+    }
+
+    /// What a press at `point` lands on: the page's own control, nothing, or the picture of a video.
+    ///
+    /// **A video is neither of the first two.** Its picture is blank in the sense dead space means — no
+    /// button, nothing to select — but a click on it is how a player pauses, and a double-click how it
+    /// goes full screen, so a press cannot be given to the window outright. See `mouseDown`, which
+    /// holds a press on one until it is known whether it is a click or the start of a drag.
+    ///
+    /// A video counts only above the strip along its foot where players put their controls
+    /// (`deadSpaceBand`, as at the top of a page), and an ancestor that merely holds the video — a
+    /// player's `tabindex=0` wrapper, which is how it takes the space bar — is not a control.
+    enum Press: String { case page, dead, video }
+
+    func press(at point: NSPoint) async -> Press {
         let scale = pageZoom * magnification
-        guard scale > 0 else { return true }
+        guard scale > 0 else { return .page }
         let y = isFlipped ? point.y : bounds.height - point.y
         let answer = try? await callAsyncJavaScript(Self.usesScript,
-                                                    arguments: ["x": point.x / scale, "y": y / scale],
+                                                    arguments: ["x": point.x / scale, "y": y / scale,
+                                                                "band": Self.deadSpaceBand],
                                                     in: nil, contentWorld: .defaultClient)
-        return answer as? Bool ?? true
+        return (answer as? String).flatMap(Press.init(rawValue:)) ?? .page
     }
 
     private static let usesScript = """
         let el = document.elementFromPoint(x, y);
-        if (!el) return true;
+        if (!el) return 'page';
         while (el.shadowRoot) {
             const inner = el.shadowRoot.elementFromPoint(x, y);
             if (!inner || inner === el) break;
             el = inner;
         }
-        const used = 'button, input, select, textarea, summary, label, a[href], canvas, iframe, video, '
+        const used = 'button, input, select, textarea, summary, label, a[href], canvas, iframe, '
             + 'embed, object, [tabindex]:not([tabindex^="-"]), [draggable="true"], [contenteditable=""], '
             + '[contenteditable="true"], [onclick], [role="button"], [role="link"], [role="menuitem"], '
             + '[role="menuitemcheckbox"], [role="menuitemradio"], [role="tab"], [role="checkbox"], '
@@ -701,16 +764,29 @@ final class CanvasPageView: WKWebView {
             + '[role="textbox"], [role="spinbutton"], [role="treeitem"], [role="gridcell"]';
         const floating = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
         const width = document.documentElement.clientWidth;
+        // The video under the point, above the strip along its foot where a player keeps its controls.
+        const video = [...document.querySelectorAll('video')].find(v => {
+            const r = v.getBoundingClientRect();
+            return r.width >= 200 && r.height >= 100 && x >= r.left && x <= r.right
+                && y >= r.top && y <= r.bottom - band;
+        });
+        const holds = n => video && (n === video || n.contains(video));
         for (let n = el; n; n = n.parentElement || (n.getRootNode().host ?? null)) {
             if (n === document.documentElement || n === document.body) break;
-            if (n.matches(used) || n.matches(floating)) return true;
+            if (n.matches('video')) { if (video) continue; return 'page'; }
+            if (n.matches(used) && !holds(n)) return 'page';
+            if (n.matches(floating)) return 'page';
             const position = getComputedStyle(n).position;
-            if (position === 'fixed' || position === 'absolute') {
+            if ((position === 'fixed' || position === 'absolute') && !holds(n)) {
                 const r = n.getBoundingClientRect();
-                if (r.left > 1 && r.right < width - 1 && r.top > 1) return true;
+                const v = video && video.getBoundingClientRect();
+                // A layer laid over the whole picture is the player's, not a panel floating on a page.
+                const coversVideo = v && r.left <= v.left + 1 && r.right >= v.right - 1
+                    && r.top <= v.top + 1 && r.bottom >= v.bottom - 1;
+                if (!coversVideo && r.left > 1 && r.right < width - 1 && r.top > 1) return 'page';
             }
         }
-        return false;
+        return video ? 'video' : 'dead';
         """
 
     private static let linkScript = """

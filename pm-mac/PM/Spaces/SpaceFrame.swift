@@ -1,6 +1,7 @@
 import AppKit
 import PmLib
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Arc-style frame over a board, a space's or a project's: the sidebar lists the board, the
 /// window's content is the workspace. docs/spaces.md § The frame.
@@ -383,7 +384,44 @@ final class SpaceFrame {
         }
         picked = []
         if flags.contains(.option) { return tileBeside(id) }
-        show(id)
+        openAlone(id)
+    }
+
+    /// A click on a card: the card on its own, whether or not a layout holds it.
+    ///
+    /// **A card in a layout is still a card.** `show` takes you to the layout, which is right for a
+    /// jump by keyboard or by search but wrong for a click on one row: you asked for that card, and a
+    /// layout of five others arrives with it. The layouts are left as they were, and the row's menu
+    /// has "Show in <layout>" for going back into one (`showInLayout`).
+    ///
+    /// A card no layout holds goes the way it always did (`show`), which replaces the tile you're in.
+    func openAlone(_ id: String) {
+        guard let split, let board else { return }
+        let inLayout = board.tiling?.cards.contains(id) == true
+            || !CanvasWorkspaces.names(holdingAnyOf: [id], of: canvas).isEmpty
+        guard inLayout else { return show(id) }
+        // From a layout's own tab, leave for the board's tab; from the board, `alone` does the rest.
+        if board.workspaceName != nil || split.canvasPane?.focus != .whole { split.goToCanvas() }
+        guard let canvasBoard = self.board else { return }
+        alone(id, on: canvasBoard)
+        refresh()
+    }
+
+    /// The layouts, in the sidebar's order, that hold this card — what its row's menu offers.
+    func layouts(holding id: String) -> [String] {
+        let holding = Set(CanvasWorkspaces.names(holdingAnyOf: [id], of: canvas))
+        return CanvasWorkspaces.ordered(of: canvas).filter { holding.contains($0) && $0 != notesWorkspace }
+    }
+
+    /// Go to a layout with this card's tile forward.
+    func showInLayout(_ name: String, card id: String) {
+        guard let split else { return }
+        split.openTab(.board(.workspace(name)))
+        split.canvasPane?.whenInWorkspace(name) { [weak self] in
+            self?.board?.showTab(id)
+            self?.refresh()
+        }
+        refresh()
     }
 
     func show(_ id: String) {
@@ -395,12 +433,7 @@ final class SpaceFrame {
         }
         // In a named workspace: go there, with this card's tile picked.
         if let name = CanvasWorkspaces.names(holdingAnyOf: [id], of: canvas).first {
-            split.openTab(.board(.workspace(name)))
-            split.canvasPane?.whenInWorkspace(name) { [weak self] in
-                self?.board?.showTab(id)
-                self?.refresh()
-            }
-            return refresh()
+            return showInLayout(name, card: id)
         }
         // Anywhere else replaces the tile you're in. In a named workspace, that's leaving it for the
         // card on its own, on the board's own tab.
@@ -673,6 +706,63 @@ final class SpaceFrame {
         }
     }
 
+    /// Files from Finder (or any app) let go in the sidebar: a file card each, in the list at `spot`'s
+    /// slot in the order dropped, or into the workspace a row was dropped on; the last one shown. Files
+    /// outside the vault ask Copy In / Point At It first, as a drop on the board does. One undo step.
+    func landFiles(_ files: [URL], at spot: DropSpot) {
+        dropSpot = nil
+        guard !files.isEmpty else { return }
+        let list: SpaceCardMarks.List, index: Int, workspace: String?
+        switch spot {
+        case .list(let at, let slot): (list, index, workspace) = (at, slot, nil)
+        case .workspace(let name): (list, index, workspace) = (.today(folder: nil), 0, name)
+        case .workspaceSlot: return
+        }
+        // Asked on the next turn: this runs from inside the drop, and a modal session there nests in it.
+        DispatchQueue.main.async { [weak self] in
+            self?.addDropped(files, to: list, at: index, workspace: workspace)
+        }
+    }
+
+    /// `landFiles`, at once: the question (if any) asked now. Internal for tests.
+    func addDropped(_ files: [URL], to list: SpaceCardMarks.List, at index: Int, workspace: String?) {
+        var files = files
+        let outsiders = CanvasBoardView.outside(files, of: store.resolver)
+        if !outsiders.isEmpty {
+            switch CanvasBoardView.askAboutOutsiders(outsiders) {
+            case .copyIn?:
+                let moved = Set(outsiders)
+                files = files.map { file in
+                    guard moved.contains(file) else { return file }
+                    return CanvasBoardView.copyIn(file, besideBoardAt: canvas) ?? file
+                }
+            case .pointAt?: break
+            case nil: return
+            }
+        }
+        let nodes = files.map { url in
+            let isFolder = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            if isFolder { SpaceRecentFolders.note(url) }
+            return CanvasNode(content: .file(path: store.resolver.storablePath(for: url) ?? url.path, subpath: nil),
+                              frame: newCardFrame(width: 400, height: isFolder ? 400 : 350))
+        }
+        // Side by side right of everything, rather than all at the one place `newCardFrame` gives.
+        var placed = nodes
+        for i in placed.indices.dropFirst() {
+            placed[i].frame.x = placed[i - 1].frame.x + placed[i - 1].frame.width + 40
+        }
+        let members = members(of: list)
+        store.change(placed.count > 1 ? "Add Files" : "Add File") {
+            SpaceCardMarks.insert(placed, into: list, at: index, members: members, in: &$0)
+        }
+        refresh()
+        if let workspace {
+            placed.forEach { addToWorkspace($0.id, workspace) }
+        } else if let last = placed.last {
+            show(last.id)
+        }
+    }
+
     /// A row dropped on a workspace's: the card joins it, beside the tile in front, and the workspace
     /// comes up with it focused.
     func addToWorkspace(_ id: String, _ name: String) {
@@ -925,6 +1015,9 @@ struct SpaceFrameSidebar: View {
     @Bindable var frame: SpaceFrame
     /// The floating copy over the content (sidebar folded away) rather than the docked one.
     var inPeek = false
+    /// The peek was opened to type an address (⌘T, ⌘L), so its field takes the keyboard as it appears.
+    /// Never for one opened by the pointer reaching the edge.
+    var focusesAddress = false
     @State private var address = ""
     @State private var addressFocused = false
     @State private var focusToken = 0
@@ -967,16 +1060,19 @@ struct SpaceFrameSidebar: View {
                     }
                     group(frame.pinned, pinned: true)
                     Group { if frame.isSpace { todayRule } else { cardsRule } }
-                        .onDrop(of: [SpaceRowDrag.type], delegate: SpaceRowDropTarget(
+                        .onDrop(of: SpaceRowDropTarget.types, delegate: SpaceRowDropTarget(
                             frame: frame, owned: [pinnedEnd, todayStart]) { $0.y < 12 ? pinnedEnd : todayStart })
                     SpaceSidebarRow(title: "New Tab", symbol: "plus", dim: true) { frame.askForAddress() }
-                        .onDrop(of: [SpaceRowDrag.type], delegate: SpaceRowDropTarget(
+                        .onDrop(of: SpaceRowDropTarget.types, delegate: SpaceRowDropTarget(
                             frame: frame, owned: [todayStart]) { _ in todayStart })
                     group(frame.today, pinned: false)
                 }
                 .padding(.bottom, 8)
                 .frame(maxWidth: .infinity, minHeight: area.size.height, alignment: .topLeading)
                 .background { WindowDragArea { frame.addMenu() } }
+                // Files let go anywhere a row doesn't take them (Notes, Board, the empty sidebar below
+                // the rows): the end of Today / Cards. Files only — a row has to land on a row.
+                .onDrop(of: [.fileURL], delegate: SpaceRowDropTarget(frame: frame, owned: [todayEnd]) { _ in todayEnd })
             }
             .scrollIndicators(.never)
             }
@@ -1008,10 +1104,17 @@ struct SpaceFrameSidebar: View {
         .onHover { sidebarHover = $0 }
         .onChange(of: frame.addressRequests) {
             guard frame.addressInPeek == inPeek else { return }
-            address = frame.editingFront ? frame.frontAddress : ""
-            candidates = frame.addressCandidates
-            focusToken &+= 1
+            askForTheKeyboard()
         }
+        // A peek built for ⌘T / ⌘L is made after the request was counted, so there is no change for
+        // `onChange` to see: it asks for itself. One built because the pointer reached the edge does not.
+        .onAppear { if focusesAddress { askForTheKeyboard() } }
+    }
+
+    private func askForTheKeyboard() {
+        address = frame.editingFront ? frame.frontAddress : ""
+        candidates = frame.addressCandidates
+        focusToken &+= 1
     }
 
     private var addressField: some View {
@@ -1068,7 +1171,7 @@ struct SpaceFrameSidebar: View {
                     }
                     .opacity(frame.dragging == row.id ? 0.4 : 1)
                     .onDrag { frame.beginDrag(row.id) }
-                    .onDrop(of: [SpaceRowDrag.type], delegate: SpaceRowDropTarget(
+                    .onDrop(of: SpaceRowDropTarget.types, delegate: SpaceRowDropTarget(
                         frame: frame, owned: [.list(.favorites, index), .list(.favorites, index + 1)]) { point in
                         .list(.favorites, point.x < 22 ? index : index + 1)
                     })
@@ -1088,7 +1191,7 @@ struct SpaceFrameSidebar: View {
                 .strokeBorder(frame.dropSpot == spot ? Color.accentColor : Color.primary.opacity(0.15),
                               style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])))
             .transition(.opacity)
-            .onDrop(of: [SpaceRowDrag.type], delegate: SpaceRowDropTarget(frame: frame, owned: [spot]) { _ in spot })
+            .onDrop(of: SpaceRowDropTarget.types, delegate: SpaceRowDropTarget(frame: frame, owned: [spot]) { _ in spot })
     }
 
     /// A workspace's row: a card's row dropped on it joins the workspace; another workspace's row
@@ -1121,7 +1224,7 @@ struct SpaceFrameSidebar: View {
         }
         // Not while its name is being typed into: a drag there is selecting text.
         .onDrag(if: renamingWorkspace != workspace.name) { frame.beginWorkspaceDrag(workspace.name) }
-        .onDrop(of: [SpaceRowDrag.type, ProjectTabDrag.type], delegate: SpaceRowDropTarget(
+        .onDrop(of: SpaceRowDropTarget.types + [ProjectTabDrag.type], delegate: SpaceRowDropTarget(
             frame: frame, owned: [into, .workspaceSlot(index), .workspaceSlot(index + 1)]) { point in
             frame.draggingWorkspace != nil ? .workspaceSlot(point.y < 16 ? index : index + 1) : into
         })
@@ -1129,6 +1232,7 @@ struct SpaceFrameSidebar: View {
 
     private var pinnedEnd: SpaceFrame.DropSpot { .list(.pinned(folder: nil), frame.pinned.loose.count) }
     private var todayStart: SpaceFrame.DropSpot { .list(.today(folder: nil), 0) }
+    private var todayEnd: SpaceFrame.DropSpot { .list(.today(folder: nil), frame.today.loose.count) }
 
     /// The line where a dragged row would go.
     private func insertionMark(vertical: Bool = false) -> some View {
@@ -1231,7 +1335,7 @@ struct SpaceFrameSidebar: View {
                 if open { frame.closedFolders.insert(folder.id) } else { frame.closedFolders.remove(folder.id) }
             }
             .overlay(dropRing(!open && frame.dropSpot == first))
-            .onDrop(of: [SpaceRowDrag.type], delegate: SpaceRowDropTarget(frame: frame, owned: [first]) { _ in first })
+            .onDrop(of: SpaceRowDropTarget.types, delegate: SpaceRowDropTarget(frame: frame, owned: [first]) { _ in first })
             if open {
                 ForEach(Array(folder.rows.enumerated()), id: \.element.id) { index, row in
                     cardRow(row, indent: true, list: list, index: index, count: folder.rows.count)
@@ -1256,7 +1360,7 @@ struct SpaceFrameSidebar: View {
             }
             .opacity(frame.dragging == row.id ? 0.4 : 1)
             .onDrag { frame.beginDrag(row.id) }
-            .onDrop(of: [SpaceRowDrag.type], delegate: SpaceRowDropTarget(
+            .onDrop(of: SpaceRowDropTarget.types, delegate: SpaceRowDropTarget(
                 frame: frame, owned: [.list(list, index), .list(list, index + 1)]) { point in
                 .list(list, point.y < 16 ? index : index + 1)
             })
@@ -1266,6 +1370,9 @@ struct SpaceFrameSidebar: View {
     private func menu(for row: SpaceFrame.Row) -> some View {
         Button(row.pinned ? "Unpin" : "Pin") { frame.setPinned(row.id, !row.pinned) }
         Button(row.favorite ? "Remove from Favourites" : "Add to Favourites") { frame.setFavorite(row.id, !row.favorite) }
+        ForEach(frame.layouts(holding: row.id), id: \.self) { name in
+            Button("Show in \u{201C}\(name)\u{201D}") { frame.showInLayout(name, card: row.id) }
+        }
         Button("Open in a Tile Beside") { frame.tileBeside(row.id) }
         Divider()
         if row.host != nil {
@@ -1305,7 +1412,8 @@ struct ProjectFrameHeader: View {
         Button { showing.toggle() } label: {
             HStack(spacing: 8) {
                 if let icon = store.icon {
-                    ProjectIconMark(icon: icon, size: 15, tint: store.color.map { Color(nsColor: $0.nsColor) })
+                    // The text colour, not the project's: a dark project colour vanishes on a dark sidebar.
+                    ProjectIconMark(icon: icon, size: 15)
                         .frame(width: 18, height: 18)
                 } else {
                     RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -1475,6 +1583,9 @@ struct SpaceSidebarRow: View {
     var picked = false
     var disclosure: Bool?
     var close: (() -> Void)?
+    /// Middle-click closes the row: set for a card that isn't pinned (a pinned one's close only
+    /// unpins it, which a stray middle-click shouldn't do).
+    var middleClickCloses = false
     var glyphs: Namespace.ID?
     var cardID: String?
     let tap: () -> Void
@@ -1512,6 +1623,7 @@ struct SpaceSidebarRow: View {
         playing = row.playing || row.muted
         muted = row.muted
         self.indent = indent; self.picked = picked; self.close = close; self.pause = pause; self.tap = tap
+        middleClickCloses = !row.pinned
     }
 
     var body: some View {
@@ -1585,6 +1697,7 @@ struct SpaceSidebarRow: View {
         }
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(picked ? Color.accentColor : .clear, lineWidth: 1.5))
         .contentShape(Rectangle())
+        .background { if middleClickCloses { MiddleClickArea(enabled: !editing) { close?() } } }
         .onHover { hover = $0 }
         .onTapGesture { if !editing { tap() } }
         // Simultaneous, so the first click still shows the row at once instead of waiting out the
@@ -1710,20 +1823,42 @@ private extension View {
     }
 }
 
-/// A place in the sidebar a dragged row can go. The spot follows the pointer; the drop happens on
-/// letting go (`SpaceFrame.land`).
+/// A place in the sidebar a dragged row can go — or files from Finder, which land there as file cards
+/// (`SpaceFrame.landFiles`). The spot follows the pointer; the drop happens on letting go
+/// (`SpaceFrame.land`).
 struct SpaceRowDropTarget: DropDelegate {
+    /// What every sidebar target takes: a row, or files.
+    static let types: [UTType] = [SpaceRowDrag.type, .fileURL]
+
     let frame: SpaceFrame
     /// Every spot this target marks, so leaving it clears its own mark and no other.
     let owned: [SpaceFrame.DropSpot]
     let spot: (CGPoint) -> SpaceFrame.DropSpot?
 
-    func validateDrop(info: DropInfo) -> Bool { frame.dragging != nil || frame.draggingWorkspace != nil }
-    func dropEntered(info: DropInfo) { frame.propose(spot(info.location)) }
+    /// Files rather than a row: nothing of the sidebar's is in flight. A web card's row carries its
+    /// address as a URL, never a file URL, so it can't pass for one.
+    private func isFiles(_ info: DropInfo) -> Bool {
+        frame.dragging == nil && frame.draggingWorkspace == nil && info.hasItemsConforming(to: [.fileURL])
+    }
+
+    /// Where files would go: not between workspace rows, which only reorder them.
+    private func spot(for info: DropInfo) -> SpaceFrame.DropSpot? {
+        let spot = spot(info.location)
+        if isFiles(info), case .workspaceSlot? = spot { return nil }
+        return spot
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        frame.dragging != nil || frame.draggingWorkspace != nil || isFiles(info)
+    }
+
+    func dropEntered(info: DropInfo) { frame.propose(spot(for: info)) }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        frame.propose(spot(info.location))
-        return DropProposal(operation: .move)
+        let spot = spot(for: info)
+        frame.propose(spot)
+        guard isFiles(info) else { return DropProposal(operation: .move) }
+        return DropProposal(operation: spot == nil ? .forbidden : .copy)
     }
 
     func dropExited(info: DropInfo) {
@@ -1731,9 +1866,26 @@ struct SpaceRowDropTarget: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard let spot = spot(info.location) else { frame.dropSpot = nil; return false }
-        frame.land(at: spot)
+        guard let spot = spot(for: info) else { frame.dropSpot = nil; return false }
+        guard isFiles(info) else {
+            frame.land(at: spot)
+            return true
+        }
+        let providers = info.itemProviders(for: [.fileURL])
+        Task { @MainActor in
+            var files: [URL] = []
+            for provider in providers {
+                if let url = await Self.fileURL(from: provider) { files.append(url) }
+            }
+            frame.landFiles(files, at: spot)
+        }
         return true
+    }
+
+    private static func fileURL(from provider: NSItemProvider) async -> URL? {
+        await withCheckedContinuation { done in
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in done.resume(returning: url?.isFileURL == true ? url : nil) }
+        }
     }
 }
 

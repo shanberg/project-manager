@@ -563,6 +563,14 @@ final class CanvasTilingTests: XCTestCase {
         XCTAssertEqual(session.layout.frames["c"], session.tileFrames["c"], "a tile of one has no strip")
     }
 
+    /// A tile's grip lies at its card's top edge, so for a tile with tabs across its top it lies just under
+    /// the strip, never on the tabs. The bare strip is the window's to drag; the grip is how the tile moves.
+    func testACardWithTabsStartsWhereItsStripEnds() {
+        let session = tabbed()
+        let strip = session.tabStrips[0]
+        XCTAssertEqual(session.layout.frames["a"]!.minY, strip.band.maxY, accuracy: 0.001)
+    }
+
     /// Tabs share the strip, none wider than a tab needs to be, none overlapping.
     /// A tab slid along its strip lands where it was let go, and the card showing stays the one shown.
     func testATabMovesAlongItsStripKeepingTheOneShowing() {

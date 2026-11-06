@@ -1252,8 +1252,13 @@ card out of the workspace, as ⌥⌫ does. A tab let go of eases into its slot.
 desktop app. It lies over the card and is drawn only while the pointer is near the top centre, so nothing
 sits on a page you are reading; a small view above the card takes the press, which over a web page
 would otherwise be the page's. It replaced a bar in the gap on whichever side faced out, a consistent
-rule that put the handle somewhere different on every tile. A tile with tabs has no grip: its strip is
-already across its top, and the rest of the strip carries the tile.
+rule that put the handle somewhere different on every tile. A tile with tabs across its top has its grip
+just under the strip, on the card (2026-11-05; was: no grip, the rest of the strip carried the tile). The
+strip's bare stretch (not a tab, the +, or a close button) is the window's to drag, as the ground around
+the tiles is: drag moves the window, double-click does the title bar's action (`dragWindow`, from
+`tiledMouseDown`; only where `dragsWindowFromGround`). Its showing tab still opens the controls, which
+then hang from that tab and the grip stays down (`CanvasTileControls.viaTab`); opened from the grip they
+hang from the grip.
 
 **Tabs can run down a tile's side** — **decided and built** (backlog 36, 2026-09-16). Per tile, from its
 menu (Tabs on the Side, on the tile's, the strip's and a tab's right-click), and saved with the workspace
@@ -1435,9 +1440,9 @@ Each step ships on its own once the first is in.
      where cards are — hit testing, the grips, the page budget — is right without knowing about
      tabs. The band is drawn under the cards (`CanvasTileHandleView`).
    - **The strip is the tile's title bar.** A click on a tab shows it, a drag on one slides it along the
-     strip or, off it, pulls that card out, and a drag on the rest of the strip carries the tile, as a
-     grip does. Double-clicking it
-     maximizes, as a title bar's double-click does.
+     strip or, off it, pulls that card out. The rest of the strip is the window's to drag (2026-11-05; was:
+     carried the tile, as a grip does, and a double-click on it maximized the tile); the tile's grip is under
+     the strip. Double-clicking the tile's grip maximizes, as a title bar's double-click does.
    - **The top of every tile is its tabs.** Dropping a tile or a tab on a tile's top band joins its tabs.
      A tab pulled out joins them from the middle too, since one card is not a tile to swap with.
    - **Maximizing keeps the tabs.** The strip stays on the tile filling the room, and ⌥[ ⌥] step through

@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Folio Motion Audit</title>
+<style>
+:root {
+  --bg: #f7f7f5; --surface: #ffffff; --fg: #1d1d1f; --muted: #6e6e73; --border: rgba(0,0,0,.10);
+  --accent: #0a66d8; --crit: #c8322a; --imp: #b7791f; --opp: #2f855a; --loop-dim: rgba(0,0,0,.05);
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161618; --surface: #1f1f22; --fg: #f2f2f4; --muted: #9a9aa0; --border: rgba(255,255,255,.12);
+    --accent: #5aa2ff; --crit: #ff6b61; --imp: #f0b24a; --opp: #5fd08f; --loop-dim: rgba(255,255,255,.06);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161618; --surface: #1f1f22; --fg: #f2f2f4; --muted: #9a9aa0; --border: rgba(255,255,255,.12);
+  --accent: #5aa2ff; --crit: #ff6b61; --imp: #f0b24a; --opp: #5fd08f; --loop-dim: rgba(255,255,255,.06);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--sans); }
+main { max-width: 920px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -.01em; }
+h2 { font-size: 19px; margin: 40px 0 12px; padding-top: 16px; border-top: 1px solid var(--border); }
+h3 { font-size: 16px; margin: 0 0 6px; }
+p { margin: 6px 0; }
+code { font: 13px var(--mono); background: var(--loop-dim); padding: 1px 4px; border-radius: 4px; overflow-wrap: anywhere; }
+ul { padding-left: 20px; margin: 6px 0; }
+li { margin: 3px 0; }
+.meta { color: var(--muted); }
+.ctx { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-top: 16px; }
+.ctx dt { color: var(--muted); }
+.ctx dd { margin: 0; }
+.tally { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.pill { border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px; font-size: 14px; background: var(--surface); }
+.finding { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin: 14px 0; }
+.sev { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.sev.crit { color: var(--crit); } .sev.imp { color: var(--imp); } .sev.opp { color: var(--opp); }
+.where { color: var(--muted); font-size: 13px; }
+.lens { font-style: italic; color: var(--muted); margin-top: 10px; }
+.good li::marker { content: "✓  "; color: var(--opp); }
+pre { font: 12.5px/1.5 var(--mono); background: var(--loop-dim); padding: 10px 12px; border-radius: 8px; overflow-x: auto; margin: 8px 0; }
+
+/* Demo shell */
+.demo { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+@media (max-width: 600px) { .demo { grid-template-columns: 1fr; } }
+.lane { border: 1px solid var(--border); border-radius: 8px; background: var(--loop-dim); padding: 10px; }
+.lane-label { font-size: 12px; color: var(--muted); margin-bottom: 8px; display: flex; justify-content: space-between; }
+.stage { position: relative; height: 110px; overflow: hidden; border-radius: 6px; background: var(--bg); }
+.card { position: absolute; left: 50%; top: 50%; width: 150px; height: 44px; margin: -22px 0 0 -75px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); font-size: 13px; display: flex; align-items: center; padding: 0 12px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.card.b { border-color: var(--accent); }
+.slot { position: absolute; top: 50%; width: 64px; height: 44px; margin-top: -22px; border: 1.5px dashed var(--muted); border-radius: 8px; opacity: .5; }
+.tile { position: absolute; top: 50%; width: 64px; height: 44px; margin-top: -22px; border-radius: 8px; background: var(--accent); opacity: .85; }
+.banner { position: absolute; left: 10px; right: 10px; top: 10px; height: 30px; border-radius: 6px; background: color-mix(in oklch, var(--imp) 22%, var(--surface)); border: 1px solid var(--border); font-size: 12px; display: flex; align-items: center; padding: 0 10px; }
+.panel { position: absolute; left: 12px; top: 14px; height: 80px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+/* 1 — focus-move corner push */
+.demo-card-1__motion-target.now.a  { animation: motion-1-now-out 3s infinite; opacity: 0; }
+.demo-card-1__motion-target.now.b  { animation: motion-1-now-in 3s infinite; }
+.demo-card-1__motion-target.prop.a { animation: motion-1-prop-out 3s infinite; opacity: 0; }
+.demo-card-1__motion-target.prop.b { animation: motion-1-prop-in 3s infinite; }
+@keyframes motion-1-now-out { 0% { transform: translate(0,0); opacity: 1; animation-timing-function: cubic-bezier(.2,.9,.3,1); } 66%,100% { transform: translate(-100%,-110px); opacity: 0; } }
+@keyframes motion-1-now-in  { 0% { transform: translate(100%,110px); opacity: 0; animation-timing-function: cubic-bezier(.2,.9,.3,1); } 66%,100% { transform: none; opacity: 1; } }
+@keyframes motion-1-prop-out { 0% { transform: none; opacity: 1; animation-timing-function: cubic-bezier(.4,0,1,1); } 25%,100% { transform: translate(-6px,-6px); opacity: 0; } }
+@keyframes motion-1-prop-in  { 0% { transform: translate(14px,14px); opacity: 0; animation-timing-function: cubic-bezier(.23,1,.32,1); } 42%,100% { transform: none; opacity: 1; } }
+
+/* 2 — reduce motion bypass */
+.demo-card-2__motion-target.now  { animation: motion-2-now 3s infinite; }
+.demo-card-2__motion-target.prop { animation: motion-2-prop 3s infinite; }
+@keyframes motion-2-now  { 0% { transform: translateY(-44px); opacity: 0; animation-timing-function: cubic-bezier(.2,.9,.3,1); } 66%,100% { transform: none; opacity: 1; } }
+@keyframes motion-2-prop { 0% { opacity: 0; animation-timing-function: linear; } 40%,100% { opacity: 1; } }
+
+/* 3 — Motion.spring overshoot */
+.demo-card-3__motion-target.now  { animation: motion-3-now 3s infinite; left: calc(100% - 84px); }
+.demo-card-3__motion-target.prop { animation: motion-3-prop 3s infinite; left: calc(100% - 84px); }
+@keyframes motion-3-now  { 0% { left: 20px; animation-timing-function: cubic-bezier(.3,1.35,.5,1); } 66%,100% { left: calc(100% - 84px); } }
+@keyframes motion-3-prop { 0% { left: 20px; animation-timing-function: cubic-bezier(.33,1,.68,1); } 66%,100% { left: calc(100% - 84px); } }
+
+/* 4 — curve and tempo scale */
+.demo-card-4__motion-target.now  { animation: motion-4-now 3s infinite; width: 75%; }
+.demo-card-4__motion-target.prop { animation: motion-4-prop 3s infinite; width: 75%; }
+@keyframes motion-4-now  { 0% { width: 35%; animation-timing-function: cubic-bezier(.42,0,.58,1); } 66%,100% { width: 75%; } }
+@keyframes motion-4-prop { 0% { width: 35%; animation-timing-function: cubic-bezier(.23,1,.32,1); } 60%,100% { width: 75%; } }
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="__motion-target"] { animation: none !important; }
+}
+</style>
+</head>
+<body>
+<main>
+<h1>Folio motion audit</h1>
+<p class="meta">pm-mac (AppKit + SwiftUI) · 2026-11-05 · 141 animation call sites in 34 files</p>
+
+<dl class="ctx">
+  <dt>Project type</dt><dd>Keyboard-heavy productivity tool: focus panel, menubar task, ⌥Tab switcher, quick bar, tiled canvas</dd>
+  <dt>Existing style</dt><dd>Short durations (0.12–0.4 s), mostly ease-out; a shared <code>Motion</code> helper with Reduce Motion, an overshoot curve, and phase-offset curves</dd>
+  <dt>Weighting</dt><dd>Primary Emil · Secondary Jakub · Jhey only for rare moments (immersive stage)</dd>
+  <dt>Platform mapping</dt><dd><code>prefers-reduced-motion</code> → <code>NSWorkspace.accessibilityDisplayShouldReduceMotion</code>. Opacity-only fades are allowed under Reduce Motion (Apple's own substitution); movement and scale are not</dd>
+</dl>
+
+<div class="tally">
+  <span class="pill"><span class="sev crit">● 2 Critical</span></span>
+  <span class="pill"><span class="sev imp">● 2 Important</span></span>
+  <span class="pill"><span class="sev opp">● 5 Opportunities</span></span>
+</div>
+
+<h2>Critical</h2>
+
+<div class="finding">
+  <div class="sev crit">Critical · 1</div>
+  <h3>Focus-move push ignores Reduce Motion and moves the full card distance both ways</h3>
+  <p class="where"><code>Focus/FocusPanelView.swift:343–357</code> · <code>Menubar/TaskMenuRow.swift:133–163</code> · <code>Task/TaskTransitions.swift</code> <code>cornerPush</code></p>
+  <ul>
+    <li>Runs on every classified change of the focused task (done, next, dive into subtask). Daily-frequent, often many times an hour.</li>
+    <li><code>.snappy(duration: 0.32)</code> is passed directly, not through <code>Motion.animation</code>. With Reduce Motion on, the card still slides diagonally.</li>
+    <li><code>cornerPush</code> builds from <code>.move(edge:)</code>: both the outgoing and incoming card travel their full size. The exit is as prominent as the entrance.</li>
+    <li><code>heroTransition</code> / <code>heroAnimation</code> are copied in two files; a fix to one misses the other.</li>
+  </ul>
+  <div class="demo">
+    <div class="lane"><div class="lane-label"><span>Now</span><span>0.32 s · full travel both ways</span></div>
+      <div class="stage"><div class="card a demo-card-1__motion-target now">Write release notes</div><div class="card b demo-card-1__motion-target now">Tag v2.4</div></div></div>
+    <div class="lane"><div class="lane-label"><span>Proposed</span><span>0.2 s in · 0.12 s out · 14 pt / 6 pt</span></div>
+      <div class="stage"><div class="card a demo-card-1__motion-target prop">Write release notes</div><div class="card b demo-card-1__motion-target prop">Tag v2.4</div></div></div>
+  </div>
+  <p class="note">Slowed for viewing; the two lanes keep their real duration ratio.</p>
+<pre>// Task/TaskTransitions.swift — offsets, not edges
+static func cornerPush(dx: CGFloat, dy: CGFloat) -> AnyTransition {
+    .asymmetric(
+        insertion: .opacity.combined(with: .offset(x: dx * 14, y: dy * 14)),
+        removal: .opacity.combined(with: .offset(x: -dx * 6, y: -dy * 6)))
+}
+// one shared definition, used by FocusPanelView and TaskMenuRow
+static func heroAnimation(for move: FocusMove) -> Animation? {
+    Motion.animation(move == .wipe ? .easeInOut(duration: 0.24) : .snappy(duration: 0.2))
+}</pre>
+  <p class="lens">Emil: frequent, so faster and smaller. Jakub: the exit should be quieter than the entrance. Reduce Motion: a crossfade keeps "the task changed" readable without travel.</p>
+</div>
+
+<div class="finding">
+  <div class="sev crit">Critical · 2</div>
+  <h3>About 25 sites skip the <code>Motion</code> helper; the ones that move break Reduce Motion</h3>
+  <p class="where">Movement sites that bypass it:</p>
+  <ul>
+    <li><code>Task/TaskViewHelpers.swift:87</code>: write-failure banner, <code>.move(edge: .top)</code></li>
+    <li><code>Focus/FocusPanelChrome.swift:230, 319</code>: panel resize and snap-to-anchor glide (window frame)</li>
+    <li><code>Canvas/CanvasSatelliteWindow.swift:1132</code>: tab chip travel (frame)</li>
+    <li><code>Canvas/CanvasSatelliteCompanion.swift:190, 205</code>: show/hide (the glide at 288 is guarded)</li>
+    <li><code>QuickBar/QuickBarView.swift:68, 482</code>: bar resize, ghost layout</li>
+    <li><code>Canvas/CanvasProjectNote.swift:572</code>: animated <code>scrollTo</code></li>
+    <li><code>Task/TaskEditors.swift:249–250</code>, <code>Focus/FocusPanelView.swift:92–94</code>: <code>.snappy</code> layout changes</li>
+  </ul>
+  <p>The doc comment in <code>Shared/Motion.swift</code> states the rule already: "a setting honoured in three animations out of five reads as a bug in the two." The opacity-only fades (HUDs, <code>ScreenDim</code>, tile alerts) can stay as they are.</p>
+  <div class="demo">
+    <div class="lane"><div class="lane-label"><span>Reduce Motion on, now</span><span>banner slides</span></div>
+      <div class="stage"><div class="banner demo-card-2__motion-target now">Couldn't save notes.md</div></div></div>
+    <div class="lane"><div class="lane-label"><span>Reduce Motion on, proposed</span><span>fade only</span></div>
+      <div class="stage"><div class="banner demo-card-2__motion-target prop">Couldn't save notes.md</div></div></div>
+  </div>
+<pre>// Shared/Motion.swift — a movement transition that degrades to a fade
+static func moving(_ t: AnyTransition) -> AnyTransition { isReduced ? .opacity : t }
+
+// TaskViewHelpers.swift:87
+.transition(Motion.moving(.move(edge: .top).combined(with: .opacity)))
+.animation(Motion.animation(.snappy), value: showing)</pre>
+  <p>To keep it from coming back, add a check in <code>scripts/</code> that fails on <code>withAnimation(</code>, <code>.animation(.</code>, or <code>context.duration = 0.</code> outside <code>Motion.swift</code> unless the line has a <code>// motion: fade-only</code> marker.</p>
+  <p class="lens">Accessibility is not weighted by lens. This is the main fix in the report.</p>
+</div>
+
+<h2>Important</h2>
+
+<div class="finding">
+  <div class="sev imp">Important · 3</div>
+  <h3><code>Motion.spring</code> overshoots about 4% on tile arrangement</h3>
+  <p class="where"><code>Shared/Motion.swift:33</code> · <code>Canvas/CanvasBoardView.swift:929, 962</code> · <code>Canvas/CanvasBoardView+Tiling.swift:269</code></p>
+  <ul>
+    <li><code>(0.3, 1.35, 0.5, 1)</code> peaks at 1.041 at 58% of the duration. On a 600 pt move, a tile passes its slot by about 24 pt and comes back.</li>
+    <li>The comment wants tiles to read as having "landed". The anti-checklist flags any bounce on a utility action, and tiling is one you do several times a day.</li>
+    <li>When the overshoot is wider than the gap between tiles, a tile can briefly overlap its neighbour.</li>
+  </ul>
+  <div class="demo">
+    <div class="lane"><div class="lane-label"><span>Now</span><span>Motion.spring</span></div>
+      <div class="stage"><div class="slot" style="left: calc(100% - 84px)"></div><div class="tile demo-card-3__motion-target now"></div></div></div>
+    <div class="lane"><div class="lane-label"><span>Proposed</span><span>Phase.leads (easeOutCubic)</span></div>
+      <div class="stage"><div class="slot" style="left: calc(100% - 84px)"></div><div class="tile demo-card-3__motion-target prop"></div></div></div>
+  </div>
+<pre>// Shared/Motion.swift — the landing comes from a hard deceleration, not a pass-and-return
+static var settle: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1) }</pre>
+  <p class="lens">Emil: no bounce on utility motion; the landing should come from deceleration. Jakub: <code>bounce: 0</code> is the production default. If you want to keep some overshoot, cap the peak near 1.01.</p>
+</div>
+
+<div class="finding">
+  <div class="sev imp">Important · 4</div>
+  <h3>No tempo or curve scale: 13 durations and three system curves</h3>
+  <p class="where">Durations in use: 0.12, 0.14, 0.15, 0.16, 0.18, 0.2, 0.22, 0.24, 0.25, 0.3, 0.32, 0.35, 0.4 s. Named system curves: <code>Focus/FocusPanelChrome.swift:232</code> (<code>.easeInEaseOut</code>), <code>CanvasSatelliteCompanion.swift:207</code>, <code>ProjectSplitViewController.swift:557</code> (<code>.easeIn</code>), and others</p>
+  <ul>
+    <li>Things of the same kind run at different speeds. Panel resize is 0.22 s, panel snap 0.24 s, quick-bar resize 0.12 s, sidebar collapse 0.3 s.</li>
+    <li><code>.easeInEaseOut</code> (0.42, 0, 0.58, 1) starts slowly. On a resize the user caused, the first ~60 ms feel like lag.</li>
+    <li><code>Motion</code> already has carefully chosen custom curves (<code>Phase</code>). The remaining sites predate them.</li>
+  </ul>
+  <div class="demo">
+    <div class="lane"><div class="lane-label"><span>Now</span><span>0.22 s · .easeInEaseOut</span></div>
+      <div class="stage"><div class="panel demo-card-4__motion-target now"></div></div></div>
+    <div class="lane"><div class="lane-label"><span>Proposed</span><span>0.2 s · Motion.Curve.out</span></div>
+      <div class="stage"><div class="panel demo-card-4__motion-target prop"></div></div></div>
+  </div>
+<pre>enum Tempo {                       // Shared/Motion.swift
+    static let quick = 0.12        // hover, chip, ghost, small fades
+    static let standard = 0.2      // panel resize, snap, push-in, banners
+    static let travel = 0.3        // board crossings, sidebar, multi-tile layout
+}
+enum Curve {
+    static let out = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)   // things you caused
+    static let inOut = CAMediaTimingFunction(controlPoints: 0.77, 0, 0.175, 1) // on-screen state changes
+    static let exit = CAMediaTimingFunction(controlPoints: 0.4, 0, 1, 1)       // leaving; pair with ≤ 0.7× enter
+}</pre>
+  <p class="lens">Emil: custom curves always, and the same speed for the same kind of thing. Jakub: a scale is what lets anyone tune the whole app's feel later.</p>
+</div>
+
+<h2>Through Emil's lens (primary)</h2>
+<p><b>Should this animate at all?</b></p>
+<ul>
+  <li>Findings 1, 3, 4: frequent motion is too long, bounces, or starts slowly.</li>
+  <li><span class="sev opp">Opportunity</span> Focus-mode sidebar collapse (<code>ProjectWindowController.swift:978</code>, 0.3 s). Focus mode is toggled from the keyboard. Cut it to <code>Tempo.standard</code>, or snap it when the shortcut toggles it and animate only from a click.</li>
+</ul>
+<ul class="good">
+  <li>The ⌥Tab switcher sets <code>alphaValue = 1</code> with no fade (<code>SwitcherController.swift:166</code>). Keyboard-initiated, so instant is correct.</li>
+  <li>Tiled-workspace drags show a proxy and reflow once on drop, with no live reflow.</li>
+  <li><code>easeTopClearance</code> steps a layout value on a timer, which the skill normally flags. The comment explains why: it keeps one clock with the sidebar's slide so the tiles can't flick between two layouts. Keep it, and it already respects Reduce Motion.</li>
+  <li>Quick-bar resize at 0.12 s is already in Emil's range.</li>
+</ul>
+<p class="lens">Through Emil's lens: the system is restrained and its reasons are written down. The work left is making the most frequent motion (the focus push) faster and smaller, and taking the bounce out of tiling.</p>
+
+<h2>Through Jakub's lens (secondary)</h2>
+<p><b>Is this subtle and polished enough to ship?</b></p>
+<ul>
+  <li>Finding 1: the exit matches the entrance.</li>
+  <li><span class="sev opp">Opportunity</span> HUD hints fade out more slowly than they fade in: <code>CanvasPaneController.swift:2130–2133</code> (0.2 s in, 0.4 s out) and <code>CanvasPageKeys.swift:338–351</code> (0.12 s in, 0.25 s out). Use 0.15 s in and 0.12 s out with <code>Curve.exit</code>. If the 0.4 s was meant to make the hint linger, hold it longer instead of fading it slowly.</li>
+  <li><span class="sev opp">Opportunity</span> The panel resize at <code>FocusPanelChrome.swift:230</code> invalidates the shadow only in the completion handler, so the stale outline its own comment describes probably shows for the whole 0.22 s (not checked live). Invalidate it at the start too, or crossfade the shadow.</li>
+</ul>
+<ul class="good">
+  <li>The immersive stage leaves faster than it arrives (scrim 0.20 s in, 0.10 s out) and enters with scale 1.05 plus a 15 pt blur, which is the polished enter recipe.</li>
+  <li>An edit uses a feathered wipe; a navigation uses a directional push. Motion tells you what kind of change happened.</li>
+  <li><code>Motion.Phase</code>, a lead/trail offset so zoom and placement trace a curve, is production-grade work.</li>
+  <li><code>CanvasTileControls</code> uses a damped spring (response 0.24, damping 0.88) and checks Reduce Motion.</li>
+</ul>
+<p class="lens">Through Jakub's lens: the craft is high where it has been designed (crossings, immersive stage, wipe vs push). The rough spots are older sites that never moved to the shared vocabulary.</p>
+
+<h2>Through Jhey's lens (selective)</h2>
+<p><b>What could the rare moments become?</b></p>
+<ul>
+  <li><span class="sev opp">Opportunity</span> Finishing the last open task of a project happens about once per project. It's the one place a small moment fits: the project's dock mark ring closes, or the focus card settles with a brief tint of the project colour. Fade-only under Reduce Motion, and skipped when the project was completed from the CLI.</li>
+  <li><span class="sev opp">Opportunity</span> The immersive stage is rare and chosen deliberately, so it can take 0.3 s instead of 0.2 s, more than the everyday UI gets.</li>
+</ul>
+<p class="lens">Through Jhey's lens: Folio is right to keep delight out of the workflow. One or two rare, earned moments would give it character without slowing down anything you do a hundred times a day.</p>
+
+<h2>Suggested order</h2>
+<ul>
+  <li>Add <code>Motion.moving</code>, <code>Tempo</code>, and <code>Curve</code>.</li>
+  <li>Fix the focus push (finding 1) in one shared file.</li>
+  <li>Move the ~25 bypassing sites onto <code>Motion</code> and add the script check.</li>
+  <li>Swap <code>Motion.spring</code> for <code>settle</code> on tiling, then judge it against the live board.</li>
+</ul>
+</main>
+</body>
+</html>

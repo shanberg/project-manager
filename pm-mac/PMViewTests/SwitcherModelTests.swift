@@ -96,3 +96,49 @@ final class SwitcherInkTests: XCTestCase {
         XCTAssertTrue(SwitcherInk.onFillIsDark(.white))
     }
 }
+
+/// The switcher's New Space card. docs/spaces.md § Switcher.
+final class SwitcherNewSpaceTests: XCTestCase {
+    private func card(_ key: String) -> SwitcherModel.Card { SwitcherModel.Card(key: key, title: key) }
+
+    func testNewSpaceComesLastAndNotWithNothingToSwitchBetween() {
+        XCTAssertEqual(SwitcherModel.withNewSpace([]), [], "no panel of only New Space")
+        let cards = SwitcherModel.withNewSpace([card("a"), card("b")])
+        XCTAssertEqual(cards.map(\.key), ["a", "b", "new-space"])
+        XCTAssertTrue(cards.last?.isNewSpace == true)
+    }
+
+    func testWithOneWindowTheFirstPressLandsOnItNotOnNewSpace() {
+        let model = SwitcherModel(cards: SwitcherModel.withNewSpace([card("a")]))
+        XCTAssertEqual(model.selectedCard?.key, "a", "a quick tap must not make a space")
+    }
+
+    func testWithTwoWindowsTheFirstPressLandsOnTheSecond() {
+        var model = SwitcherModel(cards: SwitcherModel.withNewSpace([card("a"), card("b")]))
+        XCTAssertEqual(model.selectedCard?.key, "b")
+        model.move(by: 1)
+        XCTAssertEqual(model.selectedCard?.key, "new-space")
+    }
+}
+
+/// Spaces ▸ Next / Previous Space and `@`'s matching. docs/spaces.md § Spaces menu, § Quick bar.
+final class SpaceOrderTests: XCTestCase {
+    func testStepWrapsAndStartsFromAnEndOutsideASpace() {
+        let ids = ["a", "b", "c"]
+        XCTAssertEqual(SpaceOrder.step(from: "a", by: 1, in: ids), "b")
+        XCTAssertEqual(SpaceOrder.step(from: "c", by: 1, in: ids), "a")
+        XCTAssertEqual(SpaceOrder.step(from: "a", by: -1, in: ids), "c")
+        XCTAssertEqual(SpaceOrder.step(from: nil, by: 1, in: ids), "a")
+        XCTAssertEqual(SpaceOrder.step(from: nil, by: -1, in: ids), "c")
+        XCTAssertEqual(SpaceOrder.step(from: "gone", by: 1, in: ids), "a")
+        XCTAssertNil(SpaceOrder.step(from: nil, by: 1, in: []))
+    }
+
+    func testMatchingPutsTitleStartsBeforeWordStarts() {
+        let spaces = [(id: "1", title: "Weekend Reading"), (id: "2", title: "Research"), (id: "3", title: "Music")]
+        XCTAssertEqual(SpaceOrder.matching(spaces, query: "re").map(\.id), ["2", "1"])
+        XCTAssertEqual(SpaceOrder.matching(spaces, query: "MU").map(\.id), ["3"])
+        XCTAssertEqual(SpaceOrder.matching(spaces, query: "xyz").map(\.id), [])
+        XCTAssertEqual(SpaceOrder.matching(spaces, query: "").count, 3)
+    }
+}

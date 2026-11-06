@@ -1,0 +1,1002 @@
+<title>Folio Spaces Motion</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a mocked space window (Arc-style sidebar + one tile) with a row of triggers under it; controls in a column to the right, stacked below on a phone. Visual language copied from folio-space-frame.html. */
+:root {
+  --page: #eceef2; --panel: #ffffff; --ink: #1d1f24; --ink-2: #5d6270; --ink-3: #9196a1;
+  --rule: #d9dce3; --accent: #2f6fe4; --chip: #eef1f6;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --wall-a: #9fb4d6; --wall-b: #d9c6d8; --wall-c: #f1dcc4;
+  --glass-shadow: 0 10px 34px rgba(20, 24, 40, 0.22), 0 1px 3px rgba(20, 24, 40, 0.14);
+  --m-ink: #1c1d21; --m-ink-2: rgba(28, 29, 33, 0.62); --m-ink-3: rgba(28, 29, 33, 0.38);
+  --m-rule: rgba(28, 29, 33, 0.1); --m-hover: rgba(28, 29, 33, 0.06); --m-sel: rgba(255, 255, 255, 0.92);
+  --m-field: rgba(255, 255, 255, 0.6); --win: rgba(255, 255, 255, 0.95); --pagebg: #ffffff; --line: #e7e8ec;
+  --scrim: rgba(0, 0, 0, 0.28); --c: #2a9d8f;
+  --now: #b7791f; --prop: #2f855a;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; --now: #f0b24a; --prop: #5fd08f; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; --now: #f0b24a; --prop: #5fd08f; color-scheme: dark;
+}
+.mac-dark {
+  --wall-a: #1d2944; --wall-b: #3a2742; --wall-c: #4a3326;
+  --glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --m-ink: #f2f2f4; --m-ink-2: rgba(242, 242, 244, 0.64); --m-ink-3: rgba(242, 242, 244, 0.38);
+  --m-rule: rgba(255, 255, 255, 0.1); --m-hover: rgba(255, 255, 255, 0.07); --m-sel: rgba(255, 255, 255, 0.14);
+  --m-field: rgba(0, 0, 0, 0.25); --win: rgba(34, 35, 40, 0.96); --pagebg: #1f2025; --line: #2e3036; --scrim: rgba(0, 0, 0, 0.45);
+}
+body { background: var(--page); color: var(--ink); font-family: var(--ui); }
+.wrap { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 20px; padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1380px; margin: 0 auto; }
+@media (max-width: 940px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; text-wrap: balance; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 12px; max-width: 82ch; line-height: 1.45; }
+kbd { font: 11px var(--mono); padding: 0 4px; border-radius: 4px; border: 1px solid var(--rule); background: var(--chip); color: var(--ink); }
+
+.stage { position: relative; border-radius: 12px; overflow: hidden; height: 600px; color: var(--m-ink); outline: none;
+  background: radial-gradient(120% 90% at 10% 0%, var(--wall-a), transparent 60%), radial-gradient(90% 80% at 100% 30%, var(--wall-b), transparent 65%), linear-gradient(160deg, var(--wall-b), var(--wall-c)); }
+.stage:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.win { position: absolute; inset: 18px; border-radius: 14px; overflow: hidden; box-shadow: var(--glass-shadow); display: flex;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 20%, var(--win)), color-mix(in srgb, var(--c) 9%, var(--win))); }
+
+/* sidebar */
+.side { width: 232px; flex: none; display: flex; flex-direction: column; min-height: 0; padding: 8px; }
+.lights { display: flex; gap: 7px; align-items: center; height: 22px; padding-left: 4px; }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--m-rule); flex: none; }
+.url { margin: 6px 0 8px; height: 30px; border-radius: 8px; background: var(--m-field); display: flex; align-items: center; gap: 7px; padding: 0 9px; font-size: 12px; color: var(--m-ink-2); }
+.url b { color: var(--m-ink); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 6px; }
+.fav { height: 38px; border-radius: 9px; background: var(--m-hover); display: grid; place-items: center; border: 0; cursor: pointer; padding: 0; }
+.fav.on { background: var(--m-sel); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.list { overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 6px; }
+.row { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px 0 8px; border-radius: 8px; font-size: 12.5px; cursor: pointer; position: relative; user-select: none; overflow: hidden; margin-bottom: 2px; }
+.row:hover { background: var(--m-hover); }
+.row.on { background: var(--m-sel); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row.dim .t { color: var(--m-ink-2); }
+.row.child { padding-left: 24px; }
+.row .x { width: 18px; height: 18px; border: 0; background: none; border-radius: 50%; display: grid; place-items: center; color: var(--m-ink-2); cursor: pointer; font-size: 11px; opacity: 0; padding: 0; }
+.row:hover .x, .row.on .x { opacity: 1; }
+.row .x:hover { background: var(--m-hover); }
+.row .spk { font-size: 10px; color: var(--m-ink-2); }
+.caret { width: 10px; color: var(--m-ink-3); font-size: 9px; display: inline-block; }
+.prop-folder .caret { transition: transform calc(var(--k) * 150ms) cubic-bezier(.23, 1, .32, 1); }
+.caret.open { transform: rotate(90deg); }
+.gl { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center; color: #fff; font-size: 9.5px; font-weight: 700; background: var(--f); }
+.fav .gl, .flying.gl { width: 20px; height: 20px; border-radius: 5px; font-size: 11px; }
+.rule { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; margin: 4px 0; }
+.rule i { flex: 1; height: 1px; background: var(--m-rule); }
+.clear { border: 0; background: none; font: 500 11px var(--ui); color: var(--m-ink-2); cursor: pointer; padding: 0 2px; display: none; }
+.side:hover .clear { display: inline; }
+.prop-reveal .clear { display: inline; opacity: 0; transition: opacity calc(var(--k) * 120ms) linear; pointer-events: none; }
+.prop-reveal .side:hover .clear { opacity: 1; pointer-events: auto; }
+.player { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 10px; background: var(--m-hover); margin: 6px 0; font-size: 12px; }
+.player .tt { flex: 1; min-width: 0; }
+.player .tt b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player .tt span { font-size: 10.5px; color: var(--m-ink-2); }
+.pb { border: 0; background: none; color: var(--m-ink-2); cursor: pointer; width: 22px; height: 22px; border-radius: 6px; font-size: 11px; padding: 0; }
+.pb:hover { background: var(--m-hover); }
+.foot { display: flex; align-items: center; gap: 7px; padding: 6px 8px 0; font-size: 12px; font-weight: 600; color: var(--m-ink-2); }
+.foot .sw { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.foot .grow { flex: 1; }
+.dl { position: relative; width: 22px; height: 22px; display: grid; place-items: center; font-size: 13px; }
+.dl .d { position: absolute; top: 1px; right: 1px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+/* content */
+.content { flex: 1; min-width: 0; padding: 6px 6px 6px 0; display: flex; }
+.tile { flex: 1; min-width: 0; border-radius: 10px; overflow: hidden; background: var(--pagebg); box-shadow: 0 0 0 1px var(--m-rule), 0 1px 3px rgba(0,0,0,.08); position: relative; }
+.pg { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--pagebg); }
+.pg .nav { height: 34px; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--line); font-size: 11.5px; color: var(--m-ink-2); flex: none; }
+.pg .nav b { color: var(--m-ink); }
+.pg .hero { height: 30%; min-height: 60px; background: var(--f); opacity: .85; flex: none; }
+.pg .b { padding: 14px 16px; }
+.pg h2 { font-size: 17px; margin: 0 0 10px; }
+.ln { height: 7px; border-radius: 4px; background: var(--line); margin: 0 0 8px; }
+.lk { color: var(--accent); text-decoration: underline; cursor: pointer; font-size: 12.5px; display: inline-block; margin: 4px 0 10px; }
+
+/* peek */
+.peek { position: absolute; inset: 0; z-index: 5; }
+.peek .scrim { position: absolute; inset: 0; background: var(--scrim); }
+.peek .panel { position: absolute; left: 12%; right: 12%; top: 7%; bottom: 7%; border-radius: 12px; overflow: hidden; background: var(--pagebg); box-shadow: 0 0 0 .5px var(--m-rule), 0 20px 50px rgba(0,0,0,.3); display: flex; flex-direction: column; }
+.peek .bar { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); font-size: 12px; flex: none; }
+.peek .bar b { flex: 1; font-weight: 600; }
+.peek .bar button { border: 0; border-radius: 6px; background: var(--m-hover); color: var(--m-ink); font: 11.5px var(--ui); padding: 3px 8px; cursor: pointer; }
+.peek .pbody { position: relative; flex: 1; }
+.flying { position: absolute; z-index: 9; pointer-events: none; }
+
+/* triggers */
+.triggers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.triggers button, .copy { border: 1px solid var(--rule); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 6px 10px; font: 12px var(--ui); cursor: pointer; }
+.triggers button:hover, .copy:hover { border-color: var(--ink-3); }
+.triggers button:focus-visible, .copy:focus-visible, .seg button:focus-visible, .pb:focus-visible, .x:focus-visible, .fav:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.triggers kbd { margin-left: 4px; }
+.keys { font-size: 11.5px; color: var(--ink-2); margin-top: 8px; }
+
+/* controls */
+.controls { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cg { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.cgh { display: flex; align-items: baseline; gap: 6px; }
+.cgl { font-size: 12.5px; font-weight: 600; flex: 1; }
+.freq { font-size: 10.5px; font-weight: 600; letter-spacing: .03em; border-radius: 999px; padding: 1px 7px; background: var(--chip); color: var(--ink-2); white-space: nowrap; }
+.why { font-size: 11.5px; color: var(--ink-2); line-height: 1.4; margin: 0; }
+.seg { display: inline-flex; flex-wrap: wrap; background: var(--chip); border-radius: 8px; padding: 2px; gap: 2px; }
+.seg button { border: 0; background: none; border-radius: 6px; padding: 3px 9px; font: 11.5px var(--ui); color: var(--ink-2); cursor: pointer; }
+.seg button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.1); }
+.seg button.on[data-v="now"] { color: var(--now); }
+.seg button.on[data-v="proposed"], .seg button.on[data-v="instant"] { color: var(--prop); }
+.toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; }
+.toggles label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+textarea { width: 100%; box-sizing: border-box; min-height: 54px; border: 1px solid var(--rule); border-radius: 8px; background: var(--page); color: var(--ink); font: 12px var(--ui); padding: 6px 8px; resize: vertical; }
+.summary { font: 11px/1.5 var(--mono); background: var(--chip); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; color: var(--ink); margin: 0; overflow-x: auto; }
+/* round 2: the sidebar folding, the floating sidebar, two tiles with grips, the capsule */
+.side { box-sizing: border-box; overflow: hidden; }
+.side > * { min-width: 216px; }
+.side.folded { width: 0; padding: 0; }
+.content.folded { padding-left: 6px; }
+#peekside { position: absolute; left: 6px; top: 6px; bottom: 6px; width: 232px; z-index: 4; border-radius: 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 20%, var(--win)), color-mix(in srgb, var(--c) 9%, var(--win)));
+  box-shadow: 0 0 0 .5px var(--m-rule), 0 12px 32px rgba(0,0,0,.22); }
+#edge { position: absolute; left: 0; top: 0; bottom: 0; width: 8px; z-index: 3; display: none; }
+.win.folded #edge { display: block; }
+.tiles { flex: 1; min-width: 0; display: flex; gap: 6px; }
+.tw { position: relative; flex: 1 1 0; min-width: 0; display: flex; }
+.tw.narrow { flex: 0 0 34%; }
+.tw.gone { flex-basis: 0%; margin-left: -6px; opacity: 0; pointer-events: none; }
+.anim-max .tw { transition: flex-basis calc(var(--k) * 300ms) cubic-bezier(.16, 1, .3, 1), margin calc(var(--k) * 300ms) cubic-bezier(.16, 1, .3, 1), opacity calc(var(--k) * 200ms) linear; }
+.tw > .tile { flex: 1; }
+.load { position: absolute; left: 0; top: 0; height: 2px; background: var(--accent); z-index: 2; }
+.grip { position: absolute; left: 50%; top: -6px; transform: translateX(-50%); width: 46px; height: 14px; z-index: 3; cursor: grab; display: grid; place-items: center; border: 0; background: none; padding: 0; }
+.grip i { width: 34px; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--m-ink) 34%, transparent); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.grip:hover i, .grip:focus-visible i { width: 42px; background: color-mix(in srgb, var(--m-ink) 55%, transparent); }
+.grip.open i { width: 42px; background: color-mix(in srgb, var(--accent) 80%, transparent); }
+.grip:focus-visible { outline: 2px solid var(--accent); border-radius: 6px; }
+.capw { position: absolute; z-index: 6; height: 32px; filter: drop-shadow(0 3px 7px rgba(0,0,0,.2)); }
+.cap { height: 32px; box-sizing: border-box; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 13px; overflow: hidden; white-space: nowrap;
+  background: color-mix(in srgb, var(--win) 88%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: inset 0 0 0 .5px var(--m-rule); color: var(--m-ink); }
+.cb { width: 26px; height: 26px; border: 0; border-radius: 9px; background: none; color: var(--m-ink); display: grid; place-items: center; cursor: pointer; padding: 0; flex: none; }
+.cb:hover { background: var(--m-hover); }
+.cb:active { background: color-mix(in srgb, var(--m-ink) 14%, transparent); }
+.cb:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cb .ic { display: grid; place-items: center; width: 14px; height: 14px; }
+.cb svg { width: 14px; height: 14px; display: block; }
+.cb.on { color: var(--accent); }
+.cb.site { width: auto; padding: 0 7px; font: 500 12px var(--ui); max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.cap input { width: 240px; height: 22px; box-sizing: border-box; border: 0; border-radius: 7px; padding: 0 7px; background: color-mix(in srgb, var(--m-ink) 7%, transparent); color: var(--m-ink); font: 12px var(--ui); outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); flex: none; }
+.cap .sep { width: 1px; height: 16px; background: var(--m-rule); margin: 0 2px; flex: none; }
+.press-scale .cb:active .ic { transform: scale(.92); }
+.press-nudge .cb[data-act="back"]:active .ic { transform: translateX(-2px); }
+.press-nudge .cb[data-act="fwd"]:active .ic { transform: translateX(2px); }
+.press-scale .cb .ic, .press-nudge .cb .ic { transition: transform calc(var(--k) * 90ms) cubic-bezier(.23, 1, .32, 1); }
+.rm .cb .ic { transition: none !important; transform: none !important; }
+.rm .anim-max .tw, .rm.anim-max .tw { transition: none; }
+@media (prefers-reduced-motion: reduce) { .prop-folder .caret, .prop-reveal .clear, .anim-max .tw, .cb .ic { transition: none; } .cb:active .ic { transform: none !important; } }
+details.cg > summary { cursor: pointer; font-size: 12.5px; font-weight: 600; }
+details.cg[open] > summary { margin-bottom: 4px; }
+.rnd { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); margin: 4px 0 -4px; }
+</style>
+
+<div class="wrap">
+  <div style="min-width: 0">
+    <h1>Spaces browser motion</h1>
+    <p class="sub">A space window, as built. Each interaction can be set to <b>Now</b> (what the app does) or <b>Proposed</b>. Click rows, close them with ×, fold the Trip folder, hover the sidebar for Clear, ⇧-click the page's link. Slow motion runs everything at 4× length.</p>
+    <div class="stage" id="stage" tabindex="0" aria-label="Mocked space window">
+      <div class="win" id="win">
+        <div class="side" id="side"></div>
+        <div class="content" id="content"><div class="tiles" id="tiles"></div></div>
+        <div id="edge"></div>
+        <div class="side" id="peekside" hidden></div>
+      </div>
+    </div>
+    <div class="triggers" id="triggers">
+      <button id="t-fold">Fold the sidebar<kbd>⌘S</kbd></button>
+      <button id="t-next">Next card<kbd>⌃⇥</kbd></button>
+      <button id="t-new">New Tab<kbd>⌘T</kbd></button>
+      <button id="t-music">Play music, then switch away</button>
+      <button id="t-peek">⇧-click a link</button>
+      <button id="t-fav">Favourite the front card</button>
+      <button id="t-clear">Clear Today</button>
+      <button id="t-dl">Finish a download</button>
+      <button id="t-reset">Reset</button>
+    </div>
+    <p class="keys">Rest on a tile's grip (the bar at its top centre) or click it for the capsule. With the sidebar folded, move to the window's left edge. With the window focused: <kbd>S</kbd> folds the sidebar, <kbd>1</kbd>–<kbd>9</kbd> as ⌘1–⌘9, <kbd>N</kbd> next card, <kbd>T</kbd> new tab, <kbd>Esc</kbd> closes the preview, <kbd>Return</kbd> opens it as a card.</p>
+  </div>
+
+  <aside class="controls" id="controls" aria-label="Mock controls"></aside>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const OPTIONS = [
+  { key: 'switch', label: 'Switching cards', freq: '100s / day', choices: [['now', 'Now: flies in'], ['instant', 'Instant'], ['fade', '80ms fade']],
+    def: 'instant', why: 'Row click, ⌃⇥, ⌘1–9, mini player. Now the card flies from its board spot into the tile over 0.3s (replaceInTiling → setLayout animated). A browser tab switch is the most frequent thing you do; Arc and Safari cut.' },
+  { key: 'list', label: 'Rows coming and going', freq: 'daily', choices: [['now', 'Now: pop'], ['proposed', 'Proposed']],
+    def: 'proposed', why: 'Close (×), Clear Today, archive, Move to Space, ⌘T. Now rows vanish and the list jumps under the pointer. Proposed: fade, then the gap closes (0.22s); new rows open in (0.2s).' },
+  { key: 'folder', label: 'Folders', freq: 'daily', choices: [['now', 'Now: snap'], ['proposed', 'Proposed']],
+    def: 'now', why: 'Now the chevron and rows snap. Proposed: chevron turns and rows open or close as Finder’s outline does (0.15–0.18s).' },
+  { key: 'player', label: 'Mini player', freq: 'daily', choices: [['now', 'Now: pop'], ['proposed', 'Proposed']],
+    def: 'proposed', why: 'It appears when sound leaves the screen, which you didn’t do on purpose, so it should be noticed. Proposed: rises 8pt and fades in (0.2s); leaves quicker (0.12s).' },
+  { key: 'peek', label: 'Link preview (⇧-click)', freq: 'occasional', choices: [['now', 'Now'], ['proposed', 'Proposed']],
+    def: 'proposed', why: 'Now: everything fades in over 0.15s, then vanishes on close; Open as Card replaces the tile with nothing to connect the two. Proposed: panel grows from 97% (0.2s), fades out on close (0.12s), and Open as Card moves the panel onto the tile (0.25s).' },
+  { key: 'fav', label: 'Add to Favourites', freq: 'occasional', choices: [['now', 'Now: jump'], ['proposed', 'Proposed']],
+    def: 'proposed', why: 'Now the row disappears and an icon appears in the grid. Proposed: the icon moves from the row into its new slot (0.25s), so you see where it went.' },
+  { key: 'reveal', label: 'Clear and the downloads dot', freq: 'many / day', choices: [['now', 'Now: pop'], ['proposed', 'Proposed']],
+    def: 'proposed', why: 'Clear appears every time the pointer enters the sidebar. Proposed: a 0.12s fade, so it doesn’t flicker; the finished-download dot scales in.' },
+].map(o => Object.assign(o, { round: 1 })).concat([
+  { key: 'fold', label: 'Folding the sidebar (⌘S)', freq: 'many / day, keyboard', choices: [['now', 'Now: 0.22s'], ['quick', 'Quicker: 0.18s'], ['instant', 'Instant']],
+    def: 'quick', why: 'Now the pane slides over 0.22s on AppKit’s default ease-in-out (slow to start), the tiles re-fitting every frame. It’s keyboard-driven and frequent: an ease-out at 0.18s starts at once; instant is the strict reading.' },
+  { key: 'edge', label: 'Floating sidebar at the edge', freq: 'many / day', choices: [['now', 'Now: full slide'], ['proposed', 'Short slide + fade']],
+    def: 'proposed', why: 'With the sidebar folded, the left edge brings it over the page. Now it slides its whole width (0.2s) the moment the pointer arrives, so brushing the edge flashes it. Proposed: it waits 80ms, comes in from 24pt with a fade (0.18s), leaves the same way (0.12s).' },
+  { key: 'capOpen', label: 'Capsule opening', freq: 'many / day', choices: [['now', 'Now: from its middle'], ['grip', 'Out of the grip'], ['drop', 'Drop + fade']],
+    def: 'grip', why: 'Now it scales up from 60% × 70% at its own top centre on a spring. Clamped in a narrow tile (the right one), that centre isn’t under the grip. Out of the grip: it starts as the grip’s pill, widens out of it, and the icons fade in behind. Drop: 4pt down and a fade, no scale.' },
+  { key: 'capClose', label: 'Capsule closing', freq: 'many / day', choices: [['now', 'Now: vanishes'], ['proposed', 'Folds back']],
+    def: 'proposed', why: 'Now it’s removed in one frame, 0.45s after the pointer leaves. Proposed: the opening reversed, quicker (0.12s), so it goes back where it came from.' },
+  { key: 'capWidth', label: 'Capsule editing the address', freq: 'daily', choices: [['now', 'Now: jumps'], ['proposed', 'Widens']],
+    def: 'proposed', why: 'Clicking the site swaps it for a 260pt field: the capsule changes width and re-centres in one frame. Proposed: it widens over 0.18s, and narrows back on Return or Esc.' },
+  { key: 'iconToggle', label: 'Pin and Favourite icons', freq: 'occasional', choices: [['now', 'Now: swap'], ['replace', 'Replace'], ['bounce', 'Replace + bounce']],
+    def: 'replace', why: 'Now the outline swaps for the filled symbol in one frame. Replace is SF Symbols’ own (.contentTransition(.symbolEffect(.replace))): the old shrinks out, the new grows in. Bounce adds one small bounce when it turns on.' },
+  { key: 'iconMax', label: 'Maximize and Restore icon', freq: 'occasional', choices: [['now', 'Now: swap'], ['replace', 'Replace']],
+    def: 'replace', why: 'Needs Two tiles. The arrows point out to maximize, in to restore; Replace makes the change of meaning visible as the tiles move.' },
+  { key: 'iconReload', label: 'Reload', freq: 'many / day', choices: [['now', 'Now: nothing'], ['spin', 'Turns once'], ['stop', 'Stop while loading']],
+    def: 'stop', why: 'Now nothing in the capsule says the page is reloading. Turns once: one 360° turn on the press. Stop while loading: it becomes ✕ until the load ends, as Safari’s does. That one says something; the turn only decorates.' },
+  { key: 'iconPress', label: 'Back and Forward press', freq: '100s / day', choices: [['now', 'Now: fill'], ['nudge', 'Nudge 2pt'], ['scale', 'Press scale']],
+    def: 'now', why: 'Now the button’s fill darkens while held, as macOS buttons do. Nudge moves the chevron 2pt its own way while held; Press scale shrinks it to 92%. This one is pressed constantly, so quieter is better.' },
+].map(o => Object.assign(o, { round: 2 })));
+const DEFAULT = Object.fromEntries(OPTIONS.map(o => [o.key, o.def]));
+let S = Object.assign({}, DEFAULT, { slow: false, reduce: false, dark: false, two: true, note: '' });
+try { Object.assign(S, JSON.parse(localStorage.getItem('spaces-motion-mock') || '{}')); } catch (e) {}
+function save() { try { localStorage.setItem('spaces-motion-mock', JSON.stringify(S)); } catch (e) {} }
+
+const SEED = () => ({
+  cards: [
+    { id: 'mail', t: 'Inbox', h: 'mail.google.com', f: '#d9483b', fav: true },
+    { id: 'cal', t: 'Calendar', h: 'calendar.google.com', f: '#3b7bd9', fav: true },
+    { id: 'linear', t: 'Linear: FOL-412', h: 'linear.app', f: '#5e6ad2', pin: true },
+    { id: 'gh', t: 'Pull request #881', h: 'github.com', f: '#24292f', pin: true },
+    { id: 'air', t: 'Lisbon apartment', h: 'airbnb.com', f: '#ff5a5f', pin: true, folder: 'trip' },
+    { id: 'seat', t: 'Seat map, TP 208', h: 'seatguru.com', f: '#2f9a6a', pin: true, folder: 'trip' },
+    { id: 'nyt', t: 'The quiet revival of trams', h: 'nytimes.com', f: '#3a3a3a' },
+    { id: 'hn', t: 'Hacker News', h: 'news.ycombinator.com', f: '#ff6600' },
+    { id: 'music', t: 'Late Night Tales', h: 'music.apple.com', f: '#fa2d48' },
+    { id: 'swift', t: 'Swift Forums: Observation', h: 'forums.swift.org', f: '#f05138' },
+    { id: 'mdn', t: 'CSS linear() easing', h: 'developer.mozilla.org', f: '#1b1b1b' },
+  ],
+  front: 'nyt', folderOpen: true, playing: null, player: null, dlDot: false, nextNew: 1, folded: false, maximized: false, side2: 'swift',
+});
+let M = SEED();
+
+const reduced = () => S.reduce || matchMedia('(prefers-reduced-motion: reduce)').matches;
+const k = () => (S.slow ? 4 : 1);
+const OUT = 'cubic-bezier(.23, 1, .32, 1)', EXIT = 'cubic-bezier(.4, 0, 1, 1)', SETTLE = 'cubic-bezier(.16, 1, .3, 1)';
+// `done` settles on the animation's end, or shortly after it should have ended: a hidden page never
+// finishes an animation, and an element left waiting for that stays on screen.
+const run = (el, frames, ms, easing = OUT) => {
+  const a = el.animate(frames, { duration: ms * k(), easing, fill: 'both' });
+  a.done = Promise.race([a.finished.catch(() => {}), new Promise(r => setTimeout(r, ms * k() + 150))]).then(() => a);
+  return a;
+};
+const card = id => M.cards.find(c => c.id === id);
+const activeSide = () => (M.folded ? $('peekside') : $('side'));
+const q = sel => activeSide().querySelector(sel);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const glyph = c => `<span class="gl" style="--f:${c.f}" data-g="${c.id}">${esc(c.t[0])}</span>`;
+
+function order() {
+  const favs = M.cards.filter(c => c.fav);
+  const pins = M.cards.filter(c => c.pin && !c.fav);
+  const today = M.cards.filter(c => !c.pin && !c.fav);
+  return { favs, pins, today, all: [...favs, ...pins, ...today] };
+}
+
+// MARK: Sidebar
+
+function rowHTML(c, child) {
+  const spk = M.playing === c.id ? '<span class="spk" aria-label="Playing">🔊</span>' : '';
+  return `<div class="row${c.id === M.front ? ' on' : ''}${child ? ' child' : ''}" data-row="${c.id}" tabindex="0" role="button">
+    ${glyph(c)}<span class="t">${esc(c.t)}</span>${spk}<button class="x" data-close="${c.id}" aria-label="Close ${esc(c.t)}">✕</button></div>`;
+}
+
+function renderSide() {
+  const { favs, pins, today } = order();
+  const loose = pins.filter(c => !c.folder), trip = pins.filter(c => c.folder === 'trip');
+  const front = card(M.front);
+  const player = M.player && card(M.player);
+  (M.folded ? $('side') : $('peekside')).innerHTML = '';
+  activeSide().innerHTML = `
+    <div class="lights"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div class="url">🔒 <b>${esc(front ? front.h : 'Search or enter address')}</b></div>
+    <div class="favs">${favs.map(c => `<button class="fav${c.id === M.front ? ' on' : ''}" data-row="${c.id}" data-favslot="${c.id}" aria-label="${esc(c.t)}">${glyph(c)}</button>`).join('')}</div>
+    <div class="list" id="list">
+      ${loose.map(c => rowHTML(c)).join('')}
+      ${trip.length ? `<div class="row" data-folder="trip" tabindex="0" role="button"><span class="caret${M.folderOpen ? ' open' : ''}">▶</span><span class="t">Trip</span></div>` : ''}
+      ${M.folderOpen ? trip.map(c => rowHTML(c, true)).join('') : ''}
+      <div class="rule"><i></i>${today.length ? '<button class="clear" id="clear">↓ Clear</button>' : ''}</div>
+      <div class="row dim" data-new tabindex="0" role="button"><span class="gl" style="--f:transparent;color:var(--m-ink-2)">+</span><span class="t">New Tab</span></div>
+      ${today.map(c => rowHTML(c)).join('')}
+    </div>
+    ${player ? `<div class="player" id="player">${glyph(player)}<div class="tt"><b>${esc(player.t)}</b><span>${M.playing ? 'Playing' : 'Paused'}</span></div>
+      <button class="pb" id="pp" aria-label="Play or pause">${M.playing ? '❚❚' : '▶'}</button><button class="pb" id="px" aria-label="Dismiss">✕</button></div>` : ''}
+    <div class="foot"><span class="sw"></span>Reading<span class="grow"></span><span class="dl" aria-label="Downloads">⤓${M.dlDot ? '<span class="d" id="dld"></span>' : ''}</span></div>`;
+}
+
+function renderPage(target, c) {
+  target.innerHTML = c ? `<div class="pg" style="--f:${c.f}"><div class="nav"><b>${esc(c.h)}</b><span>Home</span><span>Latest</span></div><div class="hero"></div>
+    <div class="b"><h2>${esc(c.t)}</h2><div class="ln" style="width:92%"></div><div class="ln" style="width:84%"></div>
+    <span class="lk" data-link>Related: how Lisbon kept its trams</span><div class="ln" style="width:88%"></div><div class="ln" style="width:61%"></div></div></div>`
+    : `<div class="pg"><div class="b" style="color:var(--m-ink-3)">Nothing in front</div></div>`;
+}
+
+function renderAll() {
+  document.body.classList.toggle('prop-folder', S.folder === 'proposed');
+  document.body.classList.toggle('prop-reveal', S.reveal === 'proposed');
+  $('win').classList.toggle('mac-dark', S.dark);
+  $('stage').classList.toggle('mac-dark', S.dark);
+  document.body.classList.toggle('rm', reduced());
+  document.body.classList.toggle('press-scale', S.iconPress === 'scale');
+  document.body.classList.toggle('press-nudge', S.iconPress === 'nudge');
+  $('win').classList.toggle('folded', M.folded);
+  $('side').classList.toggle('folded', M.folded);
+  $('content').classList.toggle('folded', M.folded);
+  closeCap(true);
+  renderSide();
+  renderTiles();
+}
+
+function renderTiles() {
+  const two = S.two;
+  $('tiles').classList.toggle('anim-max', !reduced());
+  $('tiles').innerHTML = `<div class="tw" id="tw1"><div class="tile" id="tile"></div><button class="grip" data-grip="1" aria-label="Tile controls"><i></i></button></div>`
+    + (two ? `<div class="tw narrow${M.maximized ? ' gone' : ''}" id="tw2"><div class="tile" id="tile2"></div><button class="grip" data-grip="2" aria-label="Tile controls"><i></i></button></div>` : '');
+  renderPage($('tile'), card(M.front));
+  if (two) renderPage($('tile2'), card(M.side2));
+}
+
+// MARK: Switching
+
+let switching = null;
+function showCard(id, mode = S.switch) {
+  if (!card(id) || id === M.front) return;
+  const tile = $('tile');
+  const old = tile.firstElementChild;
+  M.front = id;
+  if (M.player === id) { M.player = null; }
+  renderSide();
+  const holder = document.createElement('div');
+  renderPage(holder, card(id));
+  const incoming = holder.firstElementChild;
+  if (switching) switching.forEach(a => a.finish());
+  if (mode === 'instant' || reduced()) { tile.replaceChildren(incoming); return; }
+  tile.appendChild(incoming);
+  const anims = mode === 'fade'
+    ? [run(incoming, [{ opacity: 0 }, { opacity: 1 }], 80, 'linear')]
+    : [run(incoming, [{ opacity: 0, transform: 'translate(28%, 14%) scale(.55)' }, { opacity: 1, transform: 'none' }], 300, SETTLE),
+       run(old, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translate(-6%, 4%) scale(.8)' }], 300, SETTLE)];
+  switching = anims;
+  anims[0].done.then(() => { if (old.isConnected) old.remove(); anims.forEach(a => a.cancel()); switching = null; }).catch(() => {});
+}
+
+function nextCard(step = 1) {
+  const all = order().all;
+  const at = all.findIndex(c => c.id === M.front);
+  showCard(all[(at + step + all.length) % all.length].id);
+}
+
+// MARK: Rows in and out
+
+const listAnimated = () => S.list === 'proposed' && !reduced();
+function rowsOut(ids, then) {
+  const els = ids.map(id => q(`.row[data-row="${id}"]`)).filter(Boolean);
+  if (!listAnimated() || !els.length) return then();
+  let last;
+  els.forEach(el => {
+    const h = el.getBoundingClientRect().height;
+    el.style.pointerEvents = 'none';
+    last = run(el, [{ opacity: 1, height: h + 'px', marginBottom: '2px' }, { opacity: 0, height: h + 'px', marginBottom: '2px', offset: .4 }, { opacity: 0, height: '0px', marginBottom: '0px' }], 220, OUT);
+  });
+  last.done.then(then);
+}
+function rowsIn(ids, ms = 200) {
+  if (!listAnimated() && !(ms === 180 && S.folder === 'proposed' && !reduced())) return;
+  ids.forEach(id => {
+    const el = q(`.row[data-row="${id}"]`);
+    if (!el) return;
+    run(el, [{ opacity: 0, height: '0px', marginBottom: '0px' }, { opacity: 0, height: '30px', marginBottom: '2px', offset: .5 }, { opacity: 1, height: '30px', marginBottom: '2px' }], ms).done.then(a => a.cancel());
+  });
+}
+
+function closeCard(id) {
+  const c = card(id);
+  if (!c) return;
+  rowsOut([id], () => {
+    if (c.pin) { c.pin = false; delete c.folder; }
+    else M.cards = M.cards.filter(x => x.id !== id);
+    if (M.front === id) {
+      const next = order().today[0] || order().all[0];
+      M.front = null;
+      renderSide();
+      if (next) showCard(next.id, 'instant'); else renderPage($('tile'), null);
+    } else renderSide();
+  });
+}
+
+function clearToday() {
+  const ids = order().today.map(c => c.id);
+  if (!ids.length) return;
+  rowsOut(ids, () => {
+    M.cards = M.cards.filter(c => !ids.includes(c.id));
+    if (ids.includes(M.front)) { M.front = null; const n = order().all[0]; renderSide(); if (n) showCard(n.id, 'instant'); }
+    else renderSide();
+  });
+}
+
+function newTab() {
+  const id = 'new' + M.nextNew++;
+  M.cards.push({ id, t: 'duckduckgo.com', h: 'duckduckgo.com', f: '#de5833' });
+  renderSide();
+  rowsIn([id]);
+  showCard(id);
+}
+
+function toggleFolder() {
+  const trip = order().pins.filter(c => c.folder === 'trip').map(c => c.id);
+  const animated = S.folder === 'proposed' && !reduced();
+  if (M.folderOpen) {
+    const caret = q('[data-folder] .caret');
+    if (caret) caret.classList.remove('open');
+    if (!animated) { M.folderOpen = false; return renderSide(); }
+    let last;
+    trip.forEach(id => {
+      const el = q(`.row[data-row="${id}"]`);
+      if (el) last = run(el, [{ opacity: 1, height: '30px', marginBottom: '2px' }, { opacity: 0, height: '0px', marginBottom: '0px' }], 150, EXIT);
+    });
+    (last ? last.done : Promise.resolve()).then(() => { M.folderOpen = false; renderSide(); });
+  } else {
+    M.folderOpen = true;
+    renderSide();
+    const caret = q('[data-folder] .caret');
+    if (animated && caret) { caret.classList.remove('open'); caret.getBoundingClientRect(); caret.classList.add('open'); rowsIn(trip, 180); }
+  }
+}
+
+// MARK: Mini player
+
+function playerIn() {
+  const el = q('#player');
+  if (!el || S.player !== 'proposed') return;
+  run(el, reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], 200);
+}
+function playerOut(then) {
+  const el = q('#player');
+  if (!el || S.player !== 'proposed') return then();
+  run(el, reduced() ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(4px)' }], 120, EXIT).done.then(then);
+}
+function musicThenAway() {
+  M.player = null;
+  showCard('music', 'instant');
+  M.playing = 'music';
+  renderSide();
+  setTimeout(() => {
+    const away = order().today.find(c => c.id !== 'music') || order().all.find(c => c.id !== 'music');
+    showCard(away.id);
+    M.player = 'music';
+    renderSide();
+    playerIn();
+  }, 500);
+}
+
+// MARK: Peek
+
+let peekEl = null;
+function openPeek(fromEl) {
+  if (peekEl) return;
+  const stage = $('stage');
+  const sb = stage.getBoundingClientRect();
+  const fr = fromEl ? fromEl.getBoundingClientRect() : { left: sb.left + sb.width / 2, top: sb.top + sb.height / 2, width: 0, height: 0 };
+  peekEl = document.createElement('div');
+  peekEl.className = 'peek';
+  peekEl.innerHTML = `<div class="scrim"></div><div class="panel" role="dialog" aria-label="Link preview"><div class="bar"><b>nytimes.com</b><button data-keep>Open as Card ⌘↩</button><button data-dismiss aria-label="Close preview">✕</button></div><div class="pbody"></div></div>`;
+  stage.appendChild(peekEl);
+  renderPage(peekEl.querySelector('.pbody'), { t: 'How Lisbon kept its trams', h: 'nytimes.com', f: '#7a6a4f' });
+  const panel = peekEl.querySelector('.panel'), scrim = peekEl.querySelector('.scrim');
+  if (S.peek === 'now') {
+    if (!reduced()) run(peekEl, [{ opacity: 0 }, { opacity: 1 }], 150, 'linear');
+  } else {
+    const pr = panel.getBoundingClientRect();
+    panel.style.transformOrigin = `${fr.left + fr.width / 2 - pr.left}px ${fr.top + fr.height / 2 - pr.top}px`;
+    run(scrim, [{ opacity: 0 }, { opacity: 1 }], 200, 'linear');
+    run(panel, reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'scale(.97)' }, { opacity: 1, transform: 'none' }], 200);
+  }
+  stage.focus();
+}
+function closePeek() {
+  if (!peekEl) return;
+  const el = peekEl; peekEl = null;
+  if (S.peek === 'now') return el.remove();
+  run(el, [{ opacity: 1 }, { opacity: 0 }], 120, EXIT).done.then(() => el.remove());
+}
+function keepPeek() {
+  if (!peekEl) return;
+  const el = peekEl; peekEl = null;
+  const id = 'kept' + M.nextNew++;
+  M.cards.push({ id, t: 'How Lisbon kept its trams', h: 'nytimes.com', f: '#7a6a4f' });
+  if (S.peek === 'now' || reduced()) {
+    el.remove();
+    renderSide(); rowsIn([id]);
+    return showCard(id, S.peek === 'now' ? S.switch : 'instant');
+  }
+  const panel = el.querySelector('.panel'), scrim = el.querySelector('.scrim');
+  const pr = panel.getBoundingClientRect(), tr = $('tile').getBoundingClientRect();
+  panel.style.transformOrigin = '0 0';
+  const sx = tr.width / pr.width, sy = tr.height / pr.height;
+  run(scrim, [{ opacity: 1 }, { opacity: 0 }], 250, 'linear');
+  const bar = el.querySelector('.bar');
+  run(bar, [{ opacity: 1 }, { opacity: 0 }], 120, 'linear');
+  run(panel, [{ transform: 'none', borderRadius: '12px' }, { transform: `translate(${tr.left - pr.left}px, ${tr.top - pr.top}px) scale(${sx}, ${sy})`, borderRadius: '10px' }], 250).done.then(() => {
+    renderSide(); rowsIn([id]);
+    showCard(id, 'instant');
+    el.remove();
+  });
+}
+
+// MARK: Favourites
+
+function favouriteFront() {
+  const c = card(M.front);
+  if (!c || c.fav) return;
+  const from = q(`.row[data-row="${c.id}"] .gl`);
+  const fromRect = from && from.getBoundingClientRect();
+  const animated = S.fav === 'proposed' && !reduced() && fromRect;
+  const commit = () => { c.fav = true; c.pin = false; delete c.folder; renderSide(); };
+  if (!animated) {
+    if (S.fav === 'proposed' && reduced()) { commit(); const s = q(`[data-favslot="${c.id}"]`); if (s) run(s, [{ opacity: 0 }, { opacity: 1 }], 150, 'linear'); return; }
+    return commit();
+  }
+  const row = q(`.row[data-row="${c.id}"]`);
+  const clone = from.cloneNode(true);
+  clone.classList.add('flying');
+  document.body.appendChild(clone);
+  Object.assign(clone.style, { position: 'fixed', left: fromRect.left + 'px', top: fromRect.top + 'px', width: fromRect.width + 'px', height: fromRect.height + 'px', margin: 0 });
+  from.style.visibility = 'hidden';
+  const h = row.getBoundingClientRect().height;
+  run(row, [{ opacity: 1, height: h + 'px', marginBottom: '2px' }, { opacity: 0, height: '0px', marginBottom: '0px' }], 220);
+  // Where it lands: render the grid with the new slot, measure, hide its glyph until the flight lands.
+  setTimeout(() => {
+    commit();
+    const slot = q(`[data-favslot="${c.id}"] .gl`);
+    const to = slot.getBoundingClientRect();
+    slot.style.visibility = 'hidden';
+    run(clone, [{ transform: 'none' }, { transform: `translate(${to.left - fromRect.left}px, ${to.top - fromRect.top}px) scale(${to.width / fromRect.width})` }], 250).done.then(() => {
+      slot.style.visibility = '';
+      clone.remove();
+    });
+  }, 30 * k());
+}
+
+// MARK: Downloads
+
+function finishDownload() {
+  M.dlDot = false; renderSide();
+  setTimeout(() => {
+    M.dlDot = true; renderSide();
+    const d = q('#dld');
+    if (d && S.reveal === 'proposed') run(d, reduced() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'scale(.4)' }, { opacity: 1, transform: 'none' }], 150);
+  }, 250);
+}
+
+// MARK: Events
+
+function sideClick(e) {
+  const x = e.target.closest('[data-close]');
+  if (x) { e.stopPropagation(); return closeCard(x.dataset.close); }
+  if (e.target.closest('#clear')) return clearToday();
+  if (e.target.closest('#pp')) { M.playing = M.playing ? null : M.player; renderSide(); return; }
+  if (e.target.closest('#px')) return playerOut(() => { M.playing = null; M.player = null; renderSide(); });
+  if (e.target.closest('#player')) { const id = M.player; return playerOut(() => { M.player = null; renderSide(); showCard(id); }); }
+  if (e.target.closest('[data-folder]')) return toggleFolder();
+  if (e.target.closest('[data-new]')) return newTab();
+  const r = e.target.closest('[data-row]');
+  if (r) showCard(r.dataset.row);
+}
+function sideKey(e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const t = e.target.closest('[data-row],[data-folder],[data-new]');
+  if (t && t.matches('.row')) { e.preventDefault(); t.click(); }
+}
+['side', 'peekside'].forEach(id => { $(id).addEventListener('click', sideClick); $(id).addEventListener('keydown', sideKey); });
+$('tiles').addEventListener('click', e => {
+  const g = e.target.closest('.grip');
+  if (g) { clearTimeout(restTimer); if (capFor !== +g.dataset.grip) openCap(+g.dataset.grip); return; }
+  const l = e.target.closest('[data-link]');
+  if (l && e.shiftKey) openPeek(l);
+});
+$('tiles').addEventListener('mouseover', e => {
+  const g = e.target.closest('.grip');
+  if (!g) return;
+  clearTimeout(leaveTimer);
+  if (capFor === +g.dataset.grip) return;
+  clearTimeout(restTimer);
+  restTimer = setTimeout(() => openCap(+g.dataset.grip), 300);
+});
+$('tiles').addEventListener('mouseout', e => {
+  const g = e.target.closest('.grip');
+  if (!g || (e.relatedTarget && g.contains(e.relatedTarget))) return;
+  clearTimeout(restTimer);
+  if (!(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.capw'))) scheduleCapLeave();
+});
+
+// MARK: Folding the sidebar
+
+function toggleFold() {
+  closeCap(true);
+  const side = $('side');
+  const mode = reduced() ? 'instant' : S.fold;
+  const ms = mode === 'now' ? 220 : mode === 'quick' ? 180 : 0;
+  const ease = mode === 'now' ? 'cubic-bezier(.42, 0, .58, 1)' : OUT;
+  const open = { width: '232px', paddingLeft: '8px', paddingRight: '8px' }, shut = { width: '0px', paddingLeft: '0px', paddingRight: '0px' };
+  if (!M.folded) {
+    const finish = a => {
+      M.folded = true;
+      $('win').classList.add('folded'); side.classList.add('folded'); $('content').classList.add('folded');
+      if (a) a.cancel();
+      renderSide();
+    };
+    if (ms) run(side, [open, shut], ms, ease).done.then(finish); else finish();
+  } else {
+    hidePeekSide(true);
+    M.folded = false;
+    $('win').classList.remove('folded'); side.classList.remove('folded'); $('content').classList.remove('folded');
+    renderSide();
+    if (ms) run(side, [shut, open], ms, ease).done.then(a => a.cancel());
+  }
+}
+
+// MARK: The floating sidebar
+
+let peekTimer = 0, peekHideTimer = 0, peekShown = false, peekAnim = null;
+$('edge').addEventListener('mouseenter', () => {
+  if (!M.folded) return;
+  clearTimeout(peekHideTimer);
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(showPeekSide, S.edge === 'proposed' ? 80 * k() : 0);
+});
+$('edge').addEventListener('mouseleave', e => {
+  clearTimeout(peekTimer);
+  if (!(e.relatedTarget && $('peekside').contains(e.relatedTarget))) schedulePeekHide();
+});
+$('peekside').addEventListener('mouseenter', () => clearTimeout(peekHideTimer));
+$('peekside').addEventListener('mouseleave', schedulePeekHide);
+function schedulePeekHide() { clearTimeout(peekHideTimer); peekHideTimer = setTimeout(() => hidePeekSide(false), 350); }
+function showPeekSide() {
+  if (peekShown || !M.folded) return;
+  peekShown = true;
+  const el = $('peekside');
+  el.hidden = false;
+  if (peekAnim) peekAnim.cancel();
+  if (reduced()) peekAnim = run(el, [{ opacity: 0 }, { opacity: 1 }], 120, 'linear');
+  else if (S.edge === 'now') peekAnim = run(el, [{ transform: 'translateX(-252px)' }, { transform: 'none' }], 200);
+  else peekAnim = run(el, [{ transform: 'translateX(-24px)', opacity: 0 }, { transform: 'none', opacity: 1 }], 180);
+}
+function hidePeekSide(now) {
+  clearTimeout(peekTimer); clearTimeout(peekHideTimer);
+  if (!peekShown) return;
+  peekShown = false;
+  const el = $('peekside');
+  if (peekAnim) peekAnim.cancel();
+  const gone = () => { if (!peekShown) { el.hidden = true; if (peekAnim) peekAnim.cancel(); } };
+  if (now) return gone();
+  if (reduced()) peekAnim = run(el, [{ opacity: 1 }, { opacity: 0 }], 120, 'linear');
+  else if (S.edge === 'now') peekAnim = run(el, [{ transform: 'none' }, { transform: 'translateX(-252px)' }], 120, EXIT);
+  else peekAnim = run(el, [{ transform: 'none', opacity: 1 }, { transform: 'translateX(-12px)', opacity: 0 }], 120, EXIT);
+  peekAnim.done.then(gone);
+}
+
+// MARK: The capsule
+
+const ICON = {
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
+  fwd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
+  reload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>',
+  pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></svg>',
+  pinOn: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7" fill="none"/></svg>',
+  star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 4l2.4 5 5.4.6-4 3.8 1.1 5.4L12 16.2 7.1 18.8l1.1-5.4-4-3.8 5.4-.6z"/></svg>',
+  starOn: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 4l2.4 5 5.4.6-4 3.8 1.1 5.4L12 16.2 7.1 18.8l1.1-5.4-4-3.8 5.4-.6z"/></svg>',
+  max: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
+  restore: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4v6h6M10 20v-6H4M21 3l-7 7M3 21l7-7"/></svg>',
+  out: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>',
+  more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18" cy="12" r="1.7"/></svg>',
+};
+let capFor = null, capEl = null, restTimer = 0, leaveTimer = 0, capEditing = false, loadTimer = 0;
+const capCard = n => card(n === 1 ? M.front : M.side2);
+const btn = (act, icon, label, on) => `<button class="cb${on ? ' on' : ''}" data-act="${act}" aria-label="${label}" title="${label}"><span class="ic">${icon}</span></button>`;
+
+function capHTML(n) {
+  const c = capCard(n);
+  const site = c ? c.h : 'Address';
+  return btn('back', ICON.back, 'Back') + btn('fwd', ICON.fwd, 'Forward') + btn('reload', ICON.reload, 'Reload')
+    + (capEditing ? `<input id="capaddr" value="https://${esc(site)}/" aria-label="Address">` : `<button class="cb site" data-act="addr" title="Edit the address (⌘L)">${esc(site)}</button>`)
+    + '<span class="sep"></span>'
+    + btn('pin', c && c.pin ? ICON.pinOn : ICON.pin, c && c.pin ? 'Unpin' : 'Pin', c && c.pin)
+    + btn('star', c && c.fav ? ICON.starOn : ICON.star, c && c.fav ? 'Remove from Favourites' : 'Add to Favourites', c && c.fav)
+    + (S.two ? btn('max', M.maximized ? ICON.restore : ICON.max, M.maximized ? 'Restore' : 'Maximize') : '')
+    + btn('out', ICON.out, 'Out of the Layout (⌘W)') + btn('more', ICON.more, 'More');
+}
+
+/** Where the capsule goes: centred under its grip, 4pt below the grip's mark, kept 6pt inside its tile — `place()`. */
+function capPlace(n, width) {
+  const wr = $('win').getBoundingClientRect();
+  const grip = document.querySelector(`.grip[data-grip="${n}"] i`), tile = $(n === 1 ? 'tw1' : 'tw2');
+  if (!grip || !tile) return null;
+  const g = grip.getBoundingClientRect(), t = tile.getBoundingClientRect();
+  let x = g.left + g.width / 2 - width / 2;
+  x = Math.min(Math.max(x, t.left + 6), t.right - 6 - width);
+  return { left: x - wr.left, top: g.bottom + 4 - wr.top, grip: { x: g.left + g.width / 2 - wr.left, top: g.top - wr.top, w: g.width, h: g.height } };
+}
+
+function openCap(n) {
+  closeCap(true);
+  capFor = n; capEditing = false;
+  const w = document.createElement('div');
+  w.className = 'capw';
+  w.innerHTML = `<div class="cap" role="toolbar" aria-label="Tile controls">${capHTML(n)}</div>`;
+  $('win').appendChild(w);
+  capEl = w;
+  const width = w.firstElementChild.getBoundingClientRect().width;
+  const at = capPlace(n, width);
+  if (!at) return closeCap(true);
+  Object.assign(w.style, { left: at.left + 'px', top: at.top + 'px', width: width + 'px' });
+  document.querySelector(`.grip[data-grip="${n}"]`).classList.add('open');
+  capMotion(w, at, width, true);
+}
+
+function capMotion(w, at, width, opening) {
+  const cap = w.firstElementChild;
+  const ms = opening ? 240 : 120, ease = opening ? OUT : EXIT;
+  const flip = frames => (opening ? frames : frames.slice().reverse());
+  if (reduced()) return run(w, flip([{ opacity: 0 }, { opacity: 1 }]), opening ? 120 : 100, 'linear');
+  if (S.capOpen === 'now') {
+    if (opening) return run(cap, [{ transform: 'scale(.6, .7)', opacity: 0, transformOrigin: '50% 0' }, { transform: 'none', opacity: 1, transformOrigin: '50% 0' }], 260, 'cubic-bezier(.2, .95, .3, 1)');
+    return run(cap, [{ transform: 'none', opacity: 1, transformOrigin: '50% 0' }, { transform: 'scale(.6, .7)', opacity: 0, transformOrigin: '50% 0' }], ms, ease);
+  }
+  if (S.capOpen === 'drop') {
+    return run(cap, flip([{ transform: 'translateY(-4px)', opacity: 0 }, { transform: 'none', opacity: 1 }]), opening ? 160 : ms, ease);
+  }
+  // Out of the grip: the clip starts as the grip's pill, where the grip is, and opens to the whole capsule.
+  const gx = at.grip.x - at.left, half = at.grip.w / 2;
+  const pill = `inset(0px ${Math.max(0, width - gx - half)}px ${32 - at.grip.h}px ${Math.max(0, gx - half)}px round 3px)`;
+  const lift = `translateY(${at.grip.top - at.top}px)`;
+  const a = run(cap, flip([{ clipPath: pill, transform: lift }, { clipPath: 'inset(0px 0px 0px 0px round 13px)', transform: 'none' }]), ms, ease);
+  const kids = [...cap.children];
+  kids.forEach(kid => run(kid, flip([{ opacity: 0 }, { opacity: 0, offset: .35 }, { opacity: 1 }]), ms, 'linear'));
+  return a;
+}
+
+function closeCap(now) {
+  clearTimeout(restTimer); clearTimeout(leaveTimer); clearTimeout(loadTimer);
+  document.querySelectorAll('.grip.open').forEach(g => g.classList.remove('open'));
+  const w = capEl, n = capFor;
+  capEl = null; capFor = null; capEditing = false;
+  if (!w) return;
+  if (now || S.capClose === 'now') return w.remove();
+  w.style.pointerEvents = 'none';
+  const width = w.getBoundingClientRect().width;
+  const at = capPlace(n, width) || { left: 0, top: 0, grip: { x: 0, top: 0, w: 34, h: 5 } };
+  at.left = parseFloat(w.style.left); at.top = parseFloat(w.style.top);
+  capMotion(w, at, width, false).done.then(() => w.remove());
+}
+
+function scheduleCapLeave() {
+  clearTimeout(leaveTimer);
+  leaveTimer = setTimeout(() => { if (!capEditing) closeCap(false); }, 450);
+}
+
+/** Re-render the capsule's contents, keeping it under its grip; animate the width change when asked. */
+function capRefresh(animateWidth) {
+  if (!capEl) return;
+  const w = capEl, cap = w.firstElementChild;
+  const oldW = w.getBoundingClientRect().width, oldL = parseFloat(w.style.left);
+  cap.innerHTML = capHTML(capFor);
+  w.style.width = 'auto';
+  const width = cap.getBoundingClientRect().width;
+  const at = capPlace(capFor, width);
+  if (!at) return;
+  Object.assign(w.style, { left: at.left + 'px', top: at.top + 'px', width: width + 'px' });
+  if (animateWidth && S.capWidth === 'proposed' && !reduced() && Math.abs(width - oldW) > 1) {
+    run(w, [{ width: oldW + 'px', left: oldL + 'px' }, { width: width + 'px', left: at.left + 'px' }], 180).done.then(a => a.cancel());
+  }
+}
+
+function swapIcon(button, svg, style, bounce) {
+  const ic = button.querySelector('.ic');
+  if (style === 'now') { ic.innerHTML = svg; return; }
+  if (reduced()) { ic.innerHTML = svg; run(ic, [{ opacity: 0 }, { opacity: 1 }], 120, 'linear').done.then(a => a.cancel()); return; }
+  run(ic, [{ transform: 'none', opacity: 1 }, { transform: 'scale(.5)', opacity: 0 }], 90, EXIT).done.then(a => {
+    ic.innerHTML = svg;
+    a.cancel();
+    run(ic, [{ transform: 'scale(.5)', opacity: 0 }, { transform: 'none', opacity: 1 }], 160).done.then(b => {
+      b.cancel();
+      if (bounce) run(ic, [{ transform: 'none' }, { transform: 'scale(1.2)', offset: .4 }, { transform: 'none' }], 280, 'ease-in-out').done.then(c => c.cancel());
+    });
+  });
+}
+
+function capAction(act, button) {
+  const n = capFor, c = capCard(n);
+  if (act === 'addr') { capEditing = true; capRefresh(true); const f = $('capaddr'); if (f) { f.focus(); f.select(); } return; }
+  if (act === 'back' || act === 'fwd' || act === 'more') return;
+  if (act === 'reload') {
+    const tile = $(n === 1 ? 'tile' : 'tile2');
+    if (S.iconReload === 'spin' && !reduced()) run(button.querySelector('.ic'), [{ transform: 'none' }, { transform: 'rotate(360deg)' }], 450).done.then(a => a.cancel());
+    if (S.iconReload === 'stop') {
+      swapIcon(button, ICON.stop, 'replace');
+      button.dataset.act = 'stopload'; button.title = 'Stop';
+    }
+    const bar = document.createElement('div');
+    bar.className = 'load';
+    tile.appendChild(bar);
+    run(bar, [{ width: '0%' }, { width: '70%', offset: .5 }, { width: '100%' }], 1400, 'linear');
+    loadTimer = setTimeout(() => {
+      bar.remove();
+      if (button.isConnected && button.dataset.act === 'stopload') { swapIcon(button, ICON.reload, 'replace'); button.dataset.act = 'reload'; button.title = 'Reload'; }
+    }, 1400 * k());
+    return;
+  }
+  if (act === 'stopload') {
+    clearTimeout(loadTimer);
+    document.querySelectorAll('.load').forEach(b => b.remove());
+    swapIcon(button, ICON.reload, 'replace'); button.dataset.act = 'reload'; button.title = 'Reload';
+    return;
+  }
+  if (!c) return;
+  if (act === 'pin') {
+    c.pin = !c.pin; if (!c.pin) delete c.folder;
+    button.classList.toggle('on', c.pin);
+    swapIcon(button, c.pin ? ICON.pinOn : ICON.pin, S.iconToggle === 'now' ? 'now' : 'replace', S.iconToggle === 'bounce' && c.pin);
+    renderSide();
+    return;
+  }
+  if (act === 'star') {
+    c.fav = !c.fav;
+    button.classList.toggle('on', c.fav);
+    swapIcon(button, c.fav ? ICON.starOn : ICON.star, S.iconToggle === 'now' ? 'now' : 'replace', S.iconToggle === 'bounce' && c.fav);
+    renderSide();
+    return;
+  }
+  if (act === 'max') {
+    M.maximized = !M.maximized;
+    const tw2 = $('tw2');
+    if (tw2) tw2.classList.toggle('gone', M.maximized);
+    swapIcon(button, M.maximized ? ICON.restore : ICON.max, S.iconMax === 'now' ? 'now' : 'replace');
+    // The capsule follows its grip while the tiles move (`follow`), as the board lays out each frame.
+    const until = performance.now() + 320 * k();
+    const follow = () => {
+      if (!capEl || capFor !== n) return;
+      const width = capEl.getBoundingClientRect().width, at = capPlace(n, width);
+      if (at) Object.assign(capEl.style, { left: at.left + 'px', top: at.top + 'px' });
+      if (performance.now() < until) requestAnimationFrame(follow);
+    };
+    requestAnimationFrame(follow);
+    if (n === 2 && M.maximized) closeCap(true);
+    return;
+  }
+  if (act === 'out') {
+    closeCap(true);
+    if (n === 2) { S.two = false; save(); renderControls(); renderTiles(); }
+    else { M.front = null; renderSide(); renderPage($('tile'), null); }
+  }
+}
+
+$('win').addEventListener('click', e => {
+  const b = e.target.closest('.capw .cb');
+  if (b) capAction(b.dataset.act, b);
+});
+$('win').addEventListener('keydown', e => {
+  if (e.target.id !== 'capaddr') return;
+  if (e.key === 'Enter' || e.key === 'Escape') {
+    e.preventDefault(); e.stopPropagation();
+    capEditing = false;
+    capRefresh(true);
+  }
+});
+$('win').addEventListener('mouseover', e => { if (e.target.closest('.capw')) clearTimeout(leaveTimer); });
+$('win').addEventListener('mouseout', e => {
+  const w = e.target.closest('.capw');
+  if (!w || (e.relatedTarget && (w.contains(e.relatedTarget) || (e.relatedTarget.closest && e.relatedTarget.closest('.grip'))))) return;
+  scheduleCapLeave();
+});
+$('stage').addEventListener('click', e => {
+  if (!peekEl) return;
+  if (e.target.closest('[data-keep]')) return keepPeek();
+  if (e.target.closest('[data-dismiss]') || e.target.classList.contains('scrim')) return closePeek();
+});
+$('stage').addEventListener('keydown', e => {
+  if (peekEl) {
+    if (e.key === 'Escape') { e.preventDefault(); return closePeek(); }
+    if (e.key === 'Enter') { e.preventDefault(); return keepPeek(); }
+    return;
+  }
+  if (e.target !== $('stage')) return;
+  if (/^[1-9]$/.test(e.key)) { const all = order().all; const n = +e.key; const c = n === 9 ? all[all.length - 1] : all[n - 1]; if (c) showCard(c.id); }
+  else if (e.key === 'n') nextCard(1);
+  else if (e.key === 't') newTab();
+  else if (e.key === 's') toggleFold();
+});
+$('t-fold').onclick = toggleFold;
+$('t-next').onclick = () => nextCard(1);
+$('t-new').onclick = newTab;
+$('t-music').onclick = musicThenAway;
+$('t-peek').onclick = () => openPeek(document.querySelector('[data-link]'));
+$('t-fav').onclick = favouriteFront;
+$('t-clear').onclick = clearToday;
+$('t-dl').onclick = finishDownload;
+$('t-reset').onclick = () => {
+  if (peekEl) { peekEl.remove(); peekEl = null; }
+  document.querySelectorAll('.flying').forEach(e => e.remove());
+  hidePeekSide(true); M = SEED(); renderAll();
+};
+
+// MARK: Controls
+
+function renderControls() {
+  $('controls').innerHTML = `
+    <div class="cg"><div class="cgh"><span class="cgl">Presets</span></div>
+      <div class="seg" id="presets"><button data-preset="now">All as now</button><button data-preset="proposed">All proposed</button></div>
+      <div class="toggles">
+        <label><input type="checkbox" id="slow" ${S.slow ? 'checked' : ''}> Slow motion (4×)</label>
+        <label><input type="checkbox" id="reduce" ${S.reduce ? 'checked' : ''}> Reduce Motion</label>
+        <label><input type="checkbox" id="dark" ${S.dark ? 'checked' : ''}> Dark window</label>
+        <label><input type="checkbox" id="two" ${S.two ? 'checked' : ''}> Two tiles</label>
+      </div></div>
+    <p class="rnd">Round 2: sidebar, capsule, icons</p>
+    ${OPTIONS.filter(o => o.round === 2).map(group).join('')}
+    <details class="cg"><summary>Decided in round 1</summary>
+      ${OPTIONS.filter(o => o.round === 1).map(group).join('')}
+    </details>
+    <div class="cg"><div class="cgh"><span class="cgl">Note</span></div><textarea id="note" placeholder="Anything else for this round">${esc(S.note)}</textarea></div>
+    <div class="cg"><div class="cgh"><span class="cgl">Summary</span></div><pre class="summary" id="summary"></pre><button class="copy" id="copy">Copy summary</button></div>`;
+  $('summary').textContent = summary();
+}
+function group(o) {
+  return `<div class="cg"><div class="cgh"><span class="cgl">${o.label}</span><span class="freq">${o.freq}</span></div>
+      <div class="seg" data-key="${o.key}">${o.choices.map(([v, l]) => `<button data-v="${v}" class="${S[o.key] === v ? 'on' : ''}" aria-pressed="${S[o.key] === v}">${l}</button>`).join('')}</div>
+      <p class="why">${o.why}</p></div>`;
+}
+function summary() {
+  const line = o => `${o.label}: ${(o.choices.find(([v]) => v === S[o.key]) || o.choices[0])[1]}`;
+  const lines = ['Round 2', ...OPTIONS.filter(o => o.round === 2).map(line), '', 'Round 1', ...OPTIONS.filter(o => o.round === 1).map(line)];
+  if (S.note.trim()) lines.push('', 'Note: ' + S.note.trim());
+  return 'Spaces motion mock\n' + lines.join('\n');
+}
+$('controls').addEventListener('click', e => {
+  const b = e.target.closest('.seg button');
+  if (b && b.dataset.preset) {
+    OPTIONS.forEach(o => { S[o.key] = b.dataset.preset === 'now' ? 'now' : o.def; });
+  } else if (b) {
+    S[b.closest('.seg').dataset.key] = b.dataset.v;
+  } else if (e.target.id === 'copy') {
+    const text = summary(), pre = $('summary');
+    const fallback = () => { const r = document.createRange(); r.selectNodeContents(pre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); $('copy').textContent = 'Selected: press ⌘C'; };
+    try { navigator.clipboard.writeText(text).then(() => { $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy summary', 1400); }, fallback); } catch (err) { fallback(); }
+    return;
+  } else return;
+  save(); renderControls(); renderAll();
+});
+$('controls').addEventListener('change', e => {
+  if (['slow', 'reduce', 'dark', 'two'].includes(e.target.id)) {
+    if (e.target.id === 'two') M.maximized = false; S[e.target.id] = e.target.checked; save(); renderControls(); renderAll(); }
+});
+$('controls').addEventListener('input', e => {
+  if (e.target.id === 'note') { S.note = e.target.value; save(); $('summary').textContent = summary(); }
+});
+document.documentElement.style.setProperty('--k', 1);
+const setK = () => document.documentElement.style.setProperty('--k', k());
+$('controls').addEventListener('change', setK);
+setK();
+renderControls();
+renderAll();
+</script>

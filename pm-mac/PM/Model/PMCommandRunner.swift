@@ -91,6 +91,10 @@ enum PMCommandRunner {
         // The app.
         case .newProject:
             ProjectPrompts.newProject { key in WindowManager.shared.open(projectKey: key) }
+        case .newSpace:
+            Spaces.shared.newSpace()
+        case .showOverview:
+            OverviewController.shared.show()
         case .settings:
             PMContract.performAffordance(.appSettings, store: store)
         }

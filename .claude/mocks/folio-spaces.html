@@ -1,0 +1,1006 @@
+<title>Folio Spaces</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a mocked Mac desktop (menubar, one Folio window, Folio's dock at the leading edge, overlays for the switcher and command bar); controls in a column to the right, stacked below on a phone. */
+:root {
+  --page: #eceef2; --panel: #ffffff; --ink: #1d1f24; --ink-2: #5d6270; --ink-3: #9196a1;
+  --rule: #d9dce3; --accent: #2f6fe4; --chip: #eef1f6;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* the mocked Mac, light */
+  --wall-a: #9fb4d6; --wall-b: #d9c6d8; --wall-c: #f1dcc4;
+  --glass: rgba(246, 247, 250, 0.72); --glass-edge: rgba(255, 255, 255, 0.75);
+  --glass-strong: rgba(246, 247, 250, 0.86);
+  --glass-shadow: 0 10px 34px rgba(20, 24, 40, 0.22), 0 1px 3px rgba(20, 24, 40, 0.14);
+  --m-ink: #1c1d21; --m-ink-2: rgba(28, 29, 33, 0.62); --m-ink-3: rgba(28, 29, 33, 0.38);
+  --m-rule: rgba(28, 29, 33, 0.1); --m-hover: rgba(28, 29, 33, 0.06); --m-sel: rgba(255, 255, 255, 0.78);
+  --m-field: rgba(255, 255, 255, 0.6); --win: rgba(255, 255, 255, 0.95); --pagebg: #ffffff; --menu: rgba(250, 250, 252, 0.97);
+  --line: #e7e8ec;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; color-scheme: dark;
+}
+.mac-dark {
+  --wall-a: #1d2944; --wall-b: #3a2742; --wall-c: #4a3326;
+  --glass: rgba(40, 41, 46, 0.7); --glass-edge: rgba(255, 255, 255, 0.12); --glass-strong: rgba(40, 41, 46, 0.88);
+  --glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --m-ink: #f2f2f4; --m-ink-2: rgba(242, 242, 244, 0.64); --m-ink-3: rgba(242, 242, 244, 0.38);
+  --m-rule: rgba(255, 255, 255, 0.1); --m-hover: rgba(255, 255, 255, 0.07); --m-sel: rgba(255, 255, 255, 0.14);
+  --m-field: rgba(0, 0, 0, 0.25); --win: rgba(34, 35, 40, 0.96); --pagebg: #1f2025; --menu: rgba(44, 45, 50, 0.97);
+  --line: #2e3036;
+}
+
+body { background: var(--page); color: var(--ink); font-family: var(--ui); }
+[hidden] { display: none !important; }
+.wrap { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1360px; margin: 0 auto; }
+@media (max-width: 920px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; text-wrap: balance; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 10px; max-width: 80ch; line-height: 1.45; }
+.tries { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+kbd { font: 11px var(--mono); padding: 0 4px; border-radius: 4px; border: 1px solid var(--rule); background: var(--chip); }
+
+/* stage */
+.stage { position: relative; border-radius: 12px; overflow: hidden; height: 780px; color: var(--m-ink); outline: none;
+  background: radial-gradient(120% 90% at 10% 0%, var(--wall-a), transparent 60%),
+              radial-gradient(90% 80% at 100% 30%, var(--wall-b), transparent 65%),
+              linear-gradient(160deg, var(--wall-b), var(--wall-c)); }
+.stage:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.menubar { height: 24px; background: var(--glass); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  display: flex; align-items: center; gap: 16px; padding: 0 8px 0 12px; font-size: 12.5px; position: relative; z-index: 5; }
+.menubar b { font-weight: 600; }
+.menubar .grow { flex: 1; }
+.focuschip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 1px 4px 1px 8px; border-radius: 6px; background: var(--m-hover); border: 0; color: var(--m-ink); font-family: var(--ui); }
+.focuschip i { width: 9px; height: 9px; border-radius: 3px; background: var(--c); }
+.focuschip.none { color: var(--m-ink-2); padding-right: 8px; }
+.focuschip.none i { background: transparent; box-shadow: inset 0 0 0 1.25px var(--m-ink-3); }
+.focuschip .ux { width: 16px; height: 16px; border: 0; background: none; border-radius: 4px; display: grid; place-items: center; color: var(--m-ink-2); cursor: pointer; padding: 0; }
+.focuschip .ux:hover { background: var(--m-hover); color: var(--m-ink); }
+.focuschip .ux svg { width: 10px; height: 10px; }
+.focuschip.flash { animation: flash .9s ease; }
+@keyframes flash { 30% { background: color-mix(in srgb, var(--c, #888) 35%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .focuschip.flash, .tabrow.new, .new { animation: none !important; } .sw-card { transition: none !important; } }
+
+/* window */
+.win { position: absolute; left: 82px; right: 18px; top: 40px; bottom: 18px; border-radius: 14px; overflow: hidden;
+  box-shadow: var(--glass-shadow); display: flex; background: var(--win); }
+
+/* space window */
+.side { width: 230px; flex: none; display: flex; flex-direction: column; min-height: 0; padding: 8px 8px 6px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 22%, var(--win)), color-mix(in srgb, var(--c) 10%, var(--win))); }
+.side.overlay { position: absolute; left: 6px; top: 6px; bottom: 6px; z-index: 2; border-radius: 12px; box-shadow: var(--glass-shadow);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 22%, var(--glass-strong)), color-mix(in srgb, var(--c) 10%, var(--glass-strong)));
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+.edge { position: absolute; left: 0; top: 0; bottom: 0; width: 10px; z-index: 1; }
+.lights { display: flex; gap: 7px; align-items: center; height: 22px; padding-left: 4px; }
+.lights .dot, .floatlights .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--m-rule); }
+.lights .grow { flex: 1; }
+.floatlights { position: absolute; left: 14px; top: 14px; display: flex; gap: 7px; z-index: 1; }
+.urlbox { margin: 6px 0 8px; height: 30px; border-radius: 8px; background: var(--m-field); display: flex; align-items: center; gap: 6px; padding: 0 9px; font-size: 12px; color: var(--m-ink-2); cursor: text; border: 0; width: 100%; text-align: left; font-family: var(--ui); }
+.urlbox b { color: var(--m-ink); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.favs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
+.fav-tile { height: 40px; border-radius: 9px; background: var(--m-hover); display: grid; place-items: center; border: 0; cursor: pointer; padding: 0; position: relative; }
+.fav-tile.on { background: var(--m-sel); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.sec { font-size: 10.5px; font-weight: 600; color: var(--m-ink-3); padding: 8px 6px 3px; display: flex; align-items: center; gap: 6px; letter-spacing: .02em; }
+.sec .grow { flex: 1; height: 1px; background: var(--m-rule); }
+.tabs { overflow-y: auto; min-height: 0; flex: 1; }
+.tabrow { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px 0 8px; border-radius: 8px; font-size: 12.5px; cursor: pointer; position: relative; }
+.tabrow:hover { background: var(--m-hover); }
+.tabrow.on { background: var(--m-sel); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.tabrow .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabrow .x { opacity: 0; display: flex; }
+.tabrow:hover .x, .tabrow:focus-within .x { opacity: 1; }
+.tabrow.new, .new { animation: newtab 1.4s ease; }
+@keyframes newtab { 0% { background: color-mix(in srgb, var(--accent) 30%, transparent); } }
+.tabrow.split { padding-left: 4px; }
+.split-pair { display: flex; gap: 3px; flex: 1; min-width: 0; }
+.split-pair span { flex: 1; min-width: 0; display: flex; gap: 5px; align-items: center; padding: 3px 5px; border-radius: 6px; background: var(--m-hover); font-size: 11.5px; overflow: hidden; white-space: nowrap; }
+.newtab { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 8px; font-size: 12.5px; color: var(--m-ink-2); cursor: pointer; border: 0; background: none; width: 100%; font-family: var(--ui); }
+.newtab:hover { background: var(--m-hover); }
+.spacebar { display: flex; align-items: center; gap: 4px; padding: 6px 4px 0; border-top: 1px solid var(--m-rule); margin-top: 4px; font-size: 11.5px; font-weight: 600; color: var(--m-ink-2); }
+.fv { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center; color: #fff; font-size: 9.5px; font-weight: 700; background: var(--f); }
+.fav-tile .fv { width: 20px; height: 20px; font-size: 11px; border-radius: 5px; }
+.playing-dot { position: absolute; right: 5px; top: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--c); }
+.spk { color: var(--m-ink-3); display: grid; place-items: center; }
+.spk svg { width: 12px; height: 12px; }
+
+.content { flex: 1; min-width: 0; display: flex; padding: 8px 8px 8px 0; gap: 6px; position: relative; }
+.content.full { padding: 8px; }
+.pane { flex: 1; min-width: 0; border-radius: 10px; overflow: hidden; background: var(--pagebg); box-shadow: 0 0 0 1px var(--m-rule), 0 1px 3px rgba(0,0,0,.08); display: flex; flex-direction: column; }
+.pane.dim { opacity: .82; }
+.strip { height: 30px; display: flex; align-items: center; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--m-rule); flex: none; }
+.strip .st { font-size: 11.5px; padding: 3px 8px; border-radius: 6px; display: flex; gap: 6px; align-items: center; max-width: 180px; white-space: nowrap; overflow: hidden; }
+.strip .st.on { background: var(--m-hover); }
+.pg { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+
+.gp { height: 100%; display: flex; flex-direction: column; color: var(--m-ink); }
+.gp .nav { height: 40px; display: flex; align-items: center; gap: 14px; padding: 0 18px 0 70px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--m-ink-2); flex: none; }
+.gp .nav b { color: var(--m-ink); }
+.gp .hero { height: 150px; background: var(--t); flex: none; }
+.gp .body { padding: 16px 18px; }
+.gp h2 { font-size: 18px; margin: 0 0 10px; font-weight: 650; }
+.gp .ln { height: 8px; border-radius: 4px; background: var(--line); margin: 0 0 9px; }
+.music { height: 100%; display: grid; grid-template-columns: 140px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 54px; background: #1e1d24; color: #f3f1f7; }
+.music .ms { padding: 40px 12px 14px; font-size: 12px; display: flex; flex-direction: column; gap: 8px; border-right: 1px solid rgba(255,255,255,.07); }
+.music .ms .sel { color: #ff6b81; font-weight: 600; }
+.music .mm { padding: 16px; overflow: hidden; }
+.music h2 { font-size: 18px; margin: 0 0 12px; }
+.albums { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 12px; }
+.albums div { aspect-ratio: 1; border-radius: 8px; max-width: 100%; }
+.music .bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: #29272f; font-size: 12px; }
+.music .art { width: 34px; height: 34px; border-radius: 6px; background: linear-gradient(135deg, #ff8a5b, #c02c6f); }
+.music .bar button { border: 0; background: #ff6b81; color: #fff; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; margin-left: auto; }
+.music .bar button svg { width: 13px; height: 13px; }
+
+/* project window */
+.proj { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.proj .tb { height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 1px solid var(--m-rule); font-size: 12px; flex: none; }
+.proj .tb .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--m-rule); }
+.proj .tb .ttl { font-weight: 600; margin: 0 8px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.proj .tb .ttl i { width: 12px; height: 12px; border-radius: 4px; background: var(--c); }
+.ptab { padding: 3px 9px; border-radius: 6px; color: var(--m-ink-2); border: 0; background: none; font: 12px var(--ui); cursor: pointer; white-space: nowrap; }
+.ptab.on { background: var(--m-hover); color: var(--m-ink); }
+.proj .pb { flex: 1; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); min-height: 0; }
+.proj .pb > div { padding: 16px; overflow: hidden; }
+.proj .pb > div + div { border-left: 1px solid var(--m-rule); background: color-mix(in srgb, var(--c) 4%, transparent); }
+.proj h3 { font-size: 13px; margin: 0 0 4px; }
+.proj .when { font-size: 11px; color: var(--m-ink-2); margin-bottom: 10px; }
+.proj p { font-size: 12.5px; line-height: 1.5; margin: 0 0 8px; }
+.trow { display: flex; gap: 8px; font-size: 12.5px; padding: 3px 0; }
+.trow .bx { width: 13px; height: 13px; border-radius: 4px; border: 1.25px solid var(--m-ink-3); flex: none; margin-top: 2px; }
+.trow .fm { color: var(--c); font-weight: 700; }
+.lk { font-size: 12px; color: var(--accent); padding: 3px 0; }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 8px; }
+.cards div { height: 64px; border-radius: 8px; background: var(--pagebg); box-shadow: 0 0 0 1px var(--m-rule); font-size: 11px; padding: 6px; color: var(--m-ink-2); overflow: hidden; }
+.tiling { flex: 1; display: flex; gap: 6px; padding: 6px; min-height: 0; background: color-mix(in srgb, var(--c) 6%, var(--win)); }
+.tile { flex: 1; min-width: 0; border-radius: 9px; background: var(--pagebg); box-shadow: 0 0 0 1px var(--m-rule); display: flex; flex-direction: column; overflow: hidden; }
+.tile.hl { box-shadow: 0 0 0 2px var(--c); }
+.tile .strip { height: 28px; }
+.tile .tb2 { flex: 1; background: var(--t); opacity: .85; }
+
+/* dock */
+.dock { position: absolute; left: 8px; top: 92px; padding: 6px; border-radius: 18px; display: flex; flex-direction: column; gap: 6px; z-index: 3;
+  background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5); }
+.dock .sep { height: 1px; margin: 2px 6px; background: var(--m-rule); }
+.mk { position: relative; width: 44px; height: 44px; border: 0; padding: 0; background: none; cursor: pointer; display: grid; place-items: center; }
+.mk .ic { width: 40px; height: 40px; border-radius: 9px; display: grid; place-items: center; color: #fff; transition: transform .15s ease;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 78%, #fff), var(--c)); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 1px 2px rgba(0,0,0,.18); }
+.mk .ic svg { width: 20px; height: 20px; }
+.mk.front::before { content: ""; position: absolute; left: -5px; top: 15px; width: 3px; height: 14px; border-radius: 2px; background: var(--m-ink-3); }
+.mk .pd { position: absolute; bottom: -3px; left: 50%; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--m-ink-2); }
+/* the focused project, four ways */
+.f-ring .mk.focused .ic { box-shadow: 0 0 0 2px var(--win), 0 0 0 4px var(--c), 0 1px 2px rgba(0,0,0,.18); }
+.f-ring .mk.focused .ic { transform: scale(.9); }
+.f-bar .mk.focused::before { content: ""; position: absolute; left: -5px; top: 8px; width: 3px; height: 28px; border-radius: 2px; background: var(--c); }
+.f-badge .mk.focused::after { content: ""; position: absolute; right: -1px; top: -1px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--win) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23444' stroke-width='2.6'%3E%3Ccircle cx='12' cy='12' r='7'/%3E%3Ccircle cx='12' cy='12' r='2' fill='%23444'/%3E%3C/svg%3E") center / 10px no-repeat; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.f-dim .mk[data-kind="project"]:not(.focused) .ic { opacity: .55; filter: saturate(.5); }
+.dock.nofocus .mk[data-kind="project"] .ic { opacity: 1; filter: none; }
+.mk:focus-visible, .ib:focus-visible, .tabrow:focus-visible, .fav-tile:focus-visible, .urlbox:focus-visible, .newtab:focus-visible, .ptab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.ib { width: 24px; height: 22px; border: 0; background: none; border-radius: 6px; display: grid; place-items: center; color: var(--m-ink-2); cursor: pointer; padding: 0; flex: none; }
+.ib:hover { background: var(--m-hover); color: var(--m-ink); }
+.ib svg { width: 14px; height: 14px; }
+
+/* command bar */
+.scrim { position: absolute; inset: 0; z-index: 7; background: rgba(10, 12, 20, .08); }
+.cmd { position: absolute; left: 50%; top: 96px; width: min(600px, calc(100% - 40px)); transform: translateX(-50%); z-index: 8; border-radius: 16px; background: var(--menu); box-shadow: 0 24px 60px rgba(0,0,0,.3), 0 0 0 1px var(--m-rule); overflow: hidden; }
+.cmd .inrow { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--m-rule); }
+.cmd .scope { font-size: 11px; padding: 2px 7px; border-radius: 6px; background: var(--m-hover); color: var(--m-ink-2); white-space: nowrap; }
+.cmd input { flex: 1; min-width: 0; border: 0; background: none; font: 16px var(--ui); padding: 14px 0; color: var(--m-ink); outline: none; }
+.cmd .grp { font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--m-ink-3); padding: 8px 16px 3px; }
+.cmd .opt { display: flex; gap: 10px; align-items: center; padding: 6px 16px; font-size: 13px; cursor: pointer; }
+.cmd .opt .oi { width: 18px; height: 18px; border-radius: 5px; flex: none; display: grid; place-items: center; color: #fff; background: var(--c, #8a8f99); font-size: 10px; font-weight: 700; }
+.cmd .opt .oi.round { border-radius: 50%; }
+.cmd .opt .oi svg { width: 11px; height: 11px; }
+.cmd .opt .ot { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmd .opt .ot small { color: var(--m-ink-3); margin-left: 6px; }
+.cmd .opt kbd { background: transparent; border-color: var(--m-rule); color: var(--m-ink-3); }
+.cmd .opt.on { background: var(--accent); color: #fff; }
+.cmd .opt.on .ot small, .cmd .opt.on kbd { color: rgba(255,255,255,.75); border-color: rgba(255,255,255,.4); }
+.cmd .foot { display: flex; gap: 14px; padding: 7px 16px; border-top: 1px solid var(--m-rule); font-size: 11px; color: var(--m-ink-3); flex-wrap: wrap; }
+.cmd .list { max-height: 420px; overflow: auto; padding-bottom: 6px; }
+
+/* switcher */
+.switcher { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 8; max-width: calc(100% - 24px); padding: 12px; border-radius: 22px;
+  background: var(--glass-strong); border: 1px solid var(--glass-edge); box-shadow: 0 24px 60px rgba(0,0,0,.3);
+  backdrop-filter: blur(30px) saturate(1.6); -webkit-backdrop-filter: blur(30px) saturate(1.6); }
+.sw-row { display: flex; gap: 10px; overflow-x: auto; align-items: stretch; }
+.sw-div { width: 1px; background: var(--m-rule); flex: none; margin: 8px 2px; }
+.sw-card { width: 176px; flex: none; border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; transition: background .1s ease; border: 0; background: none; text-align: left; color: var(--m-ink); font-family: var(--ui); }
+.sw-card.on { background: color-mix(in srgb, var(--c) 16%, var(--m-sel)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 70%, transparent); }
+.sw-card:hover:not(.on) { background: var(--m-hover); }
+.sw-top { display: flex; align-items: center; gap: 8px; }
+.sw-top .ic { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; color: #fff; flex: none; background: linear-gradient(180deg, color-mix(in srgb, var(--c) 78%, #fff), var(--c)); }
+.sw-top .ic svg { width: 18px; height: 18px; }
+.sw-top .nm { font-size: 13px; font-weight: 600; min-width: 0; line-height: 1.2; }
+.sw-top .nm small { display: block; font-size: 10.5px; font-weight: 500; color: var(--m-ink-2); }
+.sw-top .nm .fx { color: var(--c); }
+.sw-detail { font-size: 11.5px; color: var(--m-ink-2); line-height: 1.35; min-height: 30px; }
+.sw-detail b { color: var(--m-ink); font-weight: 500; }
+.sw-list { display: flex; flex-direction: column; gap: 1px; }
+.sw-item { font-size: 11.5px; padding: 3px 6px; border-radius: 6px; display: flex; gap: 6px; align-items: center; white-space: nowrap; overflow: hidden; }
+.sw-item .k { color: var(--m-ink-3); font-size: 10px; margin-left: auto; flex: none; }
+.sw-item.tile { padding-left: 18px; color: var(--m-ink-2); }
+.sw-item.on { background: var(--c); color: #fff; }
+.sw-item.on .k { color: rgba(255,255,255,.75); }
+.sw-hint { text-align: center; font-size: 11px; color: var(--m-ink-2); margin-top: 8px; }
+
+/* menus, toast */
+.menu { position: absolute; z-index: 9; min-width: 200px; padding: 5px; border-radius: 9px; background: var(--menu); box-shadow: var(--glass-shadow); border: 1px solid var(--m-rule); font-size: 12.5px; }
+.menu .mi { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 5px; cursor: pointer; border: 0; background: none; width: 100%; text-align: left; font: inherit; color: var(--m-ink); }
+.menu .mi:hover, .menu .mi:focus-visible { background: var(--accent); color: #fff; outline: none; }
+.menu .mh { font-size: 11px; color: var(--m-ink-3); padding: 5px 8px 2px; }
+.menu .msep { height: 1px; background: var(--m-rule); margin: 4px 2px; }
+.menu i { width: 10px; height: 10px; border-radius: 3px; background: var(--c); flex: none; }
+.toast { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); z-index: 10; background: var(--menu); color: var(--m-ink); font-size: 12.5px; padding: 8px 14px; border-radius: 10px; box-shadow: var(--glass-shadow); max-width: calc(100% - 40px); }
+
+/* controls */
+.controls { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 14px; align-self: start; position: sticky; top: calc(12px + env(safe-area-inset-top, 0px)); }
+.cg { display: flex; flex-direction: column; gap: 6px; }
+.gl { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.gl.big { font-size: 11px; color: var(--ink-2); border-top: 1px solid var(--rule); padding-top: 12px; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button, .btn { font: 12px var(--ui); padding: 4px 9px; border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.seg button:focus-visible, .btn:focus-visible, .copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chk { display: flex; gap: 7px; align-items: center; font-size: 12.5px; }
+.hint { font-size: 11.5px; color: var(--ink-2); margin: 0; line-height: 1.4; }
+.rules { font-size: 11.5px; color: var(--ink-2); margin: 0; padding-left: 16px; line-height: 1.5; }
+.summary { font: 11px/1.5 var(--mono); background: var(--chip); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; color: var(--ink); margin: 0; }
+.copy { font: 12px var(--ui); padding: 6px 10px; border-radius: 7px; border: 0; background: var(--accent); color: #fff; cursor: pointer; align-self: flex-start; }
+.note { width: 100%; box-sizing: border-box; min-height: 54px; font: 12px var(--ui); border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); padding: 6px 8px; resize: vertical; }
+details summary { cursor: pointer; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+@media (max-width: 600px) {
+  .stage { height: 720px; }
+  .win { left: 64px; right: 8px; }
+  .side { width: 170px; }
+  .content .pane + .pane { display: none; }
+  .music { grid-template-columns: minmax(0, 1fr); }
+  .music .ms { display: none; }
+  .proj .pb { grid-template-columns: minmax(0, 1fr); }
+  .proj .pb > div + div { display: none; }
+  .sw-card { width: 150px; }
+}
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>Spaces, focus, switcher, command bar</h1>
+    <p class="sub">Click the stage first so it has the keyboard. Hold <kbd>⌥</kbd> and press <kbd>Tab</kbd> for the switcher (arrows move into a project's workspaces; let go of ⌥ to jump). <kbd>⌥Space</kbd> opens the command bar. In a space, <kbd>⌘S</kbd> or the window's left edge shows the sidebar. Right-click a project mark, or use × on the menu bar's focus chip, to unfocus. All data is example data.</p>
+    <div class="tries">
+      <button class="btn" id="trySwitch">Show the switcher</button>
+      <button class="btn" id="tryCmd">Open the command bar</button>
+      <button class="btn" id="trySimlink">Open a link from Mail</button>
+    </div>
+    <div class="stage" id="stage" tabindex="0" aria-label="Mocked desktop">
+      <div class="menubar"><b>Folio</b><span>File</span><span>Edit</span><span>View</span><span>Window</span><span class="grow"></span>
+        <span class="focuschip" id="focuschip"></span></div>
+      <div class="win" id="win"></div>
+      <div class="dock" id="dock" role="toolbar" aria-label="Folio dock"></div>
+      <div class="scrim" id="scrim" hidden></div>
+      <div class="switcher" id="switcher" hidden role="dialog" aria-label="Switcher"></div>
+      <div class="cmd" id="cmd" hidden role="dialog" aria-label="Command bar"></div>
+      <div class="menu" id="menu" hidden role="menu"></div>
+      <div class="toast" id="toast" hidden role="status"></div>
+    </div>
+  </div>
+
+  <aside class="controls" aria-label="Mock controls">
+    <span class="gl">Focus</span>
+    <div class="cg"><span class="gl">Focused project in the dock</span>
+      <div class="seg" data-k="fmark"><button data-v="ring">Ring in its colour</button><button data-v="bar">Coloured bar beside it</button><button data-v="badge">Target badge</button><button data-v="dim">Others dimmed</button></div>
+      <p class="hint">The short grey bar is the window in front. It's a different thing from focus.</p>
+    </div>
+    <div class="cg"><span class="gl">Unfocus from</span>
+      <label class="chk"><input type="checkbox" id="uChip"> The menu bar's focus chip (×)</label>
+      <label class="chk"><input type="checkbox" id="uDock"> The mark's right-click menu</label>
+      <label class="chk"><input type="checkbox" id="uCmd"> The command bar</label>
+      <label class="chk"><input type="checkbox" id="uSwitch"> A “No project” card in the switcher</label>
+      <p class="hint">Unfocusing stops timing the project.</p>
+    </div>
+    <div class="cg"><span class="gl">Capture with nothing focused</span>
+      <div class="seg" data-k="nofocus"><button data-v="ask">Asks which project</button><button data-v="last">Goes to the last focused</button><button data-v="refuse">Refused, with a hint</button></div>
+    </div>
+
+    <span class="gl big">Switcher</span>
+    <div class="cg"><span class="gl">Shortcut</span>
+      <div class="seg" data-k="swkey"><button data-v="opt">⌥Tab</button><button data-v="ctl">⌃⌥Tab</button></div>
+      <p class="hint">⌘Tab and ⌘` belong to macOS. The mock only listens for ⌥Tab.</p>
+    </div>
+    <div class="cg"><span class="gl">In the row</span>
+      <div class="seg" data-k="swrow"><button data-v="projects">Open projects</button><button data-v="both">Open projects, then spaces</button></div>
+    </div>
+    <div class="cg"><span class="gl">Order</span>
+      <div class="seg" data-k="sworder"><button data-v="recent">Most recent first</button><button data-v="dock">Dock order</button></div>
+    </div>
+    <div class="cg"><span class="gl">Each card shows</span>
+      <label class="chk"><input type="checkbox" id="swSession"> Current session</label>
+      <label class="chk"><input type="checkbox" id="swTask"> Focused task</label>
+      <label class="chk"><input type="checkbox" id="swTiles"> Tiles under each workspace</label>
+    </div>
+
+    <span class="gl big">Command bar</span>
+    <div class="cg"><span class="gl">What it is</span>
+      <div class="seg" data-k="cmdis"><button data-v="quick">The quick bar, grown</button><button data-v="new">A new bar beside it</button></div>
+      <p class="hint" id="cmdisHint"></p>
+    </div>
+    <div class="cg"><span class="gl">Typing with no prefix</span>
+      <div class="seg" data-k="bare"><button data-v="find">Finds things; capture is the last row</button><button data-v="capture">Captures, as the quick bar does</button></div>
+    </div>
+    <div class="cg"><span class="gl">It finds</span>
+      <label class="chk"><input type="checkbox" id="fWs"> Workspaces and tiles</label>
+      <label class="chk"><input type="checkbox" id="fTabs"> Tabs in every space</label>
+      <label class="chk"><input type="checkbox" id="fTasks"> Tasks</label>
+      <label class="chk"><input type="checkbox" id="fCmds"> Commands</label>
+    </div>
+
+    <details class="cg"><summary>Decided last round</summary>
+      <ul class="rules" style="margin-top:6px">
+        <li>Spaces sit after a divider, same squircle marks.</li>
+        <li>A window per space.</li>
+        <li>Sidebar hidden; ⌘S or the left edge shows it.</li>
+        <li>Tab strips only in a split.</li>
+        <li>Today's tabs stay until closed.</li>
+        <li>Links from other apps: Today in the front space.</li>
+        <li>Send to project: as a card, to Links, as a task.</li>
+        <li>A space is never the focused project.</li>
+      </ul>
+    </details>
+    <div class="cg"><label class="chk"><input type="checkbox" id="macdark"> Dark Mac</label></div>
+    <div class="cg"><span class="gl">Your note</span>
+      <textarea class="note" id="note" placeholder="Anything the controls don't cover"></textarea>
+    </div>
+    <div class="cg"><span class="gl">Summary</span>
+      <pre class="summary" id="summary"></pre>
+      <button class="copy" id="copy">Copy summary</button>
+    </div>
+  </aside>
+</div>
+
+<script>
+const I = {
+  folio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h6l2 2h8v12H4z"/></svg>',
+  house: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9H3z"/><path d="M10 20v-5h4v5"/></svg>',
+  pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
+  sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/></svg>',
+  book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M4 5.5C6.5 4.5 9.5 4.5 12 6c2.5-1.5 5.5-1.5 8-.5V19c-2.5-1-5.5-1-8 .5-2.5-1.5-5.5-1.5-8-.5z"/><path d="M12 6v13.5"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  split: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M12 5v14"/></svg>',
+  send: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h12M13 7l5 5-5 5"/></svg>',
+  side: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M9 5v14"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
+  speaker: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7z"/></svg>',
+  target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>',
+  none: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7.5"/><path d="M7 17L17 7"/></svg>',
+  grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+  tab: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3.5" y="6" width="17" height="13" rx="2"/><path d="M3.5 10h17"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>',
+};
+
+let uid = 100;
+const T = (title, host, f, g, t, extra = {}) => ({ id: ++uid, title, host, f, g, t, ...extra });
+
+// Example data. Projects have notes, tasks, workspaces of tiles; spaces have tabs.
+const PROJECTS = [
+  { k: 'folio', title: 'Folio', color: '#3b78e7', icon: 'folio', session: 'Spaces design', when: 'since 2:10 PM', task: 'Mock the switcher',
+    note: ['Spaces are Folio’s browser, kept apart from projects.', 'The dock should say which project is focused.'],
+    tasks: ['Mock the switcher', 'Decide what unfocus does to timing', 'Copy Sign-In From for icloud.com'], links: ['web-cards.md', 'canvas-workspaces.md'], cards: ['GitHub · project-manager', 'Liquid Glass guidelines'],
+    workspaces: [
+      { name: 'Flyout', tiles: [T('Figma · Flyout', 'figma.com', '#a259ff', 'F', 'linear-gradient(135deg,#efe6ff,#c9b1f5)'), T('concepts.md', 'docs', '#555', 'M', 'linear-gradient(135deg,#f2f2f2,#dcdcdc)')] },
+      { name: 'Release', tiles: [T('GitHub Releases', 'github.com', '#24292f', 'G', 'linear-gradient(135deg,#eef0f3,#cfd4db)'), T('Notary log', 'terminal', '#333', '>', 'linear-gradient(135deg,#2b2b2b,#444)')] } ] },
+  { k: 'house', title: '42 Aberdeen', color: '#d0703a', icon: 'house', session: 'Contractor walk-through', when: 'Thu, Oct 29', task: 'Email the engineer for the letter',
+    note: ['Kitchen wall is load-bearing; needs an engineer letter.'], tasks: ['Email the engineer for the letter', 'Pick tile for the upstairs bath'], links: ['Permit portal'], cards: ['Tile supplier'],
+    workspaces: [{ name: 'Renovation', tiles: [T('Tile supplier', 'tiles.example.com', '#b5651d', 'T', 'linear-gradient(135deg,#f6e3d3,#e0b48e)'), T('Permit portal', 'permits.example.gov', '#2f5d8a', 'P', 'linear-gradient(135deg,#dbe6f1,#9fb8d3)')] }] },
+  { k: 'essay', title: 'Essay: calm software', color: '#4b8a5c', icon: 'pen', session: 'Outline', when: 'Mon, Nov 2', task: 'Draft the opening',
+    note: ['Three sections: interruption, ownership, pace.'], tasks: ['Draft the opening', 'Find the Weiser quote'], links: ['Calm Technology'], cards: ['Outline'],
+    workspaces: [{ name: 'Writing', tiles: [T('Draft', 'docs', '#4b8a5c', 'D', 'linear-gradient(135deg,#e5f1e8,#b7d6bf)')] }] },
+];
+const SPACES = [
+  { k: 'personal', title: 'Personal', color: '#e0567a', icon: 'sun',
+    favs: [T('Listen Now', 'music.apple.com', '#fa3d5b', '♪', '', { music: true }), T('Inbox (3)', 'mail.example.com', '#2f78c4', 'M', 'linear-gradient(135deg,#dbe8f7,#9fbfe6)'), T('November 2026', 'calendar.example.com', '#d0453b', '4', 'linear-gradient(135deg,#f7dcd8,#e7a59c)'), T('Morning Brief', 'news.example.com', '#222', 'N', 'linear-gradient(135deg,#eceae4,#c9c4b5)')],
+    pinned: [T('Budget 2026', 'sheets.example.com', '#1f8a4c', 'B', 'linear-gradient(135deg,#dff1e6,#9fd3b4)'), T('Recipes', 'cooking.example.com', '#2f8f5b', 'C', 'linear-gradient(135deg,#e9d6b8,#b8794a)')],
+    today: [T('Ceramic pour-over kettles', 'shop.example.com', '#7a5cc4', 'S', 'linear-gradient(135deg,#ece7f6,#c9bde8)'), T('Weather · Portland', 'weather.example.com', '#2f78c4', 'W', 'linear-gradient(160deg,#9cc6ef,#e6eef7)'), T('Swift Forums · WKWebView cookies', 'forums.swift.org', '#f05138', 'S', 'linear-gradient(135deg,#f6f1ee,#e9d9d2)')] },
+  { k: 'reading', title: 'Reading', color: '#8a6d3b', icon: 'book', favs: [],
+    pinned: [T('Reading list', 'read.example.com', '#8a6d3b', 'R', 'linear-gradient(135deg,#f3ece0,#dccbb0)')],
+    today: [T('The long tail of local-first', 'essays.example.org', '#8a6d3b', 'E', 'linear-gradient(135deg,#f3ece0,#dccbb0)'), T('Designing calm interfaces', 'blog.example.net', '#4b7a6b', 'B', 'linear-gradient(135deg,#e3eee9,#b9d3c8)')] },
+];
+const OPEN_PROJECTS = ['folio', 'house', 'essay'];
+
+const DEFAULTS = { fmark: 'ring', uChip: true, uDock: true, uCmd: true, uSwitch: false, nofocus: 'ask',
+  swkey: 'opt', swrow: 'both', sworder: 'recent', swSession: true, swTask: true, swTiles: false,
+  cmdis: 'quick', bare: 'find', fWs: true, fTabs: true, fTasks: true, fCmds: true, macdark: false, note: '' };
+let S = { ...DEFAULTS };
+try { Object.assign(S, JSON.parse(localStorage.getItem('spaces-mock-2') || '{}')); } catch (e) {}
+
+// state
+let front = { kind: 'space', k: 'personal' };     // window in front
+let focused = 'folio', lastFocused = 'folio';
+let recent = ['folio', 'house', 'essay'];          // project + space keys, most recent first
+let recentSpaces = ['personal', 'reading'];
+const sel = { personal: SPACES[0].favs[0].id, reading: SPACES[1].today[0].id };
+const projView = { folio: { ws: 0, tile: null }, house: { ws: -1 }, essay: { ws: -1 } };   // -1 = Notes
+const splits = {};
+let playing = true, sidePeek = false, sideShown = false;
+let fresh = null, menuState = null;
+let sw = null;      // switcher state: { items, i, j, held }
+let cmd = null;     // command bar state: { scope, i, opts }
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const space = k => SPACES.find(s => s.k === k);
+const proj = k => PROJECTS.find(p => p.k === k);
+const allTabs = sp => [...sp.favs, ...sp.pinned, ...sp.today];
+const findTab = (sp, id) => allTabs(sp).find(t => t.id === id);
+const fv = t => `<span class="fv" style="--f:${t.f}">${esc(t.g)}</span>`;
+const toast = text => { const t = $('toast'); t.textContent = text; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 3000); };
+const touch = k => { recent = [k, ...recent.filter(x => x !== k)]; };
+const touchSpace = k => { recentSpaces = [k, ...recentSpaces.filter(x => x !== k)]; };
+
+/* ---------- focus ---------- */
+function flashChip() { const c = $('focuschip'); c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); }
+function setFocus(k, why) {
+  if (focused === k) return;
+  if (k) lastFocused = k;
+  focused = k; flashChip();
+  if (!k && why) toast(why);
+}
+function unfocus() { const was = focused && proj(focused).title; setFocus(null, `Unfocused ${was}. Timing stopped. Spaces and windows stay as they are.`); render(); }
+
+/* ---------- dock ---------- */
+function renderDock() {
+  const d = $('dock');
+  d.className = 'dock f-' + S.fmark + (focused ? '' : ' nofocus');
+  const mark = (item, kind) => {
+    const isFront = front.kind === kind && front.k === item.k;
+    const isFocused = kind === 'project' && focused === item.k;
+    const pd = kind === 'space' && item.k === 'personal' && playing ? '<span class="pd"></span>' : '';
+    const label = `${item.title}, ${kind}${isFocused ? ', focused' : ''}${isFront ? ', in front' : ''}`;
+    return `<button class="mk ${isFront ? 'front' : ''} ${isFocused ? 'focused' : ''}" data-kind="${kind}" data-k="${item.k}" aria-label="${esc(label)}" title="${esc(item.title)}${isFocused ? ' (focused)' : ''}">
+      <span class="ic" style="--c:${item.color}">${I[item.icon]}</span>${pd}</button>`;
+  };
+  d.innerHTML = OPEN_PROJECTS.map(k => mark(proj(k), 'project')).join('') + '<div class="sep"></div>' + SPACES.map(s => mark(s, 'space')).join('');
+}
+
+function renderChip() {
+  const c = $('focuschip');
+  if (focused) {
+    const p = proj(focused);
+    c.className = 'focuschip'; c.style.setProperty('--c', p.color);
+    c.innerHTML = `<i></i><span>Focused: ${esc(p.title)}</span>${S.uChip ? `<button class="ux" id="unfocusChip" aria-label="Unfocus ${esc(p.title)}" title="Unfocus">${I.x}</button>` : ''}`;
+  } else {
+    c.className = 'focuschip none'; c.innerHTML = '<i></i><span>No focused project</span>';
+  }
+}
+
+/* ---------- windows ---------- */
+function renderWindow() {
+  const w = $('win');
+  if (front.kind === 'project') { w.innerHTML = projectWindow(proj(front.k)); return; }
+  const sp = space(front.k);
+  w.style.setProperty('--c', sp.color);
+  const showSide = sideShown || sidePeek;
+  w.innerHTML = `${!sideShown ? '<div class="edge" id="edge"></div>' : ''}
+    ${showSide ? `<div class="side ${sideShown ? '' : 'overlay'}" id="side">${sidebar(sp)}</div>` : '<div class="floatlights"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>'}
+    <div class="content ${sideShown ? '' : 'full'}">${panes(sp)}</div>`;
+}
+
+function sidebar(sp) {
+  const cur = findTab(sp, sel[sp.k]) || allTabs(sp)[0];
+  const row = t => {
+    const pair = splits[sp.k];
+    const other = pair && pair.includes(t.id) ? pair.find(x => x !== t.id) : null;
+    const otherIsFav = other != null && sp.favs.some(f => f.id === other);
+    if (other != null && !otherIsFav && pair[1] === t.id) return '';
+    if (other != null) {
+      const b = findTab(sp, other);
+      return `<div class="tabrow split ${pair.includes(sel[sp.k]) ? 'on' : ''}" tabindex="0" data-tab="${t.id}">
+        <span class="split-pair"><span>${fv(t)}${esc(t.title)}</span><span>${fv(b)}${esc(b.title)}</span></span>
+        <button class="ib" data-unsplit="1" aria-label="Separate split" title="Separate">${I.x}</button></div>`;
+    }
+    const pinned = sp.pinned.includes(t);
+    return `<div class="tabrow ${sel[sp.k] === t.id ? 'on' : ''} ${fresh === t.id ? 'new' : ''}" tabindex="0" data-tab="${t.id}">
+      ${fv(t)}<span class="t">${esc(t.title)}</span>
+      <span class="x">
+        <button class="ib" data-splitwith="${t.id}" aria-label="Split with current tab" title="Split with current tab">${I.split}</button>
+        <button class="ib" data-send="${t.id}" aria-label="Send to a project" title="Send to a project" aria-haspopup="menu">${I.send}</button>
+        <button class="ib" data-close="${t.id}" aria-label="${pinned ? 'Unpin' : 'Close'} ${esc(t.title)}" title="${pinned ? 'Unpin' : 'Close'}">${I.x}</button></span></div>`;
+  };
+  const favs = sp.favs.length ? `<div class="favs">${sp.favs.map(t => `<button class="fav-tile ${sel[sp.k] === t.id ? 'on' : ''}" data-tab="${t.id}" aria-label="${esc(t.title)}" title="${esc(t.title)}">${fv(t)}${t.music && playing ? '<span class="playing-dot"></span>' : ''}</button>`).join('')}</div>` : '';
+  return `<div class="lights"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="grow"></span>
+      <button class="ib" data-toggleside="1" aria-label="${sideShown ? 'Hide' : 'Keep'} sidebar" title="${sideShown ? 'Hide sidebar' : 'Keep sidebar shown'} (⌘S)">${I.side}</button></div>
+    <button class="urlbox" data-cmd="space" aria-label="Address and commands">${I.lock}<b>${esc(cur ? cur.host : 'Search or enter address')}</b></button>
+    ${favs}
+    <div class="tabs">
+      ${sp.pinned.length ? `<div class="sec">Pinned<span class="grow"></span></div>${sp.pinned.map(row).join('')}` : ''}
+      <div class="sec">Today<span class="grow"></span></div>
+      <button class="newtab" data-cmd="space">${I.plus.replace('<svg', '<svg width="14" height="14"')}New Tab</button>
+      ${sp.today.map(row).join('')}
+    </div><div class="spacebar">${esc(sp.title)}</div>`;
+}
+
+function page(t) {
+  if (!t) return '<div class="gp"><div class="body"><h2>No tab</h2></div></div>';
+  if (t.music) {
+    const tiles = [['#ff8a5b', '#c02c6f'], ['#4fa3d9', '#1b3e7a'], ['#c9d66b', '#4e7a2a'], ['#f2c14e', '#d1495b'], ['#9b7fd1', '#3c2a7a'], ['#7ad1c3', '#2a6f7a']];
+    return `<div class="music"><div class="ms"><span class="sel">Listen Now</span><span>Browse</span><span>Radio</span><span>Library</span></div>
+      <div class="mm"><h2>Listen Now</h2><div class="albums">${tiles.map(([a, b]) => `<div style="background:linear-gradient(135deg,${a},${b})"></div>`).join('')}</div></div>
+      <div class="bar"><span class="art"></span><span><div>Late Swim</div><div style="opacity:.6;font-size:11px">The Example Quartet</div></span>
+      <button data-pp="1" aria-label="${playing ? 'Pause' : 'Play'}">${playing ? I.pause : I.play}</button></div></div>`;
+  }
+  return `<div class="gp"><div class="nav"><b>${esc(t.host.split('.')[0])}</b><span>Home</span><span>About</span></div>
+    <div class="hero" style="--t:${t.t}"></div><div class="body"><h2>${esc(t.title)}</h2>
+    <div class="ln" style="width:92%"></div><div class="ln" style="width:86%"></div><div class="ln" style="width:70%"></div><div class="ln" style="width:80%"></div></div></div>`;
+}
+
+function panes(sp) {
+  const pair = splits[sp.k];
+  const ids = pair && pair.includes(sel[sp.k]) ? pair : [sel[sp.k]];
+  return ids.map(id => {
+    const t = findTab(sp, id);
+    const strip = ids.length > 1 ? `<div class="strip"><span class="st on">${fv(t)}${esc(t.title)}</span></div>` : '';
+    return `<div class="pane ${ids.length > 1 && sel[sp.k] !== id ? 'dim' : ''}">${strip}<div class="pg">${page(t)}</div></div>`;
+  }).join('');
+}
+
+function projectWindow(p) {
+  const v = projView[p.k];
+  const tabs = `<button class="ptab ${v.ws === -1 ? 'on' : ''}" data-pws="-1">Notes</button><button class="ptab" data-pws="-2">Board</button>` +
+    p.workspaces.map((w, i) => `<button class="ptab ${v.ws === i ? 'on' : ''}" data-pws="${i}">${esc(w.name)}</button>`).join('');
+  let body;
+  if (v.ws >= 0) {
+    const ws = p.workspaces[v.ws];
+    body = `<div class="tiling">${ws.tiles.map(t => `<div class="tile ${v.tile === t.id ? 'hl new' : ''}"><div class="strip"><span class="st on">${fv(t)}${esc(t.title)}</span></div><div class="tb2" style="--t:${t.t}"></div></div>`).join('')}</div>`;
+  } else {
+    body = `<div class="pb"><div><h3>${esc(p.session)}</h3><div class="when">${esc(p.when)}</div>
+      ${p.note.map(n => `<p>${esc(n)}</p>`).join('')}
+      ${p.tasks.map(t => `<div class="trow ${fresh === 'task:' + t ? 'new' : ''}"><span class="bx"></span><span>${esc(t)}${t === p.task ? ' <span class="fm">@</span>' : ''}</span></div>`).join('')}</div>
+      <div><h3>Links</h3>${p.links.map(l => `<div class="lk ${fresh === 'link:' + l ? 'new' : ''}">${esc(l)}</div>`).join('')}
+      <h3 style="margin-top:14px">Board</h3><div class="cards">${p.cards.map(c => `<div class="${fresh === 'card:' + c ? 'new' : ''}">${esc(c)}</div>`).join('')}</div></div></div>`;
+  }
+  return `<div class="proj" style="--c:${p.color}"><div class="tb"><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+    <span class="ttl"><i></i>${esc(p.title)}</span>${tabs}</div>${body}</div>`;
+}
+
+/* ---------- navigation ---------- */
+function goSpace(k, tabId) { front = { kind: 'space', k }; touchSpace(k); if (tabId) sel[k] = tabId; }
+function goProject(k, ws = null, tile = null) {
+  front = { kind: 'project', k }; touch(k);
+  if (ws !== null) projView[k] = { ws, tile };
+  setFocus(k);
+}
+
+/* ---------- switcher ---------- */
+function switcherItems() {
+  let projs = S.sworder === 'recent' ? recent.filter(k => OPEN_PROJECTS.includes(k)) : OPEN_PROJECTS.slice();
+  // Most recent first means the front one is first; the first Tab lands on the second, as ⌘Tab does.
+  const items = projs.map(k => ({ kind: 'project', k }));
+  if (S.swrow === 'both') {
+    const sps = S.sworder === 'recent' ? recentSpaces : SPACES.map(s => s.k);
+    items.push({ kind: 'div' }, ...sps.map(k => ({ kind: 'space', k })));
+  }
+  if (S.uSwitch) items.push({ kind: 'div' }, { kind: 'none' });
+  return items;
+}
+function subItems(it) {
+  if (it.kind === 'project') {
+    const p = proj(it.k), out = [{ label: 'Notes', ws: -1 }];
+    p.workspaces.forEach((w, wi) => {
+      out.push({ label: w.name, ws: wi, n: w.tiles.length });
+      if (S.swTiles) w.tiles.forEach(t => out.push({ label: t.title, ws: wi, tile: t.id, isTile: true, t }));
+    });
+    return out;
+  }
+  if (it.kind === 'space') {
+    const sp = space(it.k);
+    return [...sp.pinned, ...sp.today].slice(0, 4).map(t => ({ label: t.title, tab: t.id, t }));
+  }
+  return [];
+}
+function openSwitcher(held) {
+  closeCmd(); closeMenu();
+  const items = switcherItems();
+  const firstReal = items.findIndex(x => x.kind !== 'div');
+  let i = firstReal;
+  // Start on the next item after the one in front, like ⌘Tab.
+  const curIdx = items.findIndex(x => x.kind === front.kind && x.k === front.k);
+  if (curIdx >= 0) i = nextIdx(items, curIdx, 1);
+  sw = { items, i, j: -1, held };
+  $('scrim').hidden = false;
+  renderSwitcher();
+}
+function nextIdx(items, i, d) {
+  let n = i;
+  do { n = (n + d + items.length) % items.length; } while (items[n].kind === 'div');
+  return n;
+}
+function renderSwitcher() {
+  if (!sw) { $('switcher').hidden = true; return; }
+  const el = $('switcher'); el.hidden = false;
+  el.innerHTML = `<div class="sw-row">${sw.items.map((it, idx) => {
+    if (it.kind === 'div') return '<div class="sw-div"></div>';
+    const on = idx === sw.i;
+    if (it.kind === 'none') {
+      return `<button class="sw-card ${on ? 'on' : ''}" style="--c:#8a8f99" data-swi="${idx}"><div class="sw-top"><span class="ic" style="--c:#8a8f99">${I.none}</span><span class="nm">No project<small>Unfocus</small></span></div>
+        <div class="sw-detail">Stops timing. Windows stay where they are.</div></button>`;
+    }
+    const item = it.kind === 'project' ? proj(it.k) : space(it.k);
+    const subs = subItems(it);
+    let detail = '';
+    if (it.kind === 'project') {
+      const bits = [];
+      if (S.swSession) bits.push(`${esc(item.session)} · ${esc(item.when)}`);
+      if (S.swTask) bits.push(`<b>@ ${esc(item.task)}</b>`);
+      detail = bits.join('<br>');
+    } else detail = `${allTabs(item).length} tabs${item.k === 'personal' && playing ? ' · playing' : ''}`;
+    const sub = it.kind === 'project' ? (item.k === focused ? '<span class="fx">Focused</span>' : 'Project') : 'Space';
+    return `<button class="sw-card ${on ? 'on' : ''}" style="--c:${item.color}" data-swi="${idx}">
+      <div class="sw-top"><span class="ic" style="--c:${item.color}">${I[item.icon]}</span><span class="nm">${esc(item.title)}<small>${sub}</small></span></div>
+      <div class="sw-detail">${detail}</div>
+      <div class="sw-list">${subs.map((s, sj) => `<div class="sw-item ${s.isTile ? 'tile' : ''} ${on && sw.j === sj ? 'on' : ''}" data-swi="${idx}" data-swj="${sj}">
+        ${s.t ? fv(s.t) : ''}<span style="overflow:hidden;text-overflow:ellipsis">${esc(s.label)}</span>${s.n ? `<span class="k">${s.n} tiles</span>` : ''}</div>`).join('')}</div>
+    </button>`;
+  }).join('')}</div>
+  <div class="sw-hint">${sw.held ? 'Tab / ⇧Tab: projects · ↓ ↑: workspaces · let go of ⌥ to jump · Esc: stay' : '← →: projects · ↓ ↑: workspaces · Return or click to jump · Esc: stay'}</div>`;
+}
+function commitSwitcher() {
+  if (!sw) return;
+  const it = sw.items[sw.i];
+  const sub = sw.j >= 0 ? subItems(it)[sw.j] : null;
+  closeSwitcher();
+  if (it.kind === 'none') { unfocus(); return; }
+  if (it.kind === 'project') {
+    const p = proj(it.k);
+    goProject(it.k, sub ? sub.ws : null, sub && sub.tile ? sub.tile : null);
+    toast(`${p.title}${sub ? ' · ' + sub.label : ''}. Focused.`);
+  } else goSpace(it.k, sub ? sub.tab : null);
+  render();
+}
+function closeSwitcher() { sw = null; $('switcher').hidden = true; $('scrim').hidden = !cmd; }
+function moveSwitcher(dx, dy) {
+  if (!sw) return;
+  if (dx) { sw.i = nextIdx(sw.items, sw.i, dx); sw.j = -1; }
+  if (dy) {
+    const n = subItems(sw.items[sw.i]).length;
+    sw.j = Math.max(-1, Math.min(n - 1, sw.j + dy));
+  }
+  renderSwitcher();
+}
+
+/* ---------- command bar ---------- */
+function cmdResults(q, scope) {
+  q = q.trim();
+  const lq = q.toLowerCase();
+  const hit = s => !lq || s.toLowerCase().includes(lq.replace(/^[@/>]/, ''));
+  const groups = [];
+  const prefix = q[0];
+  const want = k => !'@/>'.includes(prefix) || (prefix === '@' && k === 'projects') || (prefix === '/' && k === 'tasks') || (prefix === '>' && k === 'commands');
+  const sp = front.kind === 'space' ? space(front.k) : null;
+
+  if (S.bare === 'capture' && q && !'@/>'.includes(prefix)) {
+    return [{ name: 'Capture', rows: [captureRow(q)] }];
+  }
+  if (scope === 'space' && q && !'@/>'.includes(prefix)) {
+    groups.push({ name: `Open in ${sp.title}`, rows: [{ icon: I.tab, c: sp.color, label: q.includes('.') ? `Open ${q}` : `Search for “${q}”`, sub: 'New tab', act: { type: 'newtab', q } }] });
+  }
+  if (want('projects')) {
+    const rows = [];
+    PROJECTS.filter(p => hit(p.title)).forEach(p => {
+      rows.push({ icon: I[p.icon], c: p.color, label: p.title, sub: p.k === focused ? 'Focused' : 'Project', act: { type: 'project', k: p.k } });
+      if (S.fWs && q && !'@'.includes(prefix)) p.workspaces.forEach((w, wi) => rows.push({ icon: I.grid, c: p.color, label: `${p.title} · ${w.name}`, sub: 'Workspace', act: { type: 'project', k: p.k, ws: wi } }));
+    });
+    if (S.fWs && q && prefix !== '@') PROJECTS.forEach(p => p.workspaces.forEach((w, wi) => {
+      if (hit(w.name) && !hit(p.title)) rows.push({ icon: I.grid, c: p.color, label: `${p.title} · ${w.name}`, sub: 'Workspace', act: { type: 'project', k: p.k, ws: wi } });
+      w.tiles.forEach(t => { if (q && hit(t.title)) rows.push({ fav: t, label: t.title, sub: `${p.title} · ${w.name}`, act: { type: 'project', k: p.k, ws: wi, tile: t.id } }); });
+    }));
+    if (rows.length) groups.push({ name: 'Projects', rows: rows.slice(0, q ? 6 : 3) });
+  }
+  if (!'@/>'.includes(prefix)) {
+    const rows = SPACES.filter(s => hit(s.title)).map(s => ({ icon: I[s.icon], c: s.color, label: s.title, sub: 'Space', act: { type: 'space', k: s.k } }));
+    if (S.fTabs && q) SPACES.forEach(s => allTabs(s).forEach(t => { if (hit(t.title) || hit(t.host)) rows.push({ fav: t, label: t.title, sub: `${s.title} · ${t.host}`, act: { type: 'space', k: s.k, tab: t.id } }); }));
+    if (rows.length) groups.push({ name: 'Spaces', rows: rows.slice(0, q ? 5 : 2) });
+  }
+  if (S.fTasks && want('tasks') && (q || prefix === '/')) {
+    const rows = [];
+    PROJECTS.forEach(p => p.tasks.forEach(t => { if (hit(t)) rows.push({ icon: I.check, c: p.color, label: t, sub: p.title, act: { type: 'task', k: p.k, t } }); }));
+    if (rows.length) groups.push({ name: 'Tasks', rows: rows.slice(0, 4) });
+  }
+  if (S.fCmds && want('commands')) {
+    const cmds = [];
+    if (focused && S.uCmd) cmds.push({ icon: I.none, label: `Unfocus ${proj(focused).title}`, sub: 'Stops timing', act: { type: 'unfocus' } });
+    cmds.push({ icon: I.plus, label: 'New Space…', sub: 'Command', act: { type: 'toast', text: 'Would ask for a name, icon and colour.' } });
+    cmds.push({ icon: I.plus, label: 'New Project…', sub: 'Command', act: { type: 'toast', text: 'Would open New Project.' } });
+    cmds.push({ icon: I.bolt, label: 'Show Switcher', sub: S.swkey === 'opt' ? '⌥Tab' : '⌃⌥Tab', act: { type: 'switcher' } });
+    const rows = cmds.filter(c => hit(c.label));
+    if (rows.length) groups.push({ name: 'Commands', rows: rows.slice(0, q ? 4 : 2) });
+  }
+  if (q && !'@/>'.includes(prefix) && scope !== 'space') groups.push({ name: 'Capture', rows: [captureRow(q)] });
+  return groups;
+}
+function captureRow(q) {
+  if (focused) return { icon: I.plus, c: proj(focused).color, label: `Add “${q}”`, sub: `to ${proj(focused).title}`, act: { type: 'capture', q, k: focused } };
+  if (S.nofocus === 'last') return { icon: I.plus, c: proj(lastFocused).color, label: `Add “${q}”`, sub: `to ${proj(lastFocused).title} (last focused)`, act: { type: 'capture', q, k: lastFocused } };
+  if (S.nofocus === 'refuse') return { icon: I.none, label: `Can't capture “${q}”`, sub: 'Focus a project first', act: { type: 'toast', text: 'Nothing is focused. Type @ to pick a project.' } };
+  return { icon: I.plus, label: `Add “${q}” to…`, sub: 'Choose a project', act: { type: 'askcap', q } };
+}
+function openCmd(scope = 'global', preset = '') {
+  closeSwitcher(); closeMenu();
+  if (scope === 'space' && front.kind !== 'space') scope = 'global';
+  cmd = { scope, i: 0, flat: [] };
+  const sp = scope === 'space' ? space(front.k) : null;
+  const scopeLabel = scope === 'space' ? sp.title : 'Folio';
+  const el = $('cmd'); el.hidden = false; $('scrim').hidden = false;
+  el.innerHTML = `<div class="inrow"><span class="scope">${esc(scopeLabel)}</span><input id="cmdq" placeholder="${scope === 'space' ? 'Search or enter an address' : 'Open a project, workspace, space or tab'}" aria-label="Command bar" autocomplete="off" value="${esc(preset)}"></div>
+    <div class="list" id="cmdlist"></div>
+    <div class="foot"><span>@ projects</span><span>/ tasks</span><span>&gt; commands</span><span>⏎ open</span><span>Esc close</span></div>`;
+  renderCmd(); const inp = $('cmdq'); inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+}
+function renderCmd() {
+  if (!cmd) return;
+  const q = $('cmdq').value;
+  const groups = cmd.ask ? [{ name: `Add “${cmd.ask}” to`, rows: PROJECTS.map(p => ({ icon: I[p.icon], c: p.color, label: p.title, sub: 'Project', act: { type: 'capture', q: cmd.ask, k: p.k } })) }] : cmdResults(q, cmd.scope);
+  cmd.flat = groups.flatMap(g => g.rows);
+  cmd.i = Math.min(cmd.i, Math.max(0, cmd.flat.length - 1));
+  let n = 0;
+  $('cmdlist').innerHTML = groups.map(g => `<div class="grp">${esc(g.name)}</div>` + g.rows.map(r => {
+    const idx = n++;
+    const ic = r.fav ? fv(r.fav) : `<span class="oi" style="${r.c ? `--c:${r.c}` : ''}">${r.icon || ''}</span>`;
+    return `<div class="opt ${idx === cmd.i ? 'on' : ''}" data-opt="${idx}">${ic}<span class="ot">${esc(r.label)}<small>${esc(r.sub || '')}</small></span></div>`;
+  }).join('')).join('') || '<div class="grp">Nothing matches</div>';
+}
+function runCmd(r) {
+  if (!r) return;
+  const a = r.act;
+  if (a.type === 'askcap') { cmd.ask = a.q; cmd.i = 0; renderCmd(); return; }
+  closeCmd();
+  if (a.type === 'project') { goProject(a.k, a.ws ?? null, a.tile ?? null); }
+  if (a.type === 'space') { goSpace(a.k, a.tab); }
+  if (a.type === 'task') { goProject(a.k, -1); toast(`Opened ${proj(a.k).title} at the task.`); }
+  if (a.type === 'unfocus') { unfocus(); return; }
+  if (a.type === 'switcher') { openSwitcher(false); return; }
+  if (a.type === 'toast') toast(a.text);
+  if (a.type === 'capture') { const p = proj(a.k); p.tasks.push(a.q); fresh = 'task:' + a.q; toast(`Added “${a.q}” to ${p.title}'s current session.`); }
+  if (a.type === 'newtab') {
+    const sp = space(front.k);
+    const host = a.q.includes('.') ? a.q : 'search.example.com';
+    const t = T(a.q.includes('.') ? a.q : a.q, host, '#6b7280', host[0].toUpperCase(), 'linear-gradient(135deg,#eceff3,#c9d0da)');
+    sp.today.unshift(t); sel[sp.k] = t.id; fresh = t.id;
+  }
+  render();
+}
+function closeCmd() { cmd = null; $('cmd').hidden = true; $('scrim').hidden = !sw; }
+
+/* ---------- menus ---------- */
+function openMenu(items, anchor) {
+  const m = $('menu');
+  m.innerHTML = items.join(''); m.hidden = false;
+  const r = anchor.getBoundingClientRect(), s = $('stage').getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(r.right - s.left + 4, s.width - m.offsetWidth - 8)) + 'px';
+  m.style.top = Math.max(30, Math.min(r.top - s.top, s.height - m.offsetHeight - 8)) + 'px';
+  m.querySelector('.mi')?.focus();
+}
+function closeMenu() { $('menu').hidden = true; menuState = null; }
+function markMenu(kind, k, anchor) {
+  menuState = { kind, k };
+  const items = [];
+  if (kind === 'project') {
+    const p = proj(k);
+    items.push(`<button class="mi" data-do="show">Show Window</button>`);
+    if (focused === k) { if (S.uDock) items.push(`<button class="mi" data-do="unfocus">Unfocus ${esc(p.title)}</button>`); }
+    else items.push(`<button class="mi" data-do="focus">Focus ${esc(p.title)}</button>`);
+    items.push('<div class="msep"></div>');
+    p.workspaces.forEach((w, wi) => items.push(`<button class="mi" data-do="ws:${wi}">${esc(w.name)}</button>`));
+  } else {
+    items.push(`<button class="mi" data-do="show">Show Window</button><button class="mi" data-do="newtab">New Tab</button>`);
+  }
+  openMenu(items, anchor);
+}
+function sendMenu(spaceKey, id, anchor) {
+  menuState = { send: true, space: spaceKey, id };
+  const items = [];
+  [['card', 'Move to project as a card'], ['link', "Add to project's Links"], ['task', 'Make a task in project']].forEach(([v, label], vi) => {
+    if (vi) items.push('<div class="msep"></div>');
+    items.push(`<div class="mh">${label}</div>`);
+    PROJECTS.forEach(p => items.push(`<button class="mi" data-do="${v}:${p.k}"><i style="--c:${p.color}"></i>${esc(p.title)}${p.k === focused ? ' (focused)' : ''}</button>`));
+  });
+  openMenu(items, anchor);
+}
+function doMenu(action) {
+  const st = menuState; closeMenu();
+  if (!st) return;
+  if (st.send) {
+    const [v, k] = action.split(':'), sp = space(st.space), tab = findTab(sp, st.id), p = proj(k);
+    if (v === 'card') { p.cards.push(tab.title); fresh = 'card:' + tab.title; removeTab(sp, tab.id); toast(`Moved “${tab.title}” to ${p.title}'s board.`); }
+    if (v === 'link') { if (!p.links.includes(tab.title)) p.links.push(tab.title); toast(`Added “${tab.title}” to ${p.title}'s Links. The tab stays.`); }
+    if (v === 'task') { p.tasks.push(`Read “${tab.title}”`); toast(`Made a task in ${p.title}, linked to the page.`); }
+    render(); return;
+  }
+  if (st.kind === 'project') {
+    if (action === 'show') goProject(st.k);
+    if (action === 'focus') { setFocus(st.k); toast(`Focused ${proj(st.k).title}. Timing started. The window in front didn't change.`); }
+    if (action === 'unfocus') unfocus();
+    if (action.startsWith('ws:')) goProject(st.k, +action.slice(3));
+  } else {
+    if (action === 'show') goSpace(st.k);
+    if (action === 'newtab') { goSpace(st.k); render(); openCmd('space'); return; }
+  }
+  render();
+}
+function removeTab(sp, id) {
+  for (const list of [sp.favs, sp.pinned, sp.today]) { const i = list.findIndex(t => t.id === id); if (i >= 0) list.splice(i, 1); }
+  if (splits[sp.k]?.includes(id)) delete splits[sp.k];
+  if (sel[sp.k] === id) sel[sp.k] = allTabs(sp)[0]?.id;
+}
+
+function simulateLink() {
+  const t = T('Your order has shipped', 'track.example.com', '#c4572f', 'T', 'linear-gradient(135deg,#f5e6dc,#e0b9a1)');
+  const k = front.kind === 'space' ? front.k : recentSpaces[0];
+  const s = space(k); s.today.unshift(t); goSpace(k, t.id); fresh = t.id;
+  toast(`Opened in ${s.title} as a Today tab.${focused ? ` Still focused on ${proj(focused).title}.` : ''}`);
+  render();
+}
+
+/* ---------- render ---------- */
+function summary() {
+  const name = (k, v) => document.querySelector(`.seg[data-k="${k}"] button[data-v="${v}"]`).textContent;
+  const list = (pairs) => pairs.filter(([k]) => S[k]).map(([, l]) => l).join(', ') || 'none';
+  return [
+    `Focused mark: ${name('fmark', S.fmark)}`,
+    `Unfocus from: ${list([['uChip', 'menu bar chip'], ['uDock', 'mark menu'], ['uCmd', 'command bar'], ['uSwitch', 'switcher card']])}`,
+    `Capture with nothing focused: ${name('nofocus', S.nofocus)}`,
+    `Switcher shortcut: ${name('swkey', S.swkey)}`,
+    `Switcher row: ${name('swrow', S.swrow)}`,
+    `Switcher order: ${name('sworder', S.sworder)}`,
+    `Switcher card: ${list([['swSession', 'session'], ['swTask', 'focused task'], ['swTiles', 'tiles']])}, workspaces`,
+    `Command bar: ${name('cmdis', S.cmdis)}`,
+    `Bare typing: ${name('bare', S.bare)}`,
+    `Finds: ${list([['fWs', 'workspaces/tiles'], ['fTabs', 'tabs'], ['fTasks', 'tasks'], ['fCmds', 'commands']])}, projects, spaces`,
+    S.note.trim() ? `Note: ${S.note.trim()}` : null,
+  ].filter(Boolean).join('\n');
+}
+const CHECKS = ['uChip', 'uDock', 'uCmd', 'uSwitch', 'swSession', 'swTask', 'swTiles', 'fWs', 'fTabs', 'fTasks', 'fCmds', 'macdark'];
+function render() {
+  $('stage').classList.toggle('mac-dark', S.macdark);
+  renderChip(); renderDock(); renderWindow();
+  if (sw) renderSwitcher();
+  document.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', S[seg.dataset.k] === b.dataset.v)));
+  CHECKS.forEach(k => $(k).checked = S[k]);
+  if ($('note').value !== S.note) $('note').value = S.note;
+  $('cmdisHint').textContent = S.cmdis === 'quick'
+    ? 'One bar, one shortcut. Its @ / > modes already exist; this adds workspaces, tiles, spaces and tabs.'
+    : 'A second bar with its own shortcut for opening things; the quick bar stays for capture.';
+  $('summary').textContent = summary();
+  try { localStorage.setItem('spaces-mock-2', JSON.stringify(S)); } catch (e) {}
+  fresh = null;
+}
+
+/* ---------- events ---------- */
+document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return; S[seg.dataset.k] = b.dataset.v; render();
+}));
+CHECKS.forEach(k => $(k).addEventListener('change', e => { S[k] = e.target.checked; render(); }));
+$('note').addEventListener('input', e => { S.note = e.target.value; $('summary').textContent = summary(); try { localStorage.setItem('spaces-mock-2', JSON.stringify(S)); } catch (err) {} });
+$('trySwitch').addEventListener('click', () => { $('stage').focus(); openSwitcher(false); });
+$('tryCmd').addEventListener('click', () => openCmd('global'));
+$('trySimlink').addEventListener('click', simulateLink);
+
+$('focuschip').addEventListener('click', e => { if (e.target.closest('#unfocusChip')) unfocus(); });
+
+$('dock').addEventListener('click', e => {
+  const b = e.target.closest('.mk'); if (!b) return;
+  if (b.dataset.kind === 'project') goProject(b.dataset.k); else goSpace(b.dataset.k);
+  render();
+});
+$('dock').addEventListener('contextmenu', e => {
+  const b = e.target.closest('.mk'); if (!b) return;
+  e.preventDefault(); markMenu(b.dataset.kind, b.dataset.k, b);
+});
+
+$('win').addEventListener('mouseover', e => {
+  if (e.target.id === 'edge' && !sideShown && !sidePeek) { sidePeek = true; renderWindow(); }
+});
+$('win').addEventListener('mouseleave', () => { if (sidePeek) { sidePeek = false; renderWindow(); } });
+$('win').addEventListener('mousemove', e => {
+  if (sidePeek && !sideShown && !e.target.closest('#side') && !e.target.closest('#edge')) { sidePeek = false; renderWindow(); }
+});
+$('win').addEventListener('click', e => {
+  const q = s => e.target.closest(s);
+  if (q('[data-pp]')) { playing = !playing; render(); return; }
+  if (q('[data-pws]')) { const p = front.k, ws = +q('[data-pws]').dataset.pws; if (ws === -2) { toast('The board, as today.'); return; } projView[p] = { ws, tile: null }; render(); return; }
+  if (front.kind !== 'space') return;
+  const sp = space(front.k);
+  if (q('[data-cmd]')) { openCmd('space'); return; }
+  if (q('[data-toggleside]')) { sideShown = !sideShown; sidePeek = false; render(); return; }
+  if (q('[data-unsplit]')) { delete splits[sp.k]; render(); return; }
+  if (q('[data-splitwith]')) {
+    const id = +q('[data-splitwith]').dataset.splitwith, cur = sel[sp.k];
+    if (id !== cur) splits[sp.k] = [cur, id];
+    render(); return;
+  }
+  if (q('[data-send]')) { e.stopPropagation(); sendMenu(sp.k, +q('[data-send]').dataset.send, q('[data-send]')); return; }
+  if (q('[data-close]')) {
+    const id = +q('[data-close]').dataset.close;
+    const pi = sp.pinned.findIndex(t => t.id === id);
+    if (pi >= 0) { const [t] = sp.pinned.splice(pi, 1); sp.today.unshift(t); toast(`Unpinned “${t.title}”.`); }
+    else { const t = findTab(sp, id); removeTab(sp, id); toast(`Closed “${t.title}”. ⇧⌘T reopens it.`); }
+    render(); return;
+  }
+  const tab = q('[data-tab]');
+  if (tab) { sel[sp.k] = +tab.dataset.tab; render(); }
+});
+$('win').addEventListener('dblclick', e => {
+  const tab = e.target.closest('.tabrow[data-tab]'); if (!tab || front.kind !== 'space') return;
+  const sp = space(front.k), id = +tab.dataset.tab, i = sp.today.findIndex(t => t.id === id);
+  if (i >= 0) { const [t] = sp.today.splice(i, 1); sp.pinned.push(t); fresh = t.id; toast(`Pinned “${t.title}”.`); render(); }
+});
+
+$('switcher').addEventListener('mouseover', e => {
+  if (!sw) return;
+  const it = e.target.closest('[data-swi]'); if (!it) return;
+  const i = +it.dataset.swi, j = it.dataset.swj != null ? +it.dataset.swj : -1;
+  if (i !== sw.i || j !== sw.j) { sw.i = i; sw.j = j; renderSwitcher(); }
+});
+$('switcher').addEventListener('click', e => { if (e.target.closest('[data-swi]')) commitSwitcher(); });
+$('scrim').addEventListener('click', () => { closeSwitcher(); closeCmd(); });
+
+$('menu').addEventListener('click', e => { const mi = e.target.closest('[data-do]'); if (mi) doMenu(mi.dataset.do); });
+$('cmd').addEventListener('input', e => { if (e.target.id === 'cmdq') { cmd.i = 0; cmd.ask = null; renderCmd(); } });
+$('cmd').addEventListener('click', e => { const o = e.target.closest('[data-opt]'); if (o) runCmd(cmd.flat[+o.dataset.opt]); });
+$('cmd').addEventListener('mousemove', e => { const o = e.target.closest('[data-opt]'); if (o && cmd && +o.dataset.opt !== cmd.i) { cmd.i = +o.dataset.opt; renderCmd(); } });
+
+document.addEventListener('click', e => {
+  if (!$('menu').hidden && !e.target.closest('#menu') && !e.target.closest('[data-send]')) closeMenu();
+});
+document.addEventListener('keydown', e => {
+  // The switcher: hold ⌥, press Tab.
+  if (e.key === 'Tab' && e.altKey) {
+    e.preventDefault();
+    if (!sw) openSwitcher(true); else moveSwitcher(e.shiftKey ? -1 : 1, 0);
+    return;
+  }
+  if (sw) {
+    if (e.key === 'ArrowRight') { moveSwitcher(1, 0); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { moveSwitcher(-1, 0); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { moveSwitcher(0, 1); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { moveSwitcher(0, -1); e.preventDefault(); }
+    else if (e.key === 'Enter') { commitSwitcher(); e.preventDefault(); }
+    else if (e.key === 'Escape') { closeSwitcher(); e.preventDefault(); }
+    return;
+  }
+  if (cmd) {
+    if (e.key === 'ArrowDown') { cmd.i = Math.min(cmd.i + 1, cmd.flat.length - 1); renderCmd(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { cmd.i = Math.max(cmd.i - 1, 0); renderCmd(); e.preventDefault(); }
+    else if (e.key === 'Enter') { runCmd(cmd.flat[cmd.i]); e.preventDefault(); }
+    else if (e.key === 'Escape') { closeCmd(); e.preventDefault(); }
+    return;
+  }
+  if (e.key === 'Escape' && !$('menu').hidden) { closeMenu(); return; }
+  const inField = e.target.matches('input, textarea');
+  if (inField) return;
+  if (e.altKey && e.code === 'Space') { e.preventDefault(); openCmd('global'); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') { e.preventDefault(); openCmd(front.kind === 'space' ? 'space' : 'global'); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's' && front.kind === 'space') { e.preventDefault(); sideShown = !sideShown; sidePeek = false; render(); }
+});
+document.addEventListener('keyup', e => {
+  if (sw && sw.held && (e.key === 'Alt' || !e.altKey)) commitSwitcher();
+});
+
+$('copy').addEventListener('click', () => {
+  const text = summary(), pre = $('summary');
+  const fallback = () => { const r = document.createRange(); r.selectNodeContents(pre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+  try { navigator.clipboard.writeText(text).then(() => { $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy summary', 1400); }, fallback); } catch (err) { fallback(); }
+});
+
+render();
+</script>

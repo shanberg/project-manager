@@ -46,11 +46,13 @@ extension CanvasBoardView {
     /// else, so reading a page never has a control on it. A press has to reach the board over a card
     /// that would otherwise take it, which is `CanvasTileGripView`'s catcher.
     ///
-    /// **A tile with tabs across its top has none.** Its strip is already there, and the strip is what
-    /// moves it — a tab pulls its card, the rest of the strip carries the tile — and its showing tab is
-    /// what opens its controls (`showingTopTab`). One with its tabs down
-    /// its side keeps its grip, over the card beside them: a column of tabs can be full to the bottom,
-    /// with no bare strip left to take hold of.
+    /// **A tile with tabs across its top has one just under its strip** — its card's frame starts where
+    /// the strip ends (`CanvasTiling.tabStrip`), so the grip lies on the card. The bare stretch
+    /// of the strip is the window's to drag, as the ground around the tiles is (`tiledMouseDown`), so
+    /// the strip no longer carries the tile and the grip does. A tab still pulls its card, and the
+    /// showing tab still opens the controls (`showingTopTab`). One with its tabs down its side keeps
+    /// its grip, over the card beside them: a column of tabs can be full to the bottom, with no bare
+    /// strip left to take hold of.
     func tileHandle(_ id: String) -> (bar: CanvasRect, hit: CanvasRect)? {
         // A maximized tile keeps its grip, and only so the double-click that got you here is there to
         // take you back — as a zoomed window's title bar still unzooms it. It has no order to be
@@ -60,7 +62,7 @@ extension CanvasBoardView {
         // One tile has nothing to be dragged among, but its grip still opens its controls.
         guard let tiling, !isPicking, tiling.maximized == nil || tiling.maximized == id,
               tiling.ids.count > 1 || gripOpensControls,
-              !tiling.hasTabs(id) || tiling.tabsOnSide(id), let frame = tiling.layout.frames[id] else { return nil }
+              let frame = tiling.layout.frames[id] else { return nil }
         let scale = liveScale
         let bar = CanvasRect(x: frame.midX - Self.gripLength / 2 / scale, y: frame.minY + Self.gripInset / scale,
                              width: Self.gripLength / scale, height: Self.gripThickness / scale)
@@ -71,8 +73,10 @@ extension CanvasBoardView {
     }
 
     /// What a tile's controls (`CanvasTileControls`) hang from, in canvas coordinates: its grip's bar, or
-    /// — on a tile with tabs across its top, which has no grip — the tab that is showing.
-    func tileControlsAnchor(_ id: String) -> CanvasRect? {
+    /// the showing tab of a strip across its top when they were opened from that (`viaTab`), which is
+    /// also the only handle left when the grip is not offered.
+    func tileControlsAnchor(_ id: String, viaTab: Bool = false) -> CanvasRect? {
+        if viaTab, let tab = showingTopTab(id) { return tab }
         if let handle = tileHandle(id) { return handle.bar }
         return showingTopTab(id)
     }
@@ -104,7 +108,10 @@ extension CanvasBoardView {
     func showsTileHandle(_ id: String) -> Bool {
         // Up while its controls are open under it, even through a press on it: a press starts a tile
         // drag in case it becomes one, and only an actual drag closes the controls (and so hides it).
-        if CanvasTileControls.shared.isOpen(on: self, tile: id) { return tileHandle(id) != nil }
+        // Not when they hang from the showing tab: the grip would be a second handle beside the one used.
+        if CanvasTileControls.shared.isOpen(on: self, tile: id) {
+            return tileHandle(id) != nil && !CanvasTileControls.shared.viaTab
+        }
         if case .placeTile? = gesture { return false }
         // Focus mode puts the grips away: the top of a tile is where a hand reaching for the window lands.
         if tileGripsHeld { return false }

@@ -778,6 +778,10 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     func windowWillClose(_ notification: Notification) {
+        // Its last picture, for the overview's tile while it's closed (a space's; a project's goes from the dock).
+        if let window, !WindowManager.shared.quitting, let space = Spaces.shared.space(forCanvas: openedCanvas) {
+            WindowSnapshot.remember(window, key: "space:\(space.id)")
+        }
         split.prepareForClose()
         onClose?(self)
     }

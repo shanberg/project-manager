@@ -70,6 +70,11 @@ final class CanvasFileNodeView: CanvasNodeView {
     private var loading: URL?
     /// A picture card's view, kept across rebuilds so an animation doesn't restart on every one.
     private var pictureView: CanvasPictureView?
+    /// A Quick Look card's view (any file with no viewer of its own), kept across rebuilds so its
+    /// thumbnail and live preview aren't made again on each. See `CanvasQuickLookView`.
+    private var quickLookView: CanvasQuickLookView?
+    /// A CSV / TSV card's table and the bytes it was made from, kept so a rebuild keeps its scroll.
+    private var csvView: (url: URL, data: Data?, view: CanvasCSVView)?
     /// A PDF card's document as last parsed, and the file it is out for. See `pdfDocument(of:)`.
     private var pdf: (url: URL, stamp: Date?, document: PDFBox)?
     private var pdfLoading: URL?
@@ -155,7 +160,7 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// change you are probably making in the page's own editor.
     private func watchFile(isFolder: Bool) {
         guard let url = location.url, !isFolder, !isProjectCard,
-              isProse(url.path) || isPicture(url.path) || url.pathExtension.lowercased() == "pdf"
+              isProse(url.path) || isTable(url.path) || isPicture(url.path) || url.pathExtension.lowercased() == "pdf"
         else { return CanvasFileWatch.shared.stop(self) }
         CanvasFileWatch.shared.watch(self, url) { [weak self] in self?.fileChanged() }
     }
@@ -220,7 +225,7 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// The PDF is deliberate rather than an omission — a PDF card is one page scaled to fit, with no
     /// scrolling by design (see `preview`), so there is nothing under the pointer to travel through.
     override var scrollsItsContent: Bool {
-        isProse(stored.path) || location.url.map(CanvasFolderListing.isFolder) == true
+        isProse(stored.path) || isTable(stored.path) || location.url.map(CanvasFolderListing.isFolder) == true
     }
 
     /// A note shown as prose — not a project, not a folder — which is set like a typed card and
@@ -248,6 +253,10 @@ final class CanvasFileNodeView: CanvasNodeView {
 
     private func isProse(_ path: String) -> Bool {
         ["md", "markdown", "txt"].contains((path as NSString).pathExtension.lowercased())
+    }
+
+    private func isTable(_ path: String) -> Bool {
+        ["csv", "tsv"].contains((path as NSString).pathExtension.lowercased())
     }
 
     private func isPicture(_ path: String) -> Bool {
@@ -323,16 +332,30 @@ final class CanvasFileNodeView: CanvasNodeView {
                                     noteURL: url, maxImageHeight: 320)
                 .canvasLinkZones(linkZones))
 
+        case "csv", "tsv":
+            // Quick Look draws these as a page of small print; a table reads. See `CanvasCSVView`.
+            if CloudFile.isCloudOnly(url) { return cloudOnlyView(url) }
+            guard let read = contents(of: url) else { return NSView() }
+            if let csvView, csvView.url == url, csvView.data == read { return csvView.view }
+            let text = read.flatMap { String(data: $0, encoding: .utf8) ?? String(data: $0, encoding: .isoLatin1) } ?? ""
+            let view = CanvasCSVView(text: text, separator: url.pathExtension.lowercased() == "tsv" ? "\t" : ",")
+            csvView = (url, read, view)
+            return view
+
         case "html", "htm", "xhtml":
             // A page, drawn as one. See `CanvasHTMLFileView`.
             return CanvasHTMLFileView(url: url)
 
         default:
-            let label = NSTextField(labelWithString: url.lastPathComponent)
-            label.font = .systemFont(ofSize: 12)
-            label.textColor = .secondaryLabelColor
-            label.alignment = .center
-            return label
+            // Everything else: Quick Look, a still at rest and the live preview stepped in or tiled.
+            if CloudFile.isCloudOnly(url) { return cloudOnlyView(url) }
+            if quickLookView?.url != url {
+                quickLookView?.close()
+                quickLookView = CanvasQuickLookView(url: url)
+            }
+            let view = quickLookView!
+            view.isLive = quickLookIsLive
+            return view
         }
     }
 
@@ -390,13 +413,18 @@ final class CanvasFileNodeView: CanvasNodeView {
     override func refreshTiledness(fading: Bool) {
         super.refreshTiledness(fading: fading)
         let tiled = board.showsTiles
+        quickLookView?.isLive = quickLookIsLive
         guard engagement.isTiled != tiled else { return }
         engagement.isTiled = tiled
     }
 
+    /// A Quick Look card is live while you're in it, or while it's a tile (a tile is what you're reading).
+    private var quickLookIsLive: Bool { isEngaged || board.showsTiles }
+
     override func engagementChanged() {
         if document != nil || opening != nil || (isEngaged && writesInPlace) { return documentEngagementChanged() }
         engagement.isEngaged = isEngaged
+        quickLookView?.isLive = quickLookIsLive
         if isEngaged, let folderBrowser {
             folderBrowser.focus()
         } else if isEngaged {
@@ -417,6 +445,8 @@ final class CanvasFileNodeView: CanvasNodeView {
         document?.flush()
         releaseProject()
         releaseFolder()
+        quickLookView?.close()
+        quickLookView = nil
     }
 
     /// A folder under the one this card lists is gone into, in the card — see `CanvasFolderCard`.

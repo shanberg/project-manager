@@ -1,0 +1,463 @@
+<title>Dock Flyout Card</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a desktop stage with the satellite dock at its leading edge and the flyout beside it; controls in a column to the right, stacked below on a phone. */
+:root {
+  --page: #eceef2;
+  --panel: #ffffff;
+  --ink: #1d1f24;
+  --ink-2: #5d6270;
+  --ink-3: #9196a1;
+  --rule: #d9dce3;
+  --accent: #2f6fe4;
+  --chip: #eef1f6;
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* the mocked Mac, light */
+  --wall-a: #9fb4d6; --wall-b: #d9c6d8; --wall-c: #f1dcc4;
+  --glass: rgba(246, 247, 250, 0.72);
+  --glass-edge: rgba(255, 255, 255, 0.75);
+  --glass-shadow: 0 10px 34px rgba(20, 24, 40, 0.22), 0 1px 3px rgba(20, 24, 40, 0.14);
+  --m-ink: #1c1d21; --m-ink-2: rgba(28, 29, 33, 0.62); --m-ink-3: rgba(28, 29, 33, 0.38);
+  --m-rule: rgba(28, 29, 33, 0.1);
+  --m-hover: rgba(28, 29, 33, 0.06);
+  --m-select: rgba(47, 111, 228, 0.14);
+  --m-box: rgba(28, 29, 33, 0.32);
+  --m-field: rgba(255, 255, 255, 0.55);
+  --orange: #c76a00;
+  --win: rgba(255, 255, 255, 0.85);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; color-scheme: dark;
+}
+.mac-dark {
+  --wall-a: #1d2944; --wall-b: #3a2742; --wall-c: #4a3326;
+  --glass: rgba(40, 41, 46, 0.7);
+  --glass-edge: rgba(255, 255, 255, 0.12);
+  --glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --m-ink: #f2f2f4; --m-ink-2: rgba(242, 242, 244, 0.64); --m-ink-3: rgba(242, 242, 244, 0.38);
+  --m-rule: rgba(255, 255, 255, 0.1); --m-hover: rgba(255, 255, 255, 0.07);
+  --m-select: rgba(107, 156, 255, 0.22); --m-box: rgba(255, 255, 255, 0.36);
+  --m-field: rgba(0, 0, 0, 0.2); --orange: #ff9f2e; --win: rgba(36, 37, 42, 0.9);
+}
+
+body { background: var(--page); color: var(--ink); font-family: var(--ui); }
+.wrap {
+  display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px;
+  padding-block: 20px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1280px; margin: 0 auto;
+}
+@media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 12px; }
+
+/* stage */
+.stage {
+  position: relative; border-radius: 12px; overflow: hidden; min-height: 820px;
+  background: radial-gradient(120% 90% at 10% 0%, var(--wall-a), transparent 60%),
+              radial-gradient(90% 80% at 100% 30%, var(--wall-b), transparent 65%),
+              linear-gradient(160deg, var(--wall-b), var(--wall-c));
+  font-family: var(--ui); color: var(--m-ink);
+}
+.menubar { height: 24px; background: var(--glass); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  display: flex; align-items: center; gap: 16px; padding: 0 12px; font-size: 12.5px; }
+.menubar b { font-weight: 600; }
+.satwin { position: absolute; right: 24px; top: 60px; width: 42%; height: 62%; border-radius: 14px; background: var(--win);
+  box-shadow: var(--glass-shadow); }
+.satwin .tb { height: 28px; display: flex; align-items: center; gap: 7px; padding: 0 10px; font-size: 12px; color: var(--m-ink-2); border-bottom: 1px solid var(--m-rule); }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: var(--m-rule); }
+
+.dock { position: absolute; left: 8px; top: 120px; padding: 6px; border-radius: 18px; display: flex; flex-direction: column; gap: 6px;
+  background: var(--glass); border: 1px solid var(--glass-edge); box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5); }
+.mark { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: #fff; cursor: pointer; border: 0; padding: 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--c) 78%, #fff), var(--c)); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 1px 2px rgba(0,0,0,.18); }
+.mark svg { width: 22px; height: 22px; }
+.mark[aria-pressed="true"] { outline: 2px solid color-mix(in srgb, var(--c) 60%, transparent); outline-offset: 2px; }
+
+/* flyout */
+.flyout { position: absolute; left: 70px; top: 120px; border-radius: 16px; overflow: hidden;
+  background: linear-gradient(color-mix(in srgb, var(--c) 9%, transparent), color-mix(in srgb, var(--c) 4%, transparent)), var(--glass);
+  border: 1px solid var(--glass-edge); box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(26px) saturate(1.6); -webkit-backdrop-filter: blur(26px) saturate(1.6);
+  display: flex; flex-direction: column; max-height: calc(100% - 140px); }
+.flyout > * { flex: none; }
+.flyout > .scroll { flex: 1 1 auto; }
+.fx-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; }
+.fx-head .pm { width: 18px; height: 18px; border-radius: 5px; background: var(--c); display: grid; place-items: center; color: #fff; flex: none; }
+.fx-head .pm svg { width: 12px; height: 12px; }
+.fx-title { min-width: 0; flex: 1; }
+.fx-title .t { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-title .s { font-size: 11px; color: var(--m-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib { width: 24px; height: 22px; border: 0; background: none; border-radius: 6px; display: grid; place-items: center; color: var(--m-ink-2); cursor: pointer; padding: 0; }
+.ib:hover { background: var(--m-hover); color: var(--m-ink); }
+.ib:focus-visible, .mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ib svg { width: 15px; height: 15px; }
+.hr { height: 1px; background: var(--m-rule); margin: 0 10px; flex: none; }
+.hr.full { margin: 0; }
+.scroll { overflow-y: auto; min-height: 0; }
+
+/* the card */
+.card { padding: 6px 0 8px; }
+.cap { font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--m-ink-3); padding: 8px 14px 4px; display: flex; gap: 6px; align-items: baseline; }
+.cap .n { font-weight: 500; letter-spacing: 0; text-transform: none; }
+.note { padding: 2px 14px 6px; font-size: 12px; line-height: 1.45; color: var(--m-ink); }
+.note p { margin: 0 0 3px; }
+.note p.more { color: var(--m-ink-3); font-size: 11px; }
+.task { display: grid; grid-template-columns: 16px minmax(0,1fr) auto; gap: 8px; align-items: start; padding: 4px 10px 4px 14px; margin: 0 4px; border-radius: 7px; cursor: default; }
+.task:hover { background: var(--m-hover); }
+.task.sel { background: var(--m-select); }
+.task.sub { padding-left: 34px; }
+.box { width: 14px; height: 14px; margin-top: 1.5px; border-radius: 4px; border: 1.25px solid var(--m-box); background: transparent; padding: 0; cursor: pointer; display: grid; place-items: center; color: #fff; }
+.box.on { background: var(--c); border-color: var(--c); }
+.box svg { width: 10px; height: 10px; }
+.tt { font-size: 12.5px; line-height: 1.35; min-width: 0; }
+.task.done .tt { color: var(--m-ink-3); text-decoration: line-through; }
+.tt .ctx { display: block; font-size: 10.5px; color: var(--m-ink-3); }
+.tt .wait { display: block; font-size: 11px; color: var(--orange); }
+.tt .link { color: var(--accent); }
+.badges { display: flex; gap: 4px; align-items: center; margin-top: 1px; }
+.pill { font-size: 10.5px; padding: 1px 6px; border-radius: 9px; background: var(--m-hover); color: var(--m-ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pill.due { color: var(--orange); background: color-mix(in srgb, var(--orange) 12%, transparent); }
+.focus-mark { color: var(--c); font-weight: 700; margin-right: 3px; }
+.task.focus { background: color-mix(in srgb, var(--c) 10%, transparent); }
+.focus-hero { margin: 6px 10px 2px; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--c) 11%, transparent); display: grid; grid-template-columns: 16px minmax(0,1fr) auto; gap: 8px; align-items: start; }
+.focus-hero .lbl { font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: color-mix(in srgb, var(--c) 80%, var(--m-ink)); }
+.focus-hero .tt { font-size: 13px; font-weight: 500; }
+.addline { margin: 6px 12px 2px; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 7px; background: var(--m-field); border: 1px solid var(--m-rule); }
+.addline input { flex: 1; min-width: 0; border: 0; background: none; font: 12px var(--ui); color: var(--m-ink); outline: none; }
+.addline input::placeholder { color: var(--m-ink-3); }
+.addline svg { width: 12px; height: 12px; color: var(--m-ink-3); flex: none; }
+.more-row { padding: 4px 14px 2px 38px; font-size: 11.5px; color: var(--m-ink-2); }
+.more-row button { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+
+/* workspaces block */
+.ws { padding: 6px 8px 8px 14px; display: flex; flex-direction: column; gap: 2px; }
+.wsrow { display: flex; align-items: center; gap: 2px; }
+.wsrow .nm { font-size: 11px; color: var(--m-ink-2); margin-right: 6px; white-space: nowrap; }
+.wsrow .sp { flex: 1; }
+
+/* controls */
+.controls { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 14px; align-self: start; position: sticky; top: calc(12px + env(safe-area-inset-top, 0px)); }
+.grp { display: flex; flex-direction: column; gap: 6px; }
+.grp > .gl { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button { font: 12px var(--ui); padding: 4px 9px; border-radius: 7px; border: 1px solid var(--rule); background: var(--panel); color: var(--ink); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.seg button:focus-visible, .copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chk { display: flex; gap: 7px; align-items: center; font-size: 12.5px; }
+.hint { font-size: 11.5px; color: var(--ink-2); margin: 0; }
+.summary { font: 11px/1.5 var(--mono); background: var(--chip); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; color: var(--ink); margin: 0; }
+.copy { font: 12px var(--ui); padding: 6px 10px; border-radius: 7px; border: 0; background: var(--accent); color: #fff; cursor: pointer; align-self: flex-start; }
+@media (max-width: 560px) {
+  .stage { min-height: 760px; }
+  .satwin { display: none; }
+  .flyout { left: 64px; right: 8px; width: auto !important; }
+}
+@media (prefers-reduced-motion: no-preference) { .flyout { transition: width .15s ease; } }
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>Dock flyout as a project card</h1>
+    <p class="sub">Folio's satellite dock with the flyout open on the Folio project. The checkboxes, the tasks and the add-to-note line all respond. Click the other mark to see a project with less going on.</p>
+    <div class="stage" id="stage">
+      <div class="menubar"><b>Safari</b><span>File</span><span>Edit</span><span>View</span></div>
+      <div class="satwin"><div class="tb"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span style="margin-left:8px">Figma · Flyout</span></div></div>
+      <div class="dock" id="dock"></div>
+      <div class="flyout" id="flyout"></div>
+    </div>
+  </div>
+
+  <aside class="controls" aria-label="Mock controls">
+    <div class="grp"><span class="gl">Body</span>
+      <div class="seg" data-k="body">
+        <button data-v="status">Shipped (status rows)</button>
+        <button data-v="current">Current card</button>
+        <button data-v="tasks">Tasks card</button>
+      </div>
+      <p class="hint" id="bodyHint"></p>
+    </div>
+    <div class="grp"><span class="gl">Header</span>
+      <div class="seg" data-k="header">
+        <button data-v="flyout">Name + Show Window</button>
+        <button data-v="companion">Companion header</button>
+      </div>
+    </div>
+    <div class="grp"><span class="gl">Focused task</span>
+      <div class="seg" data-k="focus">
+        <button data-v="hero">Pinned on top</button>
+        <button data-v="inline">Marked in the list</button>
+      </div>
+    </div>
+    <div class="grp"><span class="gl">Session note</span>
+      <div class="seg" data-k="note">
+        <button data-v="0">Off</button>
+        <button data-v="3">Last 3 lines</button>
+        <button data-v="all">Whole note</button>
+      </div>
+    </div>
+    <div class="grp"><span class="gl">Open tasks</span>
+      <div class="seg" data-k="cap">
+        <button data-v="5">First 5, then "N more"</button>
+        <button data-v="all">All, scrolls</button>
+      </div>
+    </div>
+    <div class="grp"><span class="gl">Window rows</span>
+      <div class="seg" data-k="ws">
+        <button data-v="top">Above the card</button>
+        <button data-v="bottom">Below the card</button>
+      </div>
+    </div>
+    <div class="grp"><span class="gl">Shape</span>
+      <div class="seg" data-k="shape">
+        <button data-v="fit">Fits its content</button>
+        <button data-v="playing">Playing card 5:7</button>
+        <button data-v="tarot">Tarot 11:19</button>
+      </div>
+      <p class="hint">A card shape keeps the flyout one size whatever the project holds; the task list scrolls inside it.</p>
+    </div>
+    <div class="grp"><span class="gl">Width</span>
+      <div class="seg" data-k="width">
+        <button data-v="280">280</button>
+        <button data-v="320">320 (companion)</button>
+        <button data-v="380">380</button>
+      </div>
+    </div>
+    <div class="grp"><span class="gl">Extras</span>
+      <label class="chk"><input type="checkbox" id="addline"> Add to the session's note line</label>
+      <label class="chk"><input type="checkbox" id="origins"> Origin pills on older tasks</label>
+      <label class="chk"><input type="checkbox" id="macdark"> Dark Mac</label>
+    </div>
+    <div class="grp"><span class="gl">Summary</span>
+      <pre class="summary" id="summary"></pre>
+      <button class="copy" id="copy">Copy summary</button>
+    </div>
+  </aside>
+</div>
+
+<script>
+const I = {
+  folio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h6l2 2h8v12H4z"/></svg>',
+  house: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9H3z"/><path d="M10 20v-5h4v5"/></svg>',
+  win: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 9h18"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M12 13v5M9.5 15.5h5"/></svg>',
+  open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M10 14l6-6M11 8h5v5"/></svg>',
+  grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+  web: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c3 3 3 14 0 17M12 3.5c-3 3-3 14 0 17"/></svg>',
+  doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>',
+  tick: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.2l2.3 2.3 4.7-5"/></svg>',
+  pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
+  scope: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>',
+};
+
+// Example data, shaped like a project's notes: sittings newest first, tasks with their sitting.
+const PROJECTS = {
+  folio: {
+    title: 'Folio', color: '#3b78e7', icon: 'folio',
+    session: { name: 'Flyout enhancements', when: 'Since 9:10 AM' },
+    note: [
+      'Status rows ship in the flyout: focused task, then the session.',
+      'They read thin next to the companion. Try the card itself.',
+      'Hover hide delay is 0.3 s; a taller flyout may need longer.',
+      'Ask whether the flyout should take the keyboard like the companion.',
+      'Check the flyout on the other Mac with legacy scrollers.',
+    ],
+    tasks: [
+      { id: 1, text: 'Mock the flyout as a project card', focus: true, ctx: 'Dock flyout', sitting: 0 },
+      { id: 2, text: 'Size the card to its content, capped at 60% of the screen', sitting: 0 },
+      { id: 3, text: 'Keep the flyout open while a row editor is up', sitting: 0, done: true },
+      { id: 4, text: 'Hover delay for a taller flyout', sitting: 0, sub: true },
+      { id: 5, text: 'Ring the window on hover for tiles in tabs', sitting: 1, origin: 'Oct 29' },
+      { id: 6, text: 'Notarize 0.55.1', sitting: 1, origin: 'Oct 29', waiting: 'Apple notary queue' },
+      { id: 7, text: 'Gather leaves an Empty behind on the second screen', sitting: 2, origin: 'Oct 27', due: 'Fri' },
+      { id: 8, text: 'Dock marks for areas, not only projects', sitting: 3, origin: 'Oct 22' },
+      { id: 9, text: 'Companion pill shows the focused task', sitting: 3, origin: 'Oct 22' },
+    ],
+    workspaces: [
+      { name: 'Flyout', windows: [{ t: 'Figma · Flyout', i: 'web' }, { t: 'concepts.md', i: 'doc' }] },
+      { name: 'Release', windows: [{ t: 'GitHub Releases', i: 'web' }] },
+    ],
+  },
+  house: {
+    title: '42 Aberdeen', color: '#d0703a', icon: 'house',
+    session: { name: 'Contractor walk-through', when: 'Thu, Oct 29' },
+    note: ['Kitchen wall is load-bearing; needs an engineer letter.'],
+    tasks: [
+      { id: 21, text: 'Email the engineer for the letter', focus: true, sitting: 0, waiting: 'Dana' },
+      { id: 22, text: 'Pick tile for the upstairs bath', sitting: 1, origin: 'Oct 20', due: 'Nov 6' },
+    ],
+    workspaces: [],
+  },
+};
+
+const DEFAULTS = { body: 'current', header: 'companion', focus: 'hero', note: '3', cap: '5', ws: 'bottom', shape: 'tarot', width: '320', addline: true, origins: true, macdark: false };
+let S = { ...DEFAULTS };
+try { Object.assign(S, JSON.parse(localStorage.getItem('flyout-mock') || '{}')); } catch (e) {}
+let current = 'folio';
+let selected = null;
+let expanded = false;
+
+const BODY_HINT = {
+  status: 'What 0.55.0 draws now: the focused task, then the session, as two rows.',
+  current: 'The card set to Current, as in the companion: the latest session’s note, then every open task.',
+  tasks: 'The card set to Tasks: every open task, no note.',
+};
+
+function esc(s) { return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+function header(p) {
+  const done = p.tasks.filter(t => t.sitting === 0 && t.done).length;
+  const total = p.tasks.filter(t => t.sitting === 0).length;
+  if (S.header === 'flyout') {
+    return `<div class="fx-head"><div class="fx-title"><div class="t">${esc(p.title)}</div></div>
+      <button class="ib" title="Show Window" aria-label="Show Window">${I.win}</button></div>`;
+  }
+  return `<div class="fx-head"><span class="pm">${I[p.icon]}</span>
+    <div class="fx-title"><div class="t">${esc(p.title)}</div><div class="s">${esc(p.session.name)} · ${esc(p.session.when)} · ${done} of ${total} done</div></div>
+    <button class="ib" title="New Task" aria-label="New Task">${I.plus}</button>
+    <button class="ib" title="New Session" aria-label="New Session">${I.cal}</button>
+    <button class="ib" title="Show Window" aria-label="Show Window">${I.open}</button></div>`;
+}
+
+function taskRow(t, opts = {}) {
+  const cls = ['task', t.sub && 'sub', t.done && 'done', selected === t.id && 'sel', S.focus === 'inline' && t.focus && 'focus'].filter(Boolean).join(' ');
+  const badges = [];
+  if (t.due) badges.push(`<span class="pill due">${esc(t.due)}</span>`);
+  if (S.origins && t.origin) badges.push(`<span class="pill">${esc(t.origin)}</span>`);
+  return `<div class="${cls}" data-sel="${t.id}">
+    <button class="box ${t.done ? 'on' : ''}" data-tick="${t.id}" aria-label="${t.done ? 'Reopen' : 'Complete'} ${esc(t.text)}">${t.done ? I.tick : ''}</button>
+    <span class="tt">${S.focus === 'inline' && t.focus ? '<span class="focus-mark">@</span>' : ''}${esc(t.text)}${t.waiting ? `<span class="wait">Waiting on ${esc(t.waiting)}</span>` : ''}</span>
+    <span class="badges">${badges.join('')}</span></div>`;
+}
+
+function statusBody(p) {
+  const f = p.tasks.find(t => t.focus && !t.done);
+  const done = p.tasks.filter(t => t.sitting === 0 && t.done).length;
+  const total = p.tasks.filter(t => t.sitting === 0).length;
+  let h = '<div class="card">';
+  if (f) h += `<div class="task" style="grid-template-columns:16px minmax(0,1fr) auto"><span style="color:var(--m-ink-2)">${I.scope.replace('<svg', '<svg width="14" height="14"')}</span>
+    <span class="tt">${f.ctx ? `<span class="ctx">${esc(f.ctx)}</span>` : ''}${esc(f.text)}${f.waiting ? `<span class="wait">Waiting on ${esc(f.waiting)}</span>` : ''}</span>
+    <button class="ib" data-tick="${f.id}" title="Complete" aria-label="Complete">${I.tick.replace('viewBox="0 0 12 12"', 'viewBox="0 0 12 12" width="14" height="14"')}</button></div>`;
+  h += `<div class="task"><span style="color:var(--m-ink-2)">${I.clock.replace('<svg', '<svg width="14" height="14"')}</span>
+    <span class="tt">${esc(p.session.name)}<span class="ctx" style="font-size:11px;color:var(--m-ink-2)">${esc(p.session.when)} · ${done} of ${total} done</span></span><span></span></div>`;
+  return h + '</div>';
+}
+
+function cardBody(p) {
+  let h = '<div class="card">';
+  const f = p.tasks.find(t => t.focus && !t.done);
+  if (S.focus === 'hero' && f) {
+    h += `<div class="focus-hero"><button class="box" data-tick="${f.id}" aria-label="Complete ${esc(f.text)}"></button>
+      <span class="tt"><span class="lbl">Focused</span>${f.ctx ? `<span class="ctx">${esc(f.ctx)}</span>` : ''}${esc(f.text)}${f.waiting ? `<span class="wait">Waiting on ${esc(f.waiting)}</span>` : ''}</span><span></span></div>`;
+  }
+  if (S.body === 'current') {
+    h += `<div class="cap">${esc(p.session.name)} <span class="n">${esc(p.session.when)}</span></div>`;
+    if (S.note !== '0') {
+      const lines = S.note === 'all' ? p.note : p.note.slice(-3);
+      h += `<div class="note">${S.note === '3' && p.note.length > 3 ? `<p class="more">${p.note.length - 3} earlier lines</p>` : ''}${lines.map(l => `<p>${esc(l)}</p>`).join('')}</div>`;
+    }
+    p.tasks.filter(t => t.sitting === 0 && !(S.focus === 'hero' && t.focus && !t.done)).forEach(t => h += taskRow(t));
+    if (S.addline) h += `<div class="addline">${I.pen}<input id="addinput" placeholder="Add to the note" aria-label="Add to the session's note"></div>`;
+  }
+  let rest = p.tasks.filter(t => !t.done && !(S.focus === 'hero' && t.focus));
+  if (S.body === 'current') rest = rest.filter(t => t.sitting !== 0);
+  if (rest.length) {
+    h += `<div class="cap">${S.body === 'current' ? 'Still open' : 'Open tasks'} <span class="n">${rest.length}</span></div>`;
+    const capped = S.cap === '5' && !expanded ? rest.slice(0, 5) : rest;
+    capped.forEach(t => h += taskRow(t));
+    if (capped.length < rest.length) h += `<div class="more-row"><button id="more">${rest.length - capped.length} more</button></div>`;
+  }
+  return h + '</div>';
+}
+
+function wsBlock(p) {
+  if (!p.workspaces.length) return '';
+  return `<div class="ws">${p.workspaces.map(w => `<div class="wsrow"><span class="nm">${esc(w.name)}</span>
+    ${w.windows.map(x => `<button class="ib" title="${esc(x.t)}" aria-label="${esc(x.t)}">${I[x.i]}</button>`).join('')}
+    <span class="sp"></span><button class="ib" title="Gather ${esc(w.name)}" aria-label="Gather ${esc(w.name)}">${I.grid}</button></div>`).join('')}</div>`;
+}
+
+function render() {
+  const p = PROJECTS[current];
+  document.getElementById('stage').classList.toggle('mac-dark', S.macdark);
+  document.getElementById('dock').innerHTML = Object.entries(PROJECTS).map(([k, q]) =>
+    `<button class="mark" style="--c:${q.color}" data-proj="${k}" aria-pressed="${k === current}" aria-label="${esc(q.title)}">${I[q.icon]}</button>`).join('');
+  const fx = document.getElementById('flyout');
+  fx.style.setProperty('--c', p.color);
+  fx.style.width = S.width + 'px';
+  fx.style.aspectRatio = { fit: 'auto', playing: '5 / 7', tarot: '11 / 19' }[S.shape];
+  const body = S.body === 'status' ? statusBody(p) : cardBody(p);
+  const ws = wsBlock(p);
+  const sections = [header(p)];
+  if (S.ws === 'top' && ws) sections.push('<div class="hr"></div>', ws);
+  sections.push('<div class="hr full"></div>', `<div class="scroll">${body}</div>`);
+  if (S.ws === 'bottom' && ws) sections.push('<div class="hr full"></div>', ws);
+  fx.innerHTML = sections.join('');
+
+  document.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', S[seg.dataset.k] === b.dataset.v)));
+  ['addline', 'origins', 'macdark'].forEach(k => document.getElementById(k).checked = S[k]);
+  document.getElementById('bodyHint').textContent = BODY_HINT[S.body];
+  const cardOnly = S.body === 'status';
+  ['focus', 'note', 'cap'].forEach(k => document.querySelector(`.seg[data-k="${k}"]`).closest('.grp').style.opacity = cardOnly || (k === 'note' && S.body === 'tasks') ? .45 : 1);
+  document.getElementById('summary').textContent = summary();
+  try { localStorage.setItem('flyout-mock', JSON.stringify(S)); } catch (e) {}
+}
+
+function summary() {
+  const name = (k, v) => document.querySelector(`.seg[data-k="${k}"] button[data-v="${v}"]`).textContent;
+  return [
+    `Body: ${name('body', S.body)}`,
+    `Header: ${name('header', S.header)}`,
+    `Focused task: ${name('focus', S.focus)}`,
+    `Session note: ${name('note', S.note)}`,
+    `Open tasks: ${name('cap', S.cap)}`,
+    `Window rows: ${name('ws', S.ws)}`,
+    `Shape: ${name('shape', S.shape)}`,
+    `Width: ${S.width}`,
+    `Add-to-note line: ${S.addline ? 'on' : 'off'}`,
+    `Origin pills: ${S.origins ? 'on' : 'off'}`,
+  ].join('\n');
+}
+
+document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  S[seg.dataset.k] = b.dataset.v; expanded = false; render();
+}));
+['addline', 'origins', 'macdark'].forEach(k => document.getElementById(k).addEventListener('change', e => { S[k] = e.target.checked; render(); }));
+document.getElementById('dock').addEventListener('click', e => {
+  const b = e.target.closest('[data-proj]'); if (!b) return;
+  current = b.dataset.proj; selected = null; expanded = false; render();
+});
+document.getElementById('flyout').addEventListener('click', e => {
+  const tick = e.target.closest('[data-tick]');
+  if (tick) {
+    const t = PROJECTS[current].tasks.find(x => x.id === +tick.dataset.tick);
+    t.done = !t.done; render(); return;
+  }
+  if (e.target.id === 'more') { expanded = true; render(); return; }
+  const row = e.target.closest('[data-sel]');
+  if (row) { selected = +row.dataset.sel; render(); }
+});
+document.getElementById('flyout').addEventListener('keydown', e => {
+  if (e.target.id === 'addinput' && e.key === 'Enter' && e.target.value.trim()) {
+    PROJECTS[current].note.push(e.target.value.trim()); render();
+    document.getElementById('addinput')?.focus();
+  }
+});
+document.getElementById('copy').addEventListener('click', () => {
+  const text = summary();
+  const pre = document.getElementById('summary');
+  const fallback = () => { const r = document.createRange(); r.selectNodeContents(pre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+  try { navigator.clipboard.writeText(text).then(() => { document.getElementById('copy').textContent = 'Copied'; setTimeout(() => document.getElementById('copy').textContent = 'Copy summary', 1400); }, fallback); } catch (e) { fallback(); }
+});
+render();
+</script>
