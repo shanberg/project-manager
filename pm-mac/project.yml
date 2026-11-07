@@ -205,6 +205,7 @@ targets:
       - path: PM/Task/TaskLineLayout.swift
       - path: PM/Project/TaskDropResolver.swift
       - path: PM/Canvas/CanvasPageBudget.swift
+      - path: PM/Canvas/DockDue.swift
       - path: PM/Canvas/CanvasPageHandover.swift
       - path: PM/Canvas/CanvasPageKeys.swift
       - path: PM/Canvas/CanvasPanBounds.swift
@@ -215,6 +216,7 @@ targets:
       - path: PM/Overview/OverviewModel.swift
       - path: PM/Overview/WindowSnapshot.swift
       - path: PM/Spaces/SpaceCardMarks.swift
+      - path: PM/Spaces/SpaceArchive.swift
       - path: PM/Spaces/SpaceCardKinds.swift
       - path: PM/Spaces/WindowDragView.swift
       - path: PM/Canvas/CanvasWebPopup.swift

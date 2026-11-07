@@ -625,7 +625,10 @@ final class CanvasBoardView: NSView {
     var tileGripsHeld = false {
         didSet { if tileGripsHeld != oldValue { refreshTileHandles() } }
     }
-    func pageStateChanged() { onPageStateChanged?() }
+    func pageStateChanged() {
+        onPageStateChanged?()
+        CanvasTileControls.shared.pageMoved(on: self)
+    }
 
     /// Told when the mode changes, so the window's header can say which one the board is in.
     var onModeChanged: (() -> Void)?

@@ -55,6 +55,7 @@ struct WindowsSettingsView: View {
     @State private var panelSettings = PanelSettings.load()
     @AppStorage(ScreenDimSettings.quickBarDimsKey) private var quickBarDims = false
     @AppStorage(ScreenDimSettings.strengthKey) private var dimStrength = ScreenDimSettings.defaultStrength
+    @AppStorage(DockDue.horizonKey) private var dueHorizon = DockDue.defaultHorizon
 
     var body: some View {
         Form {
@@ -90,9 +91,35 @@ struct WindowsSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section {
+                Picker("Bring forward projects due", selection: $dueHorizon) {
+                    Text("Off").tag(DockDue.off)
+                    Divider()
+                    ForEach(DockDue.choices, id: \.self) { days in
+                        Text(Self.dueChoice(days)).tag(days)
+                    }
+                }
+                .onChange(of: dueHorizon) { _ in CanvasSatelliteDock.shared.refresh() }
+            } header: {
+                Text("Dock")
+            } footer: {
+                Text("Projects with an open task due in this window get a Due section in the dock. Red dot: overdue. Orange dot: due today. Overdue always counts.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .scenePadding()
+    }
+
+    private static func dueChoice(_ days: Int) -> String {
+        switch days {
+        case 0: "Today"
+        case 1: "By tomorrow"
+        case 7: "Within a week"
+        default: "Within \(days) days"
+        }
     }
 
     /// Write through the same file Raycast reads, and let the panel apply it live.

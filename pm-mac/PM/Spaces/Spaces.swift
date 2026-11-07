@@ -73,6 +73,7 @@ final class Spaces {
         guard file.spaces[index] != before else { return }
         window(of: id)?.applyTitle()
         window(of: id)?.spaceFrame?.refresh()
+        if file.spaces[index].color != before.color { window(of: id)?.spaceAppearanceChanged() }
         CanvasSatelliteDock.shared.refresh()
         save()
     }
@@ -401,5 +402,6 @@ final class Spaces {
         file.spaces.removeAll { $0.id == id }
         flush()
         CanvasSatelliteDock.shared.refresh()
+        SpaceSettings.close(spaceID: id)
     }
 }

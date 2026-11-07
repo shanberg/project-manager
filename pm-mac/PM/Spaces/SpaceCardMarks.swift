@@ -13,6 +13,18 @@ enum SpaceCardMarks {
     static let pinnedKey = "pmPinned"
     static let favoriteKey = "pmFavorite"
     static let orderKey = "pmOrder"
+    /// `pmTitle`: a name typed into the card's row (double-click, Rename…), which beats the page's.
+    static let titleKey = "pmTitle"
+
+    static func title(_ node: CanvasNode) -> String? {
+        if case .string(let title)? = node.extra[titleKey], !title.isEmpty { return title }
+        return nil
+    }
+
+    static func setTitle(_ title: String?, on node: inout CanvasNode) {
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        node.extra[titleKey] = trimmed.isEmpty ? nil : .string(trimmed)
+    }
 
     static func isPinned(_ node: CanvasNode) -> Bool { flag(pinnedKey, node) || isFavorite(node) }
     static func isFavorite(_ node: CanvasNode) -> Bool { flag(favoriteKey, node) }
@@ -105,6 +117,20 @@ enum SpaceCardMarks {
         }
     }
 
+    /// Several cards dropped together at slot `index` of `list` (counted in `members` as they stand),
+    /// landing one after another in the order given. Cards taken out from above the slot pull it up.
+    static func move(_ ids: [String], to list: List, at index: Int, members: [String], in document: inout CanvasDocument) {
+        var order = members
+        var slot = index
+        for card in ids {
+            if let from = order.firstIndex(of: card), from < slot { slot -= 1 }
+            order.removeAll { $0 == card }
+            move(card, to: list, at: slot, members: order, in: &document)
+            order.insert(card, at: min(slot, order.count))
+            slot += 1
+        }
+    }
+
     /// New cards onto the board, in order from slot `index` of `list` (whose cards are `members`).
     static func insert(_ nodes: [CanvasNode], into list: List, at index: Int, members: [String],
                        in document: inout CanvasDocument) {
@@ -155,6 +181,16 @@ enum SpaceRowDrag {
 
     /// The row in flight, the board it's a card of, and its address if it's a web card.
     private(set) static var current: (card: String, canvas: URL, address: String?)?
+    /// The other picked rows travelling with `current`'s, in sidebar order: they land with it.
+    private(set) static var companions: [String] = []
+    /// Bumped per drag: a cancelled drag's late end must not clear the next one's row (same card or not).
+    private static var generation = 0
+
+    /// Every card in flight, the one under the pointer first.
+    static func cards(in drag: NSDraggingInfo, for canvas: URL) -> [String] {
+        guard let card = card(in: drag, for: canvas) else { return [] }
+        return [card] + companions.filter { $0 != card }
+    }
 
     /// The card `drag` is carrying, if it's a row of the board at `canvas`.
     static func card(in drag: NSDraggingInfo, for canvas: URL) -> String? {
@@ -172,12 +208,16 @@ enum SpaceRowDrag {
 
     /// The row was let go somewhere that took it. Not left to the provider's release, which is the
     /// only end SwiftUI reports and may come later.
-    static func end() { current = nil }
+    static func end() { current = nil; companions = [] }
 
     /// A provider for dragging `card`'s row; `address` for a web card. `onEnd` runs when the drag is
-    /// over, however it ended.
-    static func itemProvider(card: String, canvas: URL, address: String?, onEnd: @escaping () -> Void) -> NSItemProvider {
+    /// over, however it ended. `companions`: other picked rows carried with it.
+    static func itemProvider(card: String, canvas: URL, address: String?, companions: [String] = [],
+                             onEnd: @escaping () -> Void) -> NSItemProvider {
         current = (card, canvas, address)
+        Self.companions = companions
+        generation &+= 1
+        let mine = generation
         let provider = NSItemProvider()
         if let address, let url = URL(string: address) { provider.registerObject(url as NSURL, visibility: .all) }
         provider.registerDataRepresentation(forTypeIdentifier: type.identifier, visibility: .ownProcess) { done in
@@ -186,7 +226,7 @@ enum SpaceRowDrag {
         }
         objc_setAssociatedObject(provider, &sentinelKey, DragEndSentinel {
             MainActor.assumeIsolated {
-                if current?.card == card { current = nil }
+                if generation == mine { current = nil; Self.companions = [] }
                 onEnd()
             }
         }, .OBJC_ASSOCIATION_RETAIN)

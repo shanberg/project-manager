@@ -15,6 +15,11 @@ import SwiftUI
 ///   that isn't a web page has the second half only.
 /// - Closes 0.45s after the pointer leaves both grip and capsule (never while editing), when its tile
 ///   leaves the layout, and when the window resizes.
+/// - Also opens on its own while the focused tile's page is navigating — once the load is worth reporting
+///   (`CanvasPageLoad`) — so an address changing is seen as it would be in a browser's bar. A 2pt accent
+///   line along its bottom edge says how far the load has got, and fades when it ends. It goes 1s after
+///   the page has arrived, unless the pointer came into it, which makes it an ordinary open. Not in focus
+///   mode, and never taken from another tile whose capsule is open.
 /// - Motion (`.claude/mocks/folio-spaces-motion.html`): drops 4pt into place with a fade (0.16s); going
 ///   after the pointer leaves, it rises back and fades quicker (0.12s), and every other close is a cut.
 ///   Widens and narrows round the address field (0.18s). Pin and Favourite replace their symbols and
@@ -26,6 +31,8 @@ final class CanvasTileControls {
 
     static let restDelay = 0.3
     static let leaveDelay = 0.45
+    /// How long a capsule a load opened stays once the page has arrived, so the new address can be read.
+    static let arrivedDelay = 1.0
 
     let model = Model()
     private weak var board: CanvasBoardView?
@@ -41,6 +48,9 @@ final class CanvasTileControls {
     /// across its top has both, and the capsule belongs under the one that was used.
     private(set) var viaTab = false
     private var resizeWatch: NSObjectProtocol?
+    /// Opened by a page navigating rather than by the pointer: it goes once the page has arrived.
+    private var openedByLoad = false
+    private var arrived: DispatchWorkItem?
 
     func isOpen(on board: CanvasBoardView, tile id: String) -> Bool { self.board === board && tile == id && host != nil }
 
@@ -109,6 +119,8 @@ final class CanvasTileControls {
     func close() {
         rest?.cancel()
         leave?.cancel()
+        arrived?.cancel()
+        openedByLoad = false
         if let resizeWatch { NotificationCenter.default.removeObserver(resizeWatch) }
         resizeWatch = nil
         host?.removeFromSuperview()
@@ -146,7 +158,51 @@ final class CanvasTileControls {
 
     fileprivate func capsuleHover(_ inside: Bool) {
         pointerInCapsule = inside
+        // Reached for, so it's yours now: it stays and goes with the pointer, as one opened from the grip.
+        if inside, openedByLoad {
+            openedByLoad = false
+            arrived?.cancel()
+        }
         if inside { leave?.cancel() } else { scheduleLeave() }
+    }
+
+    // MARK: Following a load
+
+    /// A page on `board` started, moved along or finished a load. Opens the capsule on the focused tile
+    /// while its load is worth reporting, and lets one a load opened go once the page is there.
+    func pageMoved(on board: CanvasBoardView) {
+        if host != nil {
+            guard self.board === board, openedByLoad, let tile else { return }
+            let loading = (board.nodeViews[tile] as? CanvasLinkNodeView)?.showsLoad ?? false
+            if loading { arrived?.cancel(); arrived = nil } else if arrived == nil { scheduleArrived() }
+            return
+        }
+        guard board.gripOpensControls, !board.tileGripsHeld, board.gesture == nil,
+              let id = loadingTile(on: board), board.tileControlsAnchor(id) != nil else { return }
+        open(on: board, tile: id)
+        openedByLoad = true
+    }
+
+    /// The tile you are in, when its page is far enough into a load to say so: the one tile selected,
+    /// else the page you have stepped into.
+    private func loadingTile(on board: CanvasBoardView) -> String? {
+        guard let tiling = board.tiling else { return nil }
+        let id = board.focusedTile
+            ?? board.nodeViews.first { $0.value.isEngaged && $0.value is CanvasLinkNodeView }?.key
+        guard let id, tiling.ids.contains(id), tiling.maximized == nil || tiling.maximized == id,
+              (board.nodeViews[id] as? CanvasLinkNodeView)?.showsLoad == true else { return nil }
+        return id
+    }
+
+    private func scheduleArrived() {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.openedByLoad else { return }
+            self.arrived = nil
+            guard !self.pointerInCapsule, !self.pointerOnGrip, !self.model.editing else { return }
+            self.dismiss()
+        }
+        arrived = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.arrivedDelay, execute: work)
     }
 
     /// The board laid out or redrew: keep the capsule under its handle, or close it if the handle has gone.
@@ -187,6 +243,7 @@ final class CanvasTileControls {
         let card = self.card
         model.isWeb = card != nil
         model.loading = card?.isLoading ?? false
+        model.progress = card?.loadProgress ?? 0
         model.canBack = card?.canGoBack ?? false
         model.canForward = card?.canGoForward ?? false
         let url = card?.liveURL
@@ -294,6 +351,9 @@ final class CanvasTileControls {
         /// Down and in place; false while arriving and while going.
         var presented = false
         var loading = false
+        /// How far the load has got, 0…1, and zero until it is worth reporting — see
+        /// `CanvasLinkNodeView.loadProgress`.
+        var progress = 0.0
         var draft = ""
         var focusToken = 0
         var candidates: [CanvasAddressSuggestions.Candidate] = []
@@ -408,9 +468,29 @@ struct CanvasTileControlsView: View {
         // Widening round the address field and narrowing back, rather than jumping.
         .animation(Motion.animation(.easeOut(duration: 0.18)), value: model.editing)
         .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(.regularMaterial))
+        .overlay { progressLine }
         .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.18), radius: 7, y: 3)
         .frame(height: 32)
+    }
+
+    /// The load, as a 2pt accent line along the capsule's bottom edge, inside its curve: there only while
+    /// something is arriving, and fading with the load rather than snapping to full, as the header's.
+    private var progressLine: some View {
+        GeometryReader { box in
+            if model.isWeb, model.loading, model.progress > 0 {
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(width: box.size.width * model.progress, height: 2)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .transition(.opacity)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .allowsHitTesting(false)
+        .animation(Motion.animation(.easeOut(duration: 0.25)), value: model.progress)
+        .animation(Motion.animation(.easeOut(duration: 0.2)), value: model.loading)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder

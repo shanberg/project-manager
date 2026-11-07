@@ -413,7 +413,13 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
             canvas: openedCanvas ?? store.canvasPath.map { URL(fileURLWithPath: $0) },
             title: windowName, color: store.color?.nsColor, icon: store.icon, window: window,
             show: { [weak self] in self?.show() },
-            projectKey: openedCanvas == nil ? store.boundKey : nil)
+            projectKey: openedCanvas == nil ? store.boundKey : nil, projectColor: store.color)
+    }
+
+    /// A space's colour changed (Space Settings, the dock mark's Colour): the boards' wash follows, as a
+    /// project's does through `watchColor`.
+    func spaceAppearanceChanged() {
+        split.projectColorChanged()
     }
 
     func applyTitle() {

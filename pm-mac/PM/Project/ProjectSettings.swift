@@ -357,19 +357,6 @@ final class ProjectSettingsModel {
 
     var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
 
-    /// What the grid shows: the catalog, narrowed by the category menu and the search. A search that
-    /// spells out a drawable symbol name is offered even if the catalog doesn't list it, so a symbol
-    /// set by hand in the file can still be found and kept.
-    var symbolResults: [String] {
-        guard let catalog = symbolCatalog else { return [] }
-        let query = symbolQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        var results = catalog.symbols(in: symbolCategory, matching: query)
-        if !query.isEmpty, !results.contains(query), ProjectIconMark.canDraw(.symbol(query)) {
-            results.insert(query, at: 0)
-        }
-        return results
-    }
-
     static let defaultPattern: ProjectTexture.Name = .checker
     static let defaultSymbol = "star.fill"
     static let defaultEmoji = "🌿"
@@ -474,10 +461,6 @@ struct ProjectSettingsView: View {
     let onCancel: () -> Void
     let onSave: () -> Void
     var onAppearanceChange: (ProjectAppearancePreview.Appearance) -> Void = { _ in }
-    private let symbolColumns = [GridItem(.adaptive(minimum: 36), spacing: 4)]
-    private let emojiColumns = [GridItem(.adaptive(minimum: 34), spacing: 2)]
-    /// Fixed, so switching category or typing a search doesn't resize the sheet under the pointer.
-    private let gridHeight: CGFloat = 240
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -513,10 +496,14 @@ struct ProjectSettingsView: View {
                 }
                 if model.mode == .symbol {
                     Divider()
-                    symbolPicker.padding(12)
+                    SymbolIconPicker(symbol: $model.symbol, query: $model.symbolQuery,
+                                     category: $model.symbolCategory, catalog: model.symbolCatalog)
+                        .padding(12)
                 } else if model.mode == .emoji {
                     Divider()
-                    emojiPicker.padding(12)
+                    EmojiIconPicker(emoji: $model.emoji, query: $model.emojiQuery,
+                                    catalog: model.emojiCatalog, recents: model.recentEmoji)
+                        .padding(12)
                 } else if model.mode == .image {
                     Divider()
                     ProjectIconImagePanel(model: model).padding(12)
@@ -595,189 +582,6 @@ struct ProjectSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-    }
-
-    // MARK: Symbols
-
-    /// Search and a category menu over the whole catalog — the SF Symbols app's model, in a sheet.
-    /// A menu rather than a strip of category icons: there are nearly thirty categories, and a strip
-    /// that scrolls sideways hides most of them.
-    private var symbolPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                TextField("Search symbols", text: $model.symbolQuery)
-                    .textFieldStyle(.roundedBorder)
-                if let catalog = model.symbolCatalog, !catalog.categories.isEmpty {
-                    Picker("Category", selection: $model.symbolCategory) {
-                        Label("All", systemImage: "square.grid.2x2").tag(String?.none)
-                        Divider()
-                        ForEach(catalog.categories) { category in
-                            Label(category.title, systemImage: category.icon).tag(Optional(category.key))
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .fixedSize()
-                }
-            }
-            symbolGrid
-            // The name is the thing you'd search for next time, and the thing written into the file.
-            Text(model.symbol)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-        }
-    }
-
-    private var symbolGrid: some View {
-        let results = model.symbolResults
-        return ScrollViewReader { proxy in
-            ScrollView {
-                if model.symbolCatalog == nil {
-                    ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: gridHeight)
-                } else if results.isEmpty {
-                    emptyResult("No symbols match “\(model.symbolQuery)”")
-                } else {
-                    LazyVGrid(columns: symbolColumns, spacing: 4) {
-                        ForEach(results, id: \.self) { name in
-                            choice(isSelected: name == model.symbol, help: name) {
-                                model.symbol = name
-                            } label: {
-                                Image(systemName: name).font(.system(size: 16))
-                            }
-                            .id(name)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-            .frame(height: gridHeight)
-            // Open on the current choice rather than the top of eight thousand symbols.
-            .task(id: model.symbolCatalog == nil) {
-                guard model.symbolCatalog != nil else { return }
-                proxy.scrollTo(model.symbol, anchor: .center)
-            }
-        }
-    }
-
-    // MARK: Emoji
-
-    private struct EmojiSection: Identifiable {
-        let id: String
-        let title: String
-        let icon: String
-        let emoji: [EmojiCatalog.Emoji]
-    }
-
-    /// Recently Used, then Unicode's groups — the system picker's order.
-    private var emojiSections: [EmojiSection] {
-        var sections: [EmojiSection] = []
-        let recent = model.recentEmoji.map {
-            EmojiCatalog.Emoji(character: $0, name: model.emojiCatalog.name(of: $0) ?? $0)
-        }
-        if !recent.isEmpty {
-            sections.append(EmojiSection(id: "recent", title: "Recently Used", icon: "clock", emoji: recent))
-        }
-        sections += model.emojiCatalog.groups.map {
-            EmojiSection(id: $0.id, title: $0.title, icon: $0.icon, emoji: $0.emoji)
-        }
-        return sections
-    }
-
-    /// The standard emoji picker: search on top, a strip of group icons that jump the grid to their
-    /// section, and one scrolling grid with the section headers pinned as you pass them.
-    private var emojiPicker: some View {
-        let sections = emojiSections
-        let searching = !model.emojiQuery.trimmingCharacters(in: .whitespaces).isEmpty
-        return VStack(alignment: .leading, spacing: 8) {
-            TextField("Search emoji", text: $model.emojiQuery)
-                .textFieldStyle(.roundedBorder)
-            ScrollViewReader { proxy in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 2) {
-                        ForEach(sections) { section in
-                            Button {
-                                model.emojiQuery = ""
-                                proxy.scrollTo(section.id, anchor: .top)
-                            } label: {
-                                Image(systemName: section.icon)
-                                    .font(.system(size: 13))
-                                    .frame(maxWidth: .infinity, minHeight: 22)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                            .help(section.title)
-                            .accessibilityLabel(section.title)
-                        }
-                    }
-                    ScrollView {
-                        if searching {
-                            let results = model.emojiCatalog.search(model.emojiQuery)
-                            if results.isEmpty {
-                                emptyResult("No emoji match “\(model.emojiQuery)”")
-                            } else {
-                                LazyVGrid(columns: emojiColumns, spacing: 2) {
-                                    ForEach(results, id: \.self) { emojiCell($0) }
-                                }
-                            }
-                        } else {
-                            LazyVGrid(columns: emojiColumns, spacing: 2, pinnedViews: [.sectionHeaders]) {
-                                ForEach(sections) { section in
-                                    Section {
-                                        ForEach(section.emoji, id: \.self) { emojiCell($0) }
-                                    } header: {
-                                        sectionHeader(section.title).id(section.id)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .frame(height: gridHeight)
-                }
-            }
-        }
-    }
-
-    private func emojiCell(_ emoji: EmojiCatalog.Emoji) -> some View {
-        choice(isSelected: emoji.character == model.emoji, help: emoji.name) {
-            model.emoji = emoji.character
-        } label: {
-            Text(emoji.character).font(.system(size: 20))
-        }
-    }
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 10, weight: .semibold))
-            .textCase(.uppercase)
-            .tracking(0.6)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
-            .background(Color(nsColor: .controlBackgroundColor))
-    }
-
-    private func emptyResult(_ message: String) -> some View {
-        Text(message)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, minHeight: gridHeight)
-    }
-
-    private func choice<Label: View>(isSelected: Bool, help: String, action: @escaping () -> Void,
-                                     @ViewBuilder label: () -> Label) -> some View {
-        Button(action: action) {
-            label()
-                .frame(maxWidth: .infinity, minHeight: 30)
-                .foregroundStyle(isSelected ? Color.white : Color.primary)
-                .background(RoundedRectangle(cornerRadius: 6)
-                    .fill(isSelected ? Color.accentColor : Color.clear))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .accessibilityLabel(help)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

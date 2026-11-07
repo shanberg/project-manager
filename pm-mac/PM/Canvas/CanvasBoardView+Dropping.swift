@@ -138,7 +138,8 @@ extension CanvasBoardView: CanvasPageDropClaim {
     }
 
     /// Let go of a row over the tiles: what the mark said, and the card focused.
-    func landRow(_ id: String, _ target: (target: String, drop: CanvasTileSession.Drop)) {
+    /// `others`: picked rows carried with it, which join its tile as tabs after it.
+    func landRow(_ id: String, _ target: (target: String, drop: CanvasTileSession.Drop), with others: [String] = []) {
         let undoFrom = beginTilingUndo()
         defer { endTilingUndo("Add to Layout", from: undoFrom) }
         guard var session = tiling, document.node(id: id).map({ !$0.isGroup }) ?? false else { return }
@@ -149,6 +150,15 @@ extension CanvasBoardView: CanvasPageDropClaim {
             case .swap: guard session.replace(target.target, with: id) else { return NSSound.beep() }
             case .beside(let side): session.add(id, at: .init(target: target.target, side: side))
             }
+        }
+        let others = others.filter { $0 != id && document.node(id: $0).map { !$0.isGroup } ?? false }
+        if !others.isEmpty {
+            for other in others where !session.cards.contains(other) {
+                session.add(other, at: .init(target: id, side: .tab))
+            }
+            let tile = session.tabs(of: id)
+            let before = tile.prefix { $0 != id }.filter { !others.contains($0) }.count
+            session.gatherTabs([id] + others, into: id, at: before)
         }
         _ = session.showTab(id)
         guard session != tiling else { return }
@@ -350,8 +360,9 @@ extension CanvasBoardView: CanvasPageDropClaim {
             guard let target = rowTarget(id, at: canvasPoint(convert(sender.draggingLocation, from: nil))) else {
                 return false
             }
+            let carried = SpaceRowDrag.cards(in: sender, for: store.url)
             SpaceRowDrag.end()
-            landRow(id, target)
+            landRow(id, target, with: Array(carried.dropFirst()))
             return true
         }
         if dropSession?.sequence == sender.draggingSequenceNumber, let folder = dropSession?.folder {

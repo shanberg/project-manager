@@ -39,15 +39,17 @@ extension ProjectColor {
     }
 }
 
-/// A row of the named colours, None first, and a well for any other — Project Settings' Color row.
+/// A row of the named colours, None first, and a well for any other — Project Settings' Color row,
+/// and Space Settings' without None (a space always has a colour).
 struct ProjectColorPicker: View {
     @Binding var color: ProjectColor?
+    var allowsNone = true
 
     private static let swatch: CGFloat = 16
 
     var body: some View {
         HStack(spacing: 4) {
-            button(for: nil)
+            if allowsNone { button(for: nil) }
             ForEach(ProjectColor.Name.allCases, id: \.self) { button(for: .named($0)) }
             ColorPicker("Other", selection: custom, supportsOpacity: false)
                 .labelsHidden()

@@ -12,7 +12,10 @@ Rebuilt 2026-11-04 on workspaces (`Spaces`, `SpaceModel`). The first build, a br
 - `~/.config/pm/spaces.json` keeps what a file can't: name, icon, colour.
 - File ▸ New Space: untitled, an empty board in its window. Named with Rename… on its dock mark; clearing the name makes it untitled again.
 - Also made from (2026-11-06, `Spaces.newSpace`): Spaces ▸ New Space, the dock's +, the switcher's New Space card, `>space` / `>space <name>` and `@`'s New Space “…” in the quick bar. A new space's window comes forward with Folio active.
-- A dock mark's right-click menu: Show Window, Rename…, Colour, Delete Space… (the canvas goes to the Trash).
+- A dock mark's right-click menu: Show Window, Keep in Dock, Space Settings…, Rename…, Colour, Delete Space… (the canvas goes to the Trash).
+- Space Settings (2026-11-07, `SpaceSettings.present(spaceID:)`): a window per space, brought forward if open. From the dock mark's menu and the sidebar foot's.
+  - Name (empty: Untitled Space), Color (the named colours and a well; no None), Icon (Symbol or Emoji, Project Settings' pickers, `IconPickers`), Archive (Today's cards; `SpaceFrame.archiveChoices`), Delete Space… (`Spaces.delete`'s confirmation; the window closes with the space).
+  - Live: each change goes through `Spaces.change`; the window title, sidebar foot, wash and dock mark follow. No Save or Cancel; Done closes.
 - The window is named for the space (Untitled Space until named).
 - Never the focused project: a window on a file changes nothing (concepts.md § Workspace).
 - Comes back at launch with the other windows (Settings' Restore).
@@ -79,18 +82,37 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
 - A card's menu has "Show in “<layout>”" for each layout holding it, in the sidebar's order: that workspace's tab with the card's tile forward (`showInLayout`). Jumps from search, the ⌥Tab switcher, ⌘1…9 and ⌃⇥ still go to the layout (`show`).
 - ⌥-click: a tile beside the one you're in. Dragging a row onto the tiles: beside, as a tab, or in place, where it's let go.
 - ⌘-click rows, then ⌘↩: tile them as a new workspace (a new Pinned row).
+- Picking (2026-11-07, `SpaceFrame.click`): ⌘-click picks or unpicks a row; ⇧-click picks the run of visible rows from the last row clicked (else the card in front). The first pick takes the card in front along, as Arc's. Picked rows: accent fill and outline; a bar over the foot, "New Layout from N" (⌘↩) and ✕. Esc lets go (not while a field has the keys; `SidebarEventCatcher`). A plain click lets go.
+- A picked row's menu acts on every picked row, each item counting: Pin / Unpin N Cards, Add N to / Remove N from Favourites, New Layout from N Cards, Copy N Addresses, Move N to Space ▸, Close N Cards (one ⌘Z).
+- Dragging a picked row carries every picked row (`SpaceRowDrag.companions`): along the lists in sidebar order (`SpaceCardMarks.move(_ ids:…)`), into a folder or layout row, onto the tiles (the rest join its tile as tabs, `landRow(_:_:with:)`), or onto a space's dock mark.
+- Double-click a card's row (or its menu's Rename…) to name it in place: `pmTitle` on the node, which beats the page's name everywhere a card is named (`describeCard`). "Use the Page’s Name" clears it.
+- A row's tooltip: its whole title and, for a web card, its saved address.
+- Rows follow System Settings ▸ Appearance ▸ Sidebar icon size (`SidebarMetrics`: 28 / 32 / 38pt rows, 12 / 13 / 15pt text).
+- A row's trailing controls (count, folder +, speaker, ✕) keep fixed slots: hovering never re-truncates the title.
+- The sidebar scrolls to the card in front when it changes (⌃⇥, ⌘9, a link); to its folder's row when the folder is folded.
+- Rows are a container labelled Tabs (Cards in a project) for VoiceOver; each row says pinned / playing / on screen / expanded, and has a Close action.
+- Favourite tiles: deeper fill when on screen but not in front; accent outline when picked; the speaker pauses; middle-click takes it off the screen. A drop on a tile is before or after by the tile's own middle (tiles are 44–80pt).
+- Folders (2026-11-07): the add list's New Folder makes one named "New Folder", its name selected for typing; Finder folders are the add list's Finder Folder ▸. An empty folder shows in Today. Double-click a folder row (or Rename Folder…) names it. Its menu: Collapse / Expand, Rename Folder…, Delete Folder (its cards stay, loose). A folded folder shows its card count. Dragging a folder row reorders the folders of its list (the frame's `pmOrder`). Folded folders are kept per board in `PMSidebarClosedFolders`.
+- The space's foot: every space as a mark (icon in its colour; the current one on a chip), click to go there; a sideways two-finger swipe over the sidebar goes to the next / previous space. Right-click: Space Settings…, Archived Cards…, Clear Today, Archive Today's Cards.
+- The project frame's list popover carries the window sidebar's bottom bar (New Project, kind, Show / Group By / Sort By / Up Next).
 - Tiles keep grid / master-and-stack, sizes, maximize, pop-out. A tile's strip shows only in a split.
 - ⌘T: a new card in Today, shown in the tile you're in (File ▸ New Tab is enabled in a space though it has no project).
-- ⌘W: the focused tile out of the layout; the card stays on the board and in the sidebar, ⌘Z puts it back. With no tile focused, the window closes. A row's Close in the sidebar still takes the card off the board (a pinned one is unpinned). Middle-click on an unpinned row does the same (`MiddleClickArea`); on a pinned row it does nothing.
+- ⌘W: the focused tile out of the layout; the card stays on the board and in the sidebar, ⌘Z puts it back. With no tile focused, the window closes. A row's Close in the sidebar still takes the card off the board. A pinned card's ✕ (shown only while it's on screen), middle-click and Close take it off the screen and stop its sound; it stays pinned (Arc's; `closePinned`). Unpin is only the menu's first item.
 - ⌘L: the sidebar's address field on the page in front, which Return sends there (the header's field is hidden in a space).
-- ⌘1…⌘8: the sidebar's cards in order (favourites, pinned, today), ⌘9 the last; the menu items are titled after them.
+- ⌘1…⌘8: the sidebar's rows in order as you see them (favourites, layouts, pinned, today; a folded folder's cards skipped), ⌘9 the last; the menu items are titled after them. ⌃⇥ goes along the same rows.
 - An unnamed tiling of several tiles offers Keep as Workspace.
 
 
 
-- Projects, a divider, then every space, open or not. Same squircle marks; a closed space's is dimmed. A space's window and pop-outs belong to its mark. The dock shows whenever a space exists.
+- Projects, a divider, the Due section and a divider when it has any, then the spaces. Same squircle marks; a closed one's is dimmed. A space's window and pop-outs belong to its mark.
+- Shown: a project or space with a window or windows out, or kept. Closed and not kept: off the dock (still in the Spaces menu, quick bar, sidebar).
+- Keep in Dock (2026-11-07): on any project's or space's mark menu, checked when kept. A kept project's mark is dressed from what it was last seen as (`CanvasSatelliteDock.Pin`, `PMDockPinnedProjects`); kept spaces by id (`PMDockKeptSpaces`). Every space that existed before spaces could be kept starts kept. A new space starts not kept, as a new project.
+- No flyout opens while the dock is dragged, or with the mouse button down.
+- Due section (2026-11-07, `DockDue`): projects not otherwise in the dock with an open task due within Settings ▸ Windows ▸ Dock's window (Off, Today, By tomorrow, Within 2 days (default), Within a week; overdue always counts), earliest first; archived never. Dimmed; click opens the project. Leaves once nothing is due in the window.
+- Due dot: red overdue, orange due today, on any project mark; the top corner toward the screen's middle (flips when the dock is on the right half). Not faded with a closed mark.
+- A project's flyout lists up to 5 tasks due in the window, the date coloured by how soon.
 - The focused project's mark has a ring in its colour. Built.
-- The + (2026-11-06, `NewSpaceMark`): a + on a glass plate of its own, no outline, 4pt (the marks' spacing) under the dock (above it when the dock is at the screen's foot), centred; the dock's size never changes for it. Shown while the pointer is on the dock or the +, or a drag is over a mark or the +; fades in and out (0.12s), going 0.35s after the pointer is off both. Click: a new space. A sidebar row let go on it: a new space holding that card, moved off its board and shown. A web link (http/https) from any app: a new space on that page. Files and other schemes refused. Pressing and moving drags the dock, as any mark.
+- The + (2026-11-06, `NewSpaceMark`): a + on a glass plate of its own, no outline, 4pt (the marks' spacing) under the dock (above it when the dock is at the screen's foot; switched once a drag is let go), centred; the dock's size never changes for it. In the dock's own window, so it moves with the dock (2026-11-07; was a panel of its own that followed a frame behind and juddered). Shown while the pointer is on the dock or the +, or a drag is over a mark or the +; fades in and out (0.12s), going 0.35s after the pointer is off both. Click: a new space. A sidebar row let go on it: a new space holding that card, moved off its board and shown. A web link (http/https) from any app: a new space on that page. Files and other schemes refused. Pressing and moving drags the dock, as any mark.
 - Right-click on the + or the dock's glass: New Space, New Project….
 - Not built: a grey bar beside the mark of the window in front, apart from focus.
 - Playing sound: WebKit's own `_isPlayingAudio`, observed on the page (`CanvasPageView.isPlayingAudio`, posted as `audioChanged`) — on the page because pages move between panes. Shown as a speaker on the card's sidebar row (click: pause) and favourite tile, on the card and tile rows of the ⌥Tab switcher, a dot under the dock mark, and in the space's flyout.
@@ -107,12 +129,17 @@ Built 2026-11-05.
 - The sidebar's address field shows the focused tile's page as it is now (host and path, not the card's saved address), following focus between tiles and the page's navigation.
 - Suggestions (header and sidebar): the board's web cards, the card's back list, history (most visited, then newest), pages with a remembered name.
 - History: `~/.config/pm/history.json`, one row per address (title, last visit, count), newest 10,000 kept (`CanvasHistory`). Recorded on a card's finished load and on title changes (sites that move without loading). Not from a Private card; http and https only.
-- History menu: Reopen Closed Card (⇧⌘T), Show All History (⌘Y), the last 15 pages, Clear History… (all, or today).
+- History menu: Reopen Closed Card (⇧⌘T), Show All History (⌘Y), Archived Cards… (the front space window's; off when no space window is in front), the last 15 pages, Clear History… (all, or today).
 - History window: search, pages by day, Open / Copy Address / Remove from History; double-click opens. Opening a page goes where links from other apps go.
 - ⇧⌘T: the last card closed in a space (⌘W or a row's Close) or taken out of a project's layout, this run only, 50 kept. Still on the board (⌘W): shown again; gone: a new card on the address it was at.
 - File ▸ Print… (⌘P) and Export as PDF…: the page you're in, else the focused tile's, else the one selected web card. Paged to the paper's width.
 - Clear: on the rule above Today while the pointer is in the sidebar; every Today card off the board (⌘Z brings them back). Pinned and favourites stay.
 - Archive (the rule's or the space name's menu, per space, `Space.archiveAfter`): Never, 12 hours, a day, a week, 30 days. A Today card not on screen (and not playing) for that long goes, checked at most once a minute. When a card was last on screen: `PMSpaceCardSeen`, by space and card; a card first seen counts from then.
+- Archived cards (2026-11-07, `SpaceArchive`): every Today card that leaves the board by Archive, Clear, or a row's Close is kept, reason with it. Survives relaunch.
+  - `~/.config/pm/spaces/archive.json`, every space's together. The whole card (its node as the board's file has it), title, address and host for a web card, when, reason (auto / cleared / closed). Written on its own queue, in order.
+  - Newest 500 per space; older than 90 days dropped.
+  - Archived Cards window (`SpaceArchive.present(spaceID:)`): one per space, brought forward if open. Search (title, address), by day newest first; favicon or the card's symbol, title, reason · address, time. Restore (↩, double-click, or the menu), Copy Address, Remove from Archive; Clear Archive… (asks). Empty: No archived cards.
+  - Restore: the card back as it was, unpinned, at the top of Today, right of everything on the board; one undo step (Restore Card) on that board; the entry goes. Shown when the space's window is open. A card still on the board (⌘Z) is left as it is.
 - Downloads: Window ▸ Downloads (⌥⌘L) and an arrow at the sidebar's foot (a ring while one runs, a dot when one has finished). Progress while running; click opens, the magnifier shows in Finder, a row drags out as the file. Newest 30 kept (`PMRecentDownloads`). Clear forgets finished rows; files stay.
 - A row's menu: Copy Address, Duplicate (the page it's at, with its back list), Mute / Unmute (the card's own Mute), Move to Space ▸ (off this board, onto the other's as Today, unpinned), or drag the row onto the space's dock mark.
 - ⇧-click a link, in a space or (since 2026-11-05) a project: a preview over the window, Arc's Peek (`CanvasLinkPreview`). Same sign-ins, blocking and scripts as the card. Open as Card (⌘↩) makes it a Today card in front; Esc, ✕ or a click outside drops it. Links inside stay in the preview.
@@ -214,7 +241,7 @@ Built 2026-11-04 for projects (`SwitcherController`, `SwitcherModel`); spaces jo
 Built 2026-11-06 (`OverviewController`, `OverviewModel`, `WindowSnapshot`); designed in `.claude/mocks/folio-overview.html`.
 
 - Opened by Space in the switcher, Spaces ▸ Overview, Window ▸ Overview, or `>overview` in the quick bar (also found as mission control, exposé, all windows). No key of its own (⌃↑ is macOS Mission Control).
-- One grid in the dock's order: projects, a divider, every space, then +. As Mission Control: the fewest columns that fit, so the largest tiles; centred top to bottom.
+- One grid in the dock's order: projects, a divider, the dock's spaces, then +. As Mission Control: the fewest columns that fit, so the largest tiles; centred top to bottom.
 - A tile: the place's own window large; its windows out at half its scale, in a column beside it on the side each is on screen, top to bottom as on screen, never overlapping (a column taller than the window shrinks to its height). Name and mark under them; Focused, Closed or Playing after the name.
 - Each window picture: a one-pixel mid-grey hairline at 30% (the front window's white at 45%), so light windows show on a light desktop and dark on dark.
 - Pictures taken in the app: `cacheDisplay` for the views, WebKit's `takeSnapshot` laid over each page showing. The front window's at once; the rest as last seen, then fresh, one a turn. No Screen Recording permission.

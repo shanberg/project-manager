@@ -104,6 +104,18 @@ if [[ -f "$PROJECT_YML" ]]; then
   echo "==> Set MARKETING_VERSION to $VERSION"
 fi
 
+# And in the generated Xcode project, which is committed too. The app build regenerates it from
+# project.yml after the release commit, so without this every release left it modified with the new
+# version in it.
+PBXPROJ="$ROOT/pm-mac/PM.xcodeproj/project.pbxproj"
+if [[ -f "$PBXPROJ" ]]; then
+  sed -i '' "s/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = $VERSION;/" "$PBXPROJ"
+  if grep -q "MARKETING_VERSION = " "$PBXPROJ" && grep "MARKETING_VERSION = " "$PBXPROJ" | grep -vq "= $VERSION;"; then
+    echo "Could not set MARKETING_VERSION in $PBXPROJ." >&2
+    exit 1
+  fi
+fi
+
 # Verify again right before commit (editor may have overwritten after our write)
 ON_DISK=$(node -p "require(process.argv[1]).version" "$PACKAGE_JSON" 2>/dev/null || true)
 if [[ "$ON_DISK" != "$VERSION" ]]; then
@@ -115,6 +127,7 @@ echo "==> Commit and push"
 git add package.json
 [[ -f "$ROOT/pm-swift/Sources/pm/Version.swift" ]] && git add pm-swift/Sources/pm/Version.swift
 [[ -f "$ROOT/pm-mac/project.yml" ]] && git add pm-mac/project.yml
+[[ -f "$PBXPROJ" ]] && git add pm-mac/PM.xcodeproj/project.pbxproj
 if ! git diff --staged --quiet; then
   git commit -m "Release $TAG"
   git push

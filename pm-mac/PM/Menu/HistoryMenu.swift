@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The History menu: Reopen Closed Card (⇧⌘T), Show All History (⌘Y), the last pages visited, Clear
-/// History…. docs/spaces.md § Browsing.
+/// The History menu: Reopen Closed Card (⇧⌘T), Show All History (⌘Y), Archived Cards…, the last pages
+/// visited, Clear History…. docs/spaces.md § Browsing.
 @MainActor
 final class HistoryMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     static let shared = HistoryMenu()
@@ -18,6 +18,7 @@ final class HistoryMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         reopen.keyEquivalentModifierMask = [.command, .shift]
         reopen.target = self
         menu.addItem(withTitle: "Show All History", action: #selector(showAll(_:)), keyEquivalent: "y").target = self
+        menu.addItem(withTitle: "Archived Cards\u{2026}", action: #selector(showArchive(_:)), keyEquivalent: "").target = self
         item.submenu = menu
         return item
     }
@@ -57,6 +58,7 @@ final class HistoryMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         switch item.action {
         case #selector(reopenClosed(_:)): return !CanvasHistory.closed.isEmpty
         case #selector(clear(_:)): return !CanvasHistory.visits.isEmpty
+        case #selector(showArchive(_:)): return Spaces.shared.frontSpace != nil
         default: return true
         }
     }
@@ -68,6 +70,12 @@ final class HistoryMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     }
 
     @objc func showAll(_ sender: Any?) { HistoryWindow.shared.show() }
+
+    /// The front space window's Archived Cards (`SpaceArchive`).
+    @objc func showArchive(_ sender: Any?) {
+        guard let space = Spaces.shared.frontSpace else { return NSSound.beep() }
+        SpaceArchive.present(spaceID: space)
+    }
 
     @objc private func open(_ sender: NSMenuItem) {
         guard let address = sender.representedObject as? String, let url = URL(string: address) else { return }

@@ -626,7 +626,7 @@ final class ProjectSplitViewController: NSSplitViewController {
     }
 
     /// Build (or reveal) the content for the tab that is up, and tell everyone what changed.
-    func applySelectedTab() {
+    func applySelectedTab(crossing: Bool = true) {
         let tab = tabs.selected
         // Read before the swap, because after it this pane is hidden and its board is no longer where
         // the window is looking. See `handOver`.
@@ -638,7 +638,7 @@ final class ProjectSplitViewController: NSSplitViewController {
             let made = makeContent(for: tab)
             contentPane.show(made, for: tab.id)
         }
-        handOver(pose, from: leaving)
+        if crossing { handOver(pose, from: leaving) }
         canvasPane?.focusBoard()
         refreshTabModel()
         onRendererChanged?()
@@ -894,10 +894,13 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// Now nothing moves. A workspace tab is its workspace for as long as the workspace exists (§7i),
     /// so leaving one is not an edit to anything — it is going to a different tab, and the canvas is a
     /// tab. The pane you were in keeps its tiles, so coming back to its chip is instant and exact.
-    func goToCanvas() {
+    /// `crossing: false` cuts rather than drawing the crossing: for a caller about to tile a card on
+    /// the canvas at once (a space's sidebar), where the crossing would play the board leaving the
+    /// layout's tiles — the board between the layout and the card.
+    func goToCanvas(crossing: Bool = true) {
         guard tabs.selectedID != tabs.canvasID else { return }
         tabs.select(tabs.canvasID)
-        applySelectedTab()
+        applySelectedTab(crossing: crossing)
     }
 
     /// **⌘Return, on a board that is not tiled.** Keep this tiling as a workspace and open it.

@@ -471,10 +471,17 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// tiling laid out for a window of no width is not a tiling anyone wants back.
     private func fitWhenThereIsAWindowToFitTo() {
         guard !hasFitted else { return }
+        // **A pane opened at a layout doesn't show the board on its way there.** Its layout is applied
+        // a turn or more after it's on screen (below), and until then it was the untiled board — every
+        // card, fitted — so going from a card to a layout seemed to pass through the board. The board
+        // is kept out of sight until the layout is up; a crossing from the canvas still animates, since
+        // it starts in the same pass that shows it.
+        if case .workspace = focus { scroll.alphaValue = 0 }
         DispatchQueue.main.async { [weak self] in
             guard let self, !hasFitted, fitOrKeepTiles() else { return }
             restoreViewState()
             applyFocus()
+            scroll.alphaValue = 1
             // **Last, which is what `isSettled` has always claimed.** The latch used to be set first,
             // and a tiling restored or focused between there and here would announce itself to a tab
             // that then read the half-built board as the answer — retargeting a notes tab to the whole

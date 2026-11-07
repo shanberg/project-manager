@@ -331,6 +331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AttentionKeeper.shared.stop()
         Spaces.shared.flush()
         CanvasHistory.flush()
+        SpaceArchive.shared.finish()
         CanvasDocSession.finishAll()
         CanvasStoreRegistry.saveAll()
         CanvasFileQueue.finishAll()

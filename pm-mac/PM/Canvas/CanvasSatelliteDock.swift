@@ -39,6 +39,8 @@ final class CanvasSatelliteDock: NSObject {
         var show: () -> Void
         /// The project the window is on, for the flyout's card. None for a window opened on a file.
         var projectKey: String?
+        /// The project's colour as written, for a pinned mark to keep once the window has closed.
+        var projectColor: ProjectColor? = nil
     }
 
     /// The project windows open, in the order they opened. Set by `WindowManager`.
@@ -65,14 +67,25 @@ final class CanvasSatelliteDock: NSObject {
         var windowCount: Int { workspaces.reduce(0) { $0 + $1.satellites.count } }
         /// A space's mark, after the divider (docs/spaces.md). Nil for a project or a file.
         var space: String?
-        /// A space whose window isn't open: its mark is drawn dimmed.
+        /// A space, or a project kept in the dock, whose window isn't open: its mark is drawn dimmed.
         var isClosed = false
+        /// A project kept in the dock (`Pin`): its mark stays when its windows close.
+        var isPinned = false
+        /// How soon its earliest open task is due, within the setting's window (`DockDue`).
+        var due: DockDue.Level?
+        /// In the dock only for a task coming due: its mark goes in the Due section.
+        var isDueOnly = false
+        /// The project's colour as written, for a mark with no window to ask (`setPinned`).
+        var colorValue: String?
         /// Something on its board is making sound: a dot under its mark.
         var isPlaying = false
     }
 
     private(set) var groups: [Group] = []
     private var panel: NSPanel?
+    /// The column's glass, and the +'s, side by side in `panel` (`lay`).
+    private var dockGlass: NSGlassEffectView?
+    private var plusGlass: NSGlassEffectView?
     private let column = NSStackView()
     private var flyout: KeyablePanel?
     /// The project card the flyout shows. See `CanvasDockCard`.
@@ -148,6 +161,11 @@ final class CanvasSatelliteDock: NSObject {
     func show(_ group: Group) {
         // A space with nothing open opens; one that's open is shown like any other window.
         if let space = group.space, group.project == nil, group.workspaces.isEmpty { return Spaces.shared.show(space) }
+        // A project kept in the dock with nothing open opens, as a kept app launches from the Dock.
+        if group.space == nil, group.project == nil, group.workspaces.isEmpty, let key = group.projectKey {
+            WindowManager.shared.open(projectKey: key)
+            return
+        }
         let away = group.workspaces.first { $0.board?.window.map { !$0.isVisible } ?? false }
         if let board = away?.board { return board.showWorkspaceWindow() }
         if let project = group.project { return project.show() }
@@ -155,7 +173,13 @@ final class CanvasSatelliteDock: NSObject {
     }
 
     /// Where the dock is on screen, while it shows: the overview keeps clear of it.
-    var frame: NSRect? { panel?.isVisible == true ? panel?.frame : nil }
+    var frame: NSRect? { panel?.isVisible == true ? columnFrame : nil }
+
+    /// The column's glass on screen: the window is taller, holding the + past its end.
+    private var columnFrame: NSRect? {
+        guard let panel, let dockGlass else { return nil }
+        return panel.convertToScreen(dockGlass.frame)
+    }
 
     private static let projectOrderKey = "PMDockProjectOrder"
 
@@ -173,8 +197,159 @@ final class CanvasSatelliteDock: NSObject {
         return keys.compactMap { key in found.first { $0.key == key } }
     }
 
+    // MARK: Kept in the dock
+
+    /// A project kept in the dock, as macOS's Keep in Dock: its mark stays once its windows have closed,
+    /// dimmed, and a click opens it. Dressed from what it was last seen as, since a closed project has
+    /// nothing open to ask — refreshed whenever its window is up (`Pin.refreshed`).
+    struct Pin: Codable, Equatable {
+        var projectKey: String
+        var title: String
+        var color: String?
+        var icon: String?
+        var canvas: String?
+
+        /// The pin dressed as its open project now is. Only a project window knows the colour as
+        /// written; a project with only windows out keeps the colour it had.
+        func refreshed(from group: Group) -> Pin {
+            var pin = self
+            pin.title = group.title
+            if let project = group.project {
+                pin.color = project.projectColor?.value
+                pin.icon = group.icon?.value
+            }
+            if let canvas = group.canvas { pin.canvas = canvas.standardizedFileURL.path }
+            return pin
+        }
+    }
+
+    static let pinsKey = "PMDockPinnedProjects"
+
+    static var pins: [Pin] {
+        get {
+            UserDefaults.standard.data(forKey: pinsKey)
+                .flatMap { try? JSONDecoder().decode([Pin].self, from: $0) } ?? []
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) { UserDefaults.standard.set(data, forKey: pinsKey) }
+        }
+    }
+
+    static func isPinned(_ projectKey: String) -> Bool { pins.contains { $0.projectKey == projectKey } }
+
+    /// Keep `group`'s project in the dock, or stop keeping it.
+    func setPinned(_ pinned: Bool, _ group: Group) {
+        if let space = group.space {
+            var kept = Self.keptSpaces
+            if pinned { kept.insert(space) } else { kept.remove(space) }
+            Self.keptSpaces = kept
+            return refresh()
+        }
+        guard let key = group.projectKey else { return }
+        var pins = Self.pins.filter { $0.projectKey != key }
+        if pinned {
+            pins.append(Pin(projectKey: key, title: group.title,
+                            color: group.project?.projectColor?.value ?? group.colorValue,
+                            icon: group.icon?.value, canvas: group.canvas?.standardizedFileURL.path))
+        }
+        Self.pins = pins
+        refresh()
+    }
+
+    /// The groups with every kept project in them: an open one marked as kept, a closed one added from
+    /// its pin. A kept project whose window is up refreshes its pin, so a rename or a new colour sticks.
+    static func withPins(_ found: [Group], pins: [Pin]) -> (groups: [Group], pins: [Pin]) {
+        var groups = found
+        var pins = pins
+        for (index, pin) in pins.enumerated() {
+            if let at = groups.firstIndex(where: { $0.space == nil && $0.projectKey == pin.projectKey }) {
+                groups[at].isPinned = true
+                pins[index] = pin.refreshed(from: groups[at])
+            } else {
+                let canvas = pin.canvas.map { URL(fileURLWithPath: $0) }
+                var group = Group(key: pin.canvas ?? "pin:\(pin.projectKey)", canvas: canvas, title: pin.title,
+                                  color: pin.color.flatMap(ProjectColor.init(value:))?.nsColor,
+                                  icon: pin.icon.flatMap(ProjectIcon.init(value:)), projectKey: pin.projectKey)
+                group.colorValue = pin.color
+                group.isClosed = true
+                group.isPinned = true
+                groups.append(group)
+            }
+        }
+        return (groups, pins)
+    }
+
+    // MARK: Coming due
+
+    /// The groups with every project's due level, and a group for each project due within the window
+    /// that isn't in the dock already, earliest first, after the rest (`DockDue`).
+    static func withDue(_ found: [Group], projects: [ProjectIndex.ProjectEntry], horizon: Int,
+                        now: Date = Date()) -> [Group] {
+        guard horizon != DockDue.off else { return found }
+        let byKey = Dictionary(projects.map { ($0.projectKey, $0) }, uniquingKeysWith: { a, _ in a })
+        var groups = found
+        for index in groups.indices where groups[index].space == nil {
+            guard let key = groups[index].projectKey, let entry = byKey[key], !entry.isArchived else { continue }
+            groups[index].due = DockDue.level(entry.nextDue, horizon: horizon, now: now)
+        }
+        let present = Set(groups.compactMap(\.projectKey))
+        let candidates = projects.filter { !present.contains($0.projectKey) }.map {
+            DockDue.Candidate(projectKey: $0.projectKey, name: $0.name, nextDue: $0.nextDue, isArchived: $0.isArchived)
+        }
+        for candidate in DockDue.due(candidates, horizon: horizon, now: now) {
+            guard let entry = byKey[candidate.projectKey] else { continue }
+            var group = Group(key: "due:\(entry.projectKey)", canvas: nil, title: ProjectCodes.display(entry.name),
+                              color: entry.color?.nsColor, icon: entry.icon, projectKey: entry.projectKey)
+            group.colorValue = entry.color?.value
+            group.due = DockDue.level(entry.nextDue, horizon: horizon, now: now)
+            group.isClosed = true
+            group.isDueOnly = true
+            groups.append(group)
+        }
+        return groups
+    }
+
+    /// Held while the window is on: the project list the due levels come from, and a rebuild whenever
+    /// it changes or the day turns over.
+    private var dueRelay: ObservationRelay?
+    private var dayWatch: NSObjectProtocol?
+
+    private func watchDue(_ on: Bool) {
+        if on, dueRelay == nil {
+            ProjectIndex.shared.retain()
+            dueRelay = ObservationRelay(tracking: {
+                _ = ProjectIndex.shared.allProjects
+                _ = ProjectIndex.shared.openTasks
+            }, then: { [weak self] in self?.refresh() })
+            dayWatch = NotificationCenter.default.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    ProjectIndex.shared.warmAllProjects(force: true)
+                    self?.refresh()
+                }
+            }
+        } else if !on, dueRelay != nil {
+            ProjectIndex.shared.release()
+            dueRelay = nil
+            dayWatch.map(NotificationCenter.default.removeObserver)
+            dayWatch = nil
+        }
+    }
+
+    /// A project's open tasks due within the window, earliest first, at most `limit`.
+    private static func dueTasks(of projectKey: String, limit: Int = 5) -> [(due: String, text: String)] {
+        let tasks = ProjectIndex.shared.openTasks.filter { $0.projectKey == projectKey }.map { (due: $0.due, text: $0.text) }
+        return Array(DockDue.tasks(tasks, horizon: DockDue.horizon).prefix(limit))
+    }
+
     private func rebuild() {
-        groups = Self.withSpaces(Self.ordered(Self.groups(projects: openProjects(), open: CanvasSatelliteWindow.open))).map { group in
+        let horizon = DockDue.horizon
+        watchDue(horizon != DockDue.off)
+        let found = Self.groups(projects: openProjects(), open: CanvasSatelliteWindow.open)
+        let saved = Self.pins
+        let pinned = Self.withPins(found, pins: saved)
+        if pinned.pins != saved { Self.pins = pinned.pins }
+        let due = Self.withDue(Self.ordered(pinned.groups), projects: ProjectIndex.shared.allProjects, horizon: horizon)
+        groups = Self.withSpaces(due).map { group in
             var group = group
             group.isPlaying = group.canvas.map { !CanvasLinkNodeView.playingCards(onCanvas: $0).isEmpty } ?? false
             return group
@@ -189,7 +364,12 @@ final class CanvasSatelliteDock: NSObject {
         column.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let focusedKey = PMFiles.focusedProjectKey()
         var dividerPlaced = false
+        var dueDividerPlaced = false
         for group in groups {
+            if group.isDueOnly, !dueDividerPlaced {
+                dueDividerPlaced = true
+                if column.arrangedSubviews.count > 0 { column.addArrangedSubview(Self.markDivider()) }
+            }
             if group.space != nil, !dividerPlaced {
                 dividerPlaced = true
                 if column.arrangedSubviews.count > 0 { column.addArrangedSubview(Self.markDivider()) }
@@ -211,8 +391,8 @@ final class CanvasSatelliteDock: NSObject {
             column.addArrangedSubview(mark)
         }
         place(panel)
+        sideDots()
         panel.orderFront(nil)
-        if plusPanel?.isVisible == true { placePlus() }
         if let flyoutKey {
             if group(flyoutKey) == nil { closeFlyout() } else { fillFlyout(flyoutKey) }
         }
@@ -234,7 +414,13 @@ final class CanvasSatelliteDock: NSObject {
         let from = row.canvas.standardizedFileURL
         if group.canvas?.standardizedFileURL == from { return nil }
         if let space = group.space {
-            return { Spaces.shared.move(row.card, fromCanvas: row.canvas, to: space) }
+            // Picked rows travel together.
+            let cards = [row.card] + SpaceRowDrag.companions.filter { $0 != row.card }
+            return {
+                guard let to = Spaces.shared.canvas(of: space) else { return }
+                if !FileManager.default.fileExists(atPath: to.path) { try? Spaces.shared.makeCanvas(at: to) }
+                Spaces.shared.move(cards, fromCanvas: row.canvas, toCanvas: to)
+            }
         }
         guard let key = group.projectKey, row.address != nil,
               let source = Spaces.shared.space(forCanvas: row.canvas) else { return nil }
@@ -242,11 +428,28 @@ final class CanvasSatelliteDock: NSObject {
         return { Spaces.shared.send(row.card, in: source.id, as: .card, to: (key, title)) }
     }
 
-    /// The groups with every space after them, open or not, in the order they were made. A space's
-    /// window and pop-outs come off the list above and onto its mark, which says whose they are.
+    /// Spaces kept in the dock, by id: as a project's `Pin`, its mark stays once its windows close.
+    /// Spaces carry their own colour and icon, so the id is all a pin needs.
+    static let keptSpacesKey = "PMDockKeptSpaces"
+
+    /// The kept spaces. Before the first keep, every space there is: they were all in the dock until
+    /// spaces could be kept, so none goes from it unasked.
+    static var keptSpaces: Set<String> {
+        get {
+            if let ids = UserDefaults.standard.stringArray(forKey: keptSpacesKey) { return Set(ids) }
+            let all = Spaces.shared.all.map(\.id)
+            UserDefaults.standard.set(all, forKey: keptSpacesKey)
+            return Set(all)
+        }
+        set { UserDefaults.standard.set(newValue.sorted(), forKey: keptSpacesKey) }
+    }
+
+    /// The groups with the spaces after them that are open or kept, in the order they were made. A
+    /// space's window and pop-outs come off the list above and onto its mark, which says whose they are.
     static func withSpaces(_ found: [Group]) -> [Group] {
         var rest = found
-        let spaces = Spaces.shared.all.map { space -> Group in
+        let kept = keptSpaces
+        let spaces = Spaces.shared.all.compactMap { space -> Group? in
             let canvas = space.canvas(in: Spaces.folder)
             var group = Group(key: "space:\(space.id)", canvas: canvas, title: space.title,
                               color: ProjectColor(value: space.color)?.nsColor, icon: ProjectIcon(value: space.icon),
@@ -258,7 +461,8 @@ final class CanvasSatelliteDock: NSObject {
                 group.workspaces = open.workspaces
             }
             group.isClosed = !(group.project?.window?.isVisible ?? false) && group.workspaces.isEmpty
-            return group
+            group.isPinned = kept.contains(space.id)
+            return group.isPinned || !group.isClosed ? group : nil
         }
         return rest + spaces
     }
@@ -284,8 +488,14 @@ final class CanvasSatelliteDock: NSObject {
         let menu = NSMenu()
         let show = MarkMenuItem(title: "Show Window") { [weak self] in self?.show(found) }
         menu.addItem(show)
+        if found.space != nil || found.projectKey != nil {
+            let keep = MarkMenuItem(title: "Keep in Dock") { [weak self] in self?.setPinned(!found.isPinned, found) }
+            keep.state = found.isPinned ? .on : .off
+            menu.addItem(keep)
+        }
         if let space = found.space {
             menu.addItem(.separator())
+            menu.addItem(MarkMenuItem(title: "Space Settings…") { SpaceSettings.present(spaceID: space) })
             menu.addItem(MarkMenuItem(title: "Rename…") { Spaces.shared.rename(space) })
             let colours = NSMenu()
             for name in ProjectColor.Name.allCases {
@@ -331,11 +541,14 @@ final class CanvasSatelliteDock: NSObject {
 
     // MARK: The +
 
-    /// The + for a new space, in a panel of its own just past the dock's end, so the dock never changes
-    /// size for it: shown while the pointer is on the dock or the +, or a drag is over a mark or the +.
+    /// The + for a new space, on a glass plate of its own just past the dock's end, in the dock's own
+    /// window — so it moves with the dock as one thing, and the column never changes size for it: shown
+    /// while the pointer is on the dock or the +, or a drag is over a mark or the +.
     /// docs/spaces.md § The dock.
-    private var plusPanel: NSPanel?
     private var plusHide: DispatchWorkItem?
+    /// The + under the column; above it when the column is too near the screen's foot.
+    private var plusBelow = true
+    private var settleQueued = false
     /// The marks' own spacing, so the + reads as the next thing in the column.
     private static var plusGap: CGFloat { markSpacing }
     private static var plusSide: CGFloat { markSize + 2 * dockInset }
@@ -349,16 +562,18 @@ final class CanvasSatelliteDock: NSObject {
 
     private func revealPlus() {
         plusHide?.cancel()
-        guard let dock = panel, dock.isVisible else { return }
-        let plus = plusPanel ?? makePlusPanel()
-        placePlus()
-        guard !plus.isVisible || plus.alphaValue < 1 else { return }
-        if !plus.isVisible { plus.alphaValue = 0 }
-        plus.orderFront(nil)
-        NSAnimationContext.runAnimationGroup { context in
+        guard let panel, panel.isVisible, let plus = plusGlass else { return }
+        guard plus.isHidden || plus.alphaValue < 1 else { return }
+        if plus.isHidden {
+            plus.alphaValue = 0
+            plus.isHidden = false
+        }
+        NSAnimationContext.runAnimationGroup({ context in
             context.duration = Motion.Tempo.quick
             plus.animator().alphaValue = 1
-        }
+        }, completionHandler: { [weak panel] in
+            MainActor.assumeIsolated { panel?.invalidateShadow() }
+        })
     }
 
     /// Gone a moment after the pointer is off both the dock and the +. Asked again while it's still on
@@ -368,7 +583,9 @@ final class CanvasSatelliteDock: NSObject {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             let pointer = NSEvent.mouseLocation
-            let over = [panel, plusPanel].contains { $0?.isVisible == true && $0?.frame.insetBy(dx: -2, dy: -2).contains(pointer) == true }
+            let plus = plusGlass.flatMap { $0.isHidden ? nil : self.panel?.convertToScreen($0.frame) }
+            let over = panel?.isVisible == true
+                && [columnFrame, plus].contains { $0?.insetBy(dx: -2, dy: -2).contains(pointer) == true }
             over ? schedulePlusHide() : hidePlus(now: false)
         }
         plusHide = work
@@ -377,22 +594,27 @@ final class CanvasSatelliteDock: NSObject {
 
     private func hidePlus(now: Bool) {
         plusHide?.cancel()
-        guard let plus = plusPanel, plus.isVisible else { return }
+        guard let plus = plusGlass, !plus.isHidden else { return }
         CanvasDockTip.shared.hide()
-        if now { return plus.orderOut(nil) }
+        if now {
+            plus.alphaValue = 0
+            plus.isHidden = true
+            panel?.invalidateShadow()
+            return
+        }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = Motion.Tempo.quick
             plus.animator().alphaValue = 0
-        }, completionHandler: { [weak plus] in
+        }, completionHandler: { [weak self, weak plus] in
             MainActor.assumeIsolated {
                 guard let plus, plus.alphaValue == 0 else { return }
-                plus.orderOut(nil)
+                plus.isHidden = true
+                self?.panel?.invalidateShadow()
             }
         })
     }
 
-    private func makePlusPanel() -> NSPanel {
-        let plus = Self.floatingPanel()
+    private func makePlusGlass() -> NSGlassEffectView {
         let mark = NewSpaceMark()
         mark.onMenu = { [weak self] event, view in self?.showDockMenu(with: event, in: view) }
         mark.onHover = { [weak self] over in over ? self?.revealPlus() : self?.schedulePlusHide() }
@@ -408,22 +630,61 @@ final class CanvasSatelliteDock: NSObject {
         let square = NSRect(x: 0, y: 0, width: side, height: side)
         holder.frame = square
         glass.frame = square
-        plus.contentView = glass
-        plus.setAccessibilityLabel("New Space")
-        plusPanel = plus
-        return plus
+        glass.isHidden = true
+        glass.alphaValue = 0
+        return glass
     }
 
-    /// Under the dock, centred on it; above it when the dock is too near the screen's foot.
-    private func placePlus() {
-        guard let dock = panel, let plus = plusPanel else { return }
-        let size = NSSize(width: Self.plusSide, height: Self.plusSide)
-        let visible = dock.screen?.visibleFrame ?? .infinite
-        var y = dock.frame.minY - Self.plusGap - size.height
-        if y < visible.minY { y = dock.frame.maxY + Self.plusGap }
-        let x = (dock.frame.midX - size.width / 2).rounded()
-        plus.setFrame(NSRect(x: x, y: y.rounded(), width: size.width, height: size.height), display: true)
+    /// The window round the column at `column` (on screen), the + past its end: under it, or above it
+    /// when there's no room under. The column stays exactly where it is put.
+    private func lay(_ column: NSRect, in panel: NSPanel) {
+        guard let dockGlass, let plusGlass else { return }
+        let side = Self.plusSide, gap = Self.plusGap
+        let middle = NSPoint(x: column.midX, y: column.midY)
+        let visible = (NSScreen.screens.first { $0.frame.contains(middle) } ?? panel.screen)?.visibleFrame ?? .infinite
+        plusBelow = column.minY - gap - side >= visible.minY
+        let width = max(column.width, side)
+        let frame = NSRect(x: column.midX - width / 2, y: plusBelow ? column.minY - gap - side : column.minY,
+                           width: width, height: column.height + gap + side)
+        placing = true
+        panel.setFrame(frame, display: false)
+        placing = false
+        dockGlass.frame = NSRect(x: (width - column.width) / 2, y: plusBelow ? gap + side : 0,
+                                 width: column.width, height: column.height)
+        plusGlass.frame = NSRect(x: ((width - side) / 2).rounded(), y: plusBelow ? 0 : column.height + gap,
+                                 width: side, height: side)
+        panel.contentView?.needsDisplay = true
+        panel.invalidateShadow()
     }
+
+    /// Once a drag of the dock is let go: the + goes to the other end if the column was left too near
+    /// the screen's foot (or back, once there's room). Not during the drag, which would move the column
+    /// under the pointer. A window-server drag's mouse-up never reaches the app, so this asks the button.
+    private func settleWhenDropped() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self else { return }
+            guard NSEvent.pressedMouseButtons & 1 == 0 else { return settleWhenDropped() }
+            settleQueued = false
+            // The marks' tracking areas answer the move a turn later; those enters are not hovers either.
+            defer { DispatchQueue.main.async { [weak self] in self?.dockMoving = false } }
+            guard let panel, panel.isVisible, let column = columnFrame else { return }
+            lay(column, in: panel)
+            sideDots()
+        }
+    }
+
+    /// The marks' due dots on their inside top corner: toward the middle of the screen the dock is on.
+    private func sideDots() {
+        guard let column = columnFrame else { return }
+        let middle = NSPoint(x: column.midX, y: column.midY)
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(middle) }) ?? panel?.screen else { return }
+        let onLeft = column.midX > screen.frame.midX
+        for case let mark as DockMark in self.column.arrangedSubviews { mark.dotOnLeft = onLeft }
+    }
+
+    /// Set from the dock's first move under a drag until the button is let go (`settleWhenDropped`):
+    /// no flyout opens meanwhile.
+    private var dockMoving = false
 
     // MARK: The column
 
@@ -453,7 +714,18 @@ final class CanvasSatelliteDock: NSObject {
         // The pointer anywhere on the dock shows the + past its end (`revealPlus`).
         glass.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                                              owner: self, userInfo: nil))
-        panel.contentView = glass
+        // One window for the column and the +: a panel of its own for the + followed the dock a frame
+        // behind every move, and juddered as it was dragged. Where neither is, the window is clear, and
+        // clicks go through to what's under it.
+        let plus = makePlusGlass()
+        let root = NSView()
+        root.addSubview(glass)
+        root.addSubview(plus)
+        glass.autoresizingMask = []
+        plus.autoresizingMask = []
+        dockGlass = glass
+        plusGlass = plus
+        panel.contentView = root
         panel.setAccessibilityLabel("Satellite windows")
         self.panel = panel
         return panel
@@ -481,6 +753,7 @@ final class CanvasSatelliteDock: NSObject {
     /// on, halfway down. Always wholly inside the screen's visible frame.
     private func place(_ panel: NSPanel) {
         let size = column.fittingSize
+        let current = columnFrame
         let saved = UserDefaults.standard.data(forKey: Self.placeKey).flatMap { try? JSONDecoder().decode(Place.self, from: $0) }
         var frame: NSRect
         if let saved, let screen = NSScreen.screens.first(where: { Self.id(of: $0) == saved.screen }) {
@@ -493,29 +766,33 @@ final class CanvasSatelliteDock: NSObject {
             guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main else { return }
             let visible = screen.visibleFrame
             // Grown about its middle while it is up on a screen still here; sent to the edge otherwise.
-            if panel.isVisible, let current = panel.screen, NSScreen.screens.contains(current) {
-                frame = NSRect(x: panel.frame.minX, y: panel.frame.midY - size.height / 2, width: size.width, height: size.height)
-                frame = Self.clamp(frame, into: current.visibleFrame)
+            if panel.isVisible, let current, let screen = panel.screen, NSScreen.screens.contains(screen) {
+                frame = NSRect(x: current.minX, y: current.midY - size.height / 2, width: size.width, height: size.height)
+                frame = Self.clamp(frame, into: screen.visibleFrame)
             } else {
                 frame = NSRect(x: visible.minX + Self.margin, y: visible.midY - size.height / 2,
                                width: size.width, height: size.height)
             }
         }
         frame.origin.y = frame.origin.y.rounded()
-        placing = true
-        panel.setFrame(frame, display: true)
-        placing = false
+        lay(frame, in: panel)
     }
 
     /// The dock has been dragged: remember where, on the screen it was left on.
     private func remember() {
-        guard !placing, let panel, let screen = panel.screen else { return }
+        guard !placing, let panel, let column = columnFrame,
+              let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: column.midX, y: column.midY)) })
+                ?? panel.screen else { return }
         let visible = screen.visibleFrame
-        let place = Place(screen: Self.id(of: screen), x: Double(panel.frame.minX - visible.minX),
-                          middle: Double((panel.frame.midY - visible.minY) / max(1, visible.height)))
+        let place = Place(screen: Self.id(of: screen), x: Double(column.minX - visible.minX),
+                          middle: Double((column.midY - visible.minY) / max(1, visible.height)))
         if let data = try? JSONEncoder().encode(place) { UserDefaults.standard.set(data, forKey: Self.placeKey) }
+        dockMoving = true
         closeFlyout()
-        if plusPanel?.isVisible == true { placePlus() }
+        if !settleQueued {
+            settleQueued = true
+            settleWhenDropped()
+        }
     }
 
     static func clamp(_ frame: NSRect, into visible: NSRect) -> NSRect {
@@ -529,6 +806,9 @@ final class CanvasSatelliteDock: NSObject {
 
     private func openFlyout(for key: String, beside mark: NSView) {
         hideFlyout?.cancel()
+        // Not while the dock is being dragged: the marks pass under a pointer that is carrying them, and
+        // that is not a hover. A held button is a drag starting, or the dock's own in flight.
+        guard !dockMoving, NSEvent.pressedMouseButtons & 1 == 0 else { return }
         guard let anchor = mark.window, group(key) != nil else { return }
         // Working in the card, it stays where it is: another mark under the pointer on the way
         // somewhere is not a request for that project's card.
@@ -542,8 +822,9 @@ final class CanvasSatelliteDock: NSObject {
         let size = flyoutSize
         // To the right of the dock, unless the dock has been dragged to where there is no room there.
         let visible = anchor.screen?.visibleFrame ?? .infinite
-        let right = anchor.frame.maxX + 6
-        let x = right + size.width <= visible.maxX ? right : anchor.frame.minX - 6 - size.width
+        let dock = columnFrame ?? anchor.frame
+        let right = dock.maxX + 6
+        let x = right + size.width <= visible.maxX ? right : dock.minX - 6 - size.width
         // Its top at the mark's, unless that would run it off the bottom of the screen.
         let y = max(markOnScreen.maxY - size.height + 2, visible.minY + Self.margin)
         let origin = NSPoint(x: x, y: min(y, visible.maxY - size.height).rounded())
@@ -639,8 +920,9 @@ final class CanvasSatelliteDock: NSObject {
             let size = CanvasDockCard.size
             var rowsHeight: CGFloat = 0
             var rows: NSStackView?
-            if !group.workspaces.isEmpty {
-                let stack = NSStackView(views: [Self.separator()] + group.workspaces.map(Self.row))
+            let due = Self.dueTasks(of: project).map(Self.dueRow)
+            if !group.workspaces.isEmpty || !due.isEmpty {
+                let stack = NSStackView(views: [Self.separator()] + due + group.workspaces.map(Self.row))
                 stack.orientation = .vertical
                 stack.alignment = .width
                 stack.spacing = 2
@@ -677,10 +959,15 @@ final class CanvasSatelliteDock: NSObject {
             let name = NSTextField(labelWithString: group.title)
             name.font = .systemFont(ofSize: 13, weight: .semibold)
             Self.fitted(name, upTo: 260)
-            let show = Self.button("macwindow", "Show Window") { [weak self] in self?.show(group) }
+            let closed = group.project == nil && group.workspaces.isEmpty
+            let show = Self.button("macwindow", closed ? "Open" : "Show Window") { [weak self] in
+                self?.closeFlyout()
+                self?.show(group)
+            }
             let header = NSStackView(views: [name, Self.spacer(), show])
             header.spacing = 6
-            let rows = NSStackView(views: [header] + group.workspaces.map(Self.row))
+            let due = group.projectKey.map { Self.dueTasks(of: $0).map(Self.dueRow) } ?? []
+            let rows = NSStackView(views: [header] + due + group.workspaces.map(Self.row))
             rows.orientation = .vertical
             rows.alignment = .width
             rows.spacing = 2
@@ -707,6 +994,31 @@ final class CanvasSatelliteDock: NSObject {
         glass.frame = content.bounds
         glass.autoresizingMask = [.width, .height]
         content.addSubview(glass)
+    }
+
+    /// A task coming due: when, in the colour of how soon, and what.
+    private static func dueRow(_ task: (due: String, text: String)) -> NSView {
+        let when = NSTextField(labelWithString: RelativeDue.short(task.due))
+        when.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        when.textColor = switch DockDue.level(task.due, horizon: .max) {
+        case .overdue: .systemRed
+        case .today: .systemOrange
+        default: .secondaryLabelColor
+        }
+        when.toolTip = RelativeDue.full(task.due)
+        when.translatesAutoresizingMaskIntoConstraints = false
+        when.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        let text = NSTextField(labelWithString: task.text)
+        text.font = .systemFont(ofSize: 12)
+        text.lineBreakMode = .byTruncatingTail
+        text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let row = NSStackView(views: [when, text])
+        row.spacing = 8
+        row.alignment = .firstBaseline
+        row.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
+        row.setAccessibilityElement(true)
+        row.setAccessibilityLabel("\(task.text), due \(RelativeDue.full(task.due))")
+        return row
     }
 
     private static func separator() -> NSView {
@@ -895,6 +1207,12 @@ private final class DockMark: NSView {
     var onDrag: (Bool) -> Void = { _ in }
     /// Making sound: a dot under the icon, as the Mac's Dock marks a running app.
     private var isPlaying = false
+    /// Something overdue or due today: a dot at its top corner, red or orange.
+    private var due: DockDue.Level?
+    /// The dock is on the screen's right half: the due dot goes on the top left, the inside edge.
+    var dotOnLeft = false { didSet { if dotOnLeft != oldValue { needsDisplay = true } } }
+    /// Nothing open: the icon is drawn faded. Not the view's alpha, which would fade the due dot too.
+    private var isClosed = false
 
     /// The focused project's mark: a ring in its colour, the icon drawn smaller inside it.
     var isFocused = false { didSet { needsDisplay = true; updateLabel() } }
@@ -914,8 +1232,9 @@ private final class DockMark: NSView {
         initial = String(group.title.prefix(1)).uppercased()
         let side = CanvasSatelliteDock.markSize
         super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
-        alphaValue = group.isClosed ? 0.45 : 1
+        isClosed = group.isClosed
         isPlaying = group.isPlaying
+        due = group.due
         translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([widthAnchor.constraint(equalToConstant: side),
                                      heightAnchor.constraint(equalToConstant: side)])
@@ -926,6 +1245,12 @@ private final class DockMark: NSView {
         let count = group.windowCount
         label = count == 0 ? group.title
             : "\(group.title), \(count) \(count == 1 ? "window" : "windows") out"
+        switch group.due {
+        case .overdue: label += ", overdue"
+        case .today: label += ", due today"
+        case .soon: label += ", due soon"
+        case nil: break
+        }
         updateLabel()
     }
 
@@ -947,6 +1272,30 @@ private final class DockMark: NSView {
     static let focusedInset: CGFloat = 4.5
 
     override func draw(_ dirty: NSRect) {
+        let context = NSGraphicsContext.current?.cgContext
+        if isClosed, let context {
+            context.saveGState()
+            context.setAlpha(0.45)
+            context.beginTransparencyLayer(auxiliaryInfo: nil)
+        }
+        drawIcon()
+        if isClosed, let context {
+            context.endTransparencyLayer()
+            context.restoreGState()
+        }
+        if due == .overdue || due == .today {
+            // At the icon's top inside corner (`dotOnLeft`), ringed in the dock's ground so it reads on any colour.
+            let dot = NSRect(x: dotOnLeft ? 0 : bounds.maxX - 11, y: 0, width: 11, height: 11)
+            let path = NSBezierPath(ovalIn: dot.insetBy(dx: 0.75, dy: 0.75))
+            (due == .overdue ? NSColor.systemRed : NSColor.systemOrange).setFill()
+            path.fill()
+            path.lineWidth = 1.5
+            NSColor.windowBackgroundColor.withAlphaComponent(0.9).setStroke()
+            path.stroke()
+        }
+    }
+
+    private func drawIcon() {
         let inset = isFocused ? Self.focusedInset : 2
         let tile = bounds.insetBy(dx: inset, dy: inset)
         let scale = tile.width / (bounds.width - 4)

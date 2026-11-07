@@ -117,3 +117,99 @@ final class MiddleClickView: NSView {
 
     deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
 }
+
+/// How big a sidebar's rows are: System Settings ▸ Appearance ▸ Sidebar icon size, which every Mac
+/// sidebar follows (`NSTableViewDefaultSizeMode`: 1 small, 2 medium, 3 large).
+struct SidebarMetrics: Equatable {
+    var rowHeight: CGFloat
+    var font: CGFloat
+    var glyph: CGFloat
+    var favoriteHeight: CGFloat
+    var favoriteGlyph: CGFloat
+
+    static let small = SidebarMetrics(rowHeight: 28, font: 12, glyph: 14, favoriteHeight: 38, favoriteGlyph: 18)
+    static let medium = SidebarMetrics(rowHeight: 32, font: 13, glyph: 16, favoriteHeight: 42, favoriteGlyph: 20)
+    static let large = SidebarMetrics(rowHeight: 38, font: 15, glyph: 19, favoriteHeight: 48, favoriteGlyph: 23)
+
+    static var current: SidebarMetrics {
+        switch UserDefaults.standard.integer(forKey: "NSTableViewDefaultSizeMode") {
+        case 1: return .small
+        case 3: return .large
+        default: return .medium
+        }
+    }
+}
+
+private struct SidebarMetricsKey: EnvironmentKey {
+    static let defaultValue = SidebarMetrics.medium
+}
+
+extension EnvironmentValues {
+    var sidebarMetrics: SidebarMetrics {
+        get { self[SidebarMetricsKey.self] }
+        set { self[SidebarMetricsKey.self] = newValue }
+    }
+}
+
+/// Keys and swipes over a sidebar that SwiftUI can't give it without taking the keyboard from the page:
+/// Esc (when no field is being typed in) and a sideways two-finger swipe over the sidebar. Never takes a
+/// hit; listens to its window's events like `MiddleClickView`.
+struct SidebarEventCatcher: NSViewRepresentable {
+    /// Esc: true when it was used (the event is then consumed).
+    var onEscape: () -> Bool
+    /// A sideways swipe: +1 for the next (swiping left, content moving left), -1 for the previous.
+    var onSwipe: ((Int) -> Void)?
+
+    func makeNSView(context: Context) -> SidebarEventView { SidebarEventView() }
+    func updateNSView(_ view: SidebarEventView, context: Context) {
+        view.onEscape = onEscape
+        view.onSwipe = onSwipe
+    }
+}
+
+final class SidebarEventView: NSView {
+    var onEscape: () -> Bool = { false }
+    var onSwipe: ((Int) -> Void)?
+    private var monitor: Any?
+    /// The swipe under way: its sideways and upright travel, and whether it already went.
+    private var swipe: (dx: CGFloat, dy: CGFloat, fired: Bool)?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        guard window != nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .scrollWheel]) { [weak self] event in
+            guard let self, event.window === self.window else { return event }
+            switch event.type {
+            case .keyDown: return self.key(event) ? nil : event
+            case .scrollWheel: self.scroll(event); return event
+            default: return event
+            }
+        }
+    }
+
+    private func key(_ event: NSEvent) -> Bool {
+        guard event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+              !(window?.firstResponder is NSText) else { return false }
+        return onEscape()
+    }
+
+    /// Precise (trackpad) scrolls only, inside this view, mostly sideways: one space per gesture.
+    func scroll(_ event: NSEvent) {
+        guard let onSwipe, event.hasPreciseScrollingDeltas,
+              bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        if event.phase.contains(.began) { swipe = (0, 0, false) }
+        guard var current = swipe else { return }
+        current.dx += event.scrollingDeltaX
+        current.dy += abs(event.scrollingDeltaY)
+        if !current.fired, abs(current.dx) > 70, abs(current.dx) > current.dy * 2 {
+            current.fired = true
+            onSwipe(current.dx < 0 ? 1 : -1)
+        }
+        swipe = event.phase.contains(.ended) || event.phase.contains(.cancelled) ? nil : current
+    }
+
+    deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+}
