@@ -34,6 +34,35 @@ enum Motion {
     /// mark in one frame and never runs the curve at all.
     static var settle: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1) }
 
+    /// `settle` as arithmetic: how far along the curve is at `fraction` of its time, for things drawn in
+    /// `draw(_:)` that no timing function can reach (`CanvasGlide`). Same control points; change both.
+    static func settled(_ fraction: Double) -> Double { cubic(0.16, 1, 0.3, 1, at: fraction) }
+
+    /// A CSS-style cubic Bézier from (0, 0) to (1, 1), solved for the time `x`: Newton's method, with
+    /// bisection when the slope is too flat for it.
+    static func cubic(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, at x: Double) -> Double {
+        guard x > 0 else { return 0 }
+        guard x < 1 else { return 1 }
+        let cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx
+        let cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by
+        func curveX(_ t: Double) -> Double { ((ax * t + bx) * t + cx) * t }
+        var t = x
+        for _ in 0..<8 {
+            let error = curveX(t) - x
+            if abs(error) < 1e-6 { return ((ay * t + by) * t + cy) * t }
+            let slope = (3 * ax * t + 2 * bx) * t + cx
+            if abs(slope) < 1e-6 { break }
+            t -= error / slope
+        }
+        var low = 0.0, high = 1.0
+        t = x
+        for _ in 0..<40 {
+            if curveX(t) < x { low = t } else { high = t }
+            t = (low + high) / 2
+        }
+        return ((ay * t + by) * t + cy) * t
+    }
+
     /// How long a change takes, by kind — so the same kind of thing moves at the same speed everywhere.
     /// Pass through `Motion.duration` (or `Motion.animation`) so Reduce Motion still takes it to zero.
     enum Tempo {

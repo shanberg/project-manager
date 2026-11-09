@@ -236,6 +236,7 @@ targets:
       - path: PM/Canvas/CanvasCardSize.swift
       - path: PM/Canvas/CanvasTiling.swift
       - path: PM/Canvas/CanvasTileSession.swift
+      - path: PM/Canvas/CanvasTileCarry.swift
       - path: PM/Canvas/CanvasSatelliteGather.swift
       - path: PM/Canvas/CanvasCompanionPlacement.swift
       - path: PM/Canvas/CanvasViewState.swift
@@ -320,6 +321,7 @@ targets:
       - path: PM/QuickBar/BrowserTab.swift
       # The header's parts, so the motion tests measure the real ones (docs/header-chrome.md P1, P4, P5).
       - path: PM/Shared/Motion.swift
+      - path: PM/Shared/DisplayTicker.swift
       - path: PM/Shared/WindowChrome.swift
       - path: PM/Shared/WindowDragExcluder.swift
       - path: PM/Project/ProjectTabBar.swift

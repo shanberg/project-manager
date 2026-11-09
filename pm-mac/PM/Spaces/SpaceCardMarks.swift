@@ -208,7 +208,14 @@ enum SpaceRowDrag {
 
     /// The row was let go somewhere that took it. Not left to the provider's release, which is the
     /// only end SwiftUI reports and may come later.
-    static func end() { current = nil; companions = [] }
+    static func end() {
+        current = nil
+        companions = []
+        NotificationCenter.default.post(name: didChange, object: nil)
+    }
+
+    /// Posted when a row starts or stops travelling — what `CanvasRowDropCatcher` goes up and down on.
+    static let didChange = Notification.Name("SpaceRowDrag.didChange")
 
     /// A provider for dragging `card`'s row; `address` for a web card. `onEnd` runs when the drag is
     /// over, however it ended. `companions`: other picked rows carried with it.
@@ -216,6 +223,7 @@ enum SpaceRowDrag {
                              onEnd: @escaping () -> Void) -> NSItemProvider {
         current = (card, canvas, address)
         Self.companions = companions
+        NotificationCenter.default.post(name: didChange, object: nil)
         generation &+= 1
         let mine = generation
         let provider = NSItemProvider()
@@ -226,7 +234,7 @@ enum SpaceRowDrag {
         }
         objc_setAssociatedObject(provider, &sentinelKey, DragEndSentinel {
             MainActor.assumeIsolated {
-                if generation == mine { current = nil; Self.companions = [] }
+                if generation == mine { end() }
                 onEnd()
             }
         }, .OBJC_ASSOCIATION_RETAIN)

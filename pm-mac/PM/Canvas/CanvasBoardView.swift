@@ -362,6 +362,7 @@ final class CanvasBoardView: NSView {
     /// every card. See `CanvasTileHandleView`.
     let tileHandleView = CanvasTileHandleView()
     let tileGripView = CanvasTileGripView()
+    let rowDropCatcher = CanvasRowDropCatcher()
 
     /// Whether this board is standing in for the project window's notes — tiled to the project's own
     /// card, and nothing else (docs/canvas-workspaces.md §7d).
@@ -436,7 +437,9 @@ final class CanvasBoardView: NSView {
     var isChoosingPlacement = false
     /// Where a tile carried by its handlebar would land if let go now, and what it would do there.
     /// See `previewDrop`.
-    var dropMark: (rect: CanvasRect, title: String)?
+    var dropMark: (rect: CanvasRect, title: String)? {
+        didSet { overlay.dropMarkChanged(to: dropMark) }
+    }
     /// Whether `dropMark` is a drag's from outside the tiles — a sidebar row's (`rowDrop`) or a dropped
     /// note, file or link's (`markTileDrop`) — for the drag leaving to take down, and for the mark to
     /// carry its own words, since nothing is drawn under the pointer to say them.
@@ -467,6 +470,12 @@ final class CanvasBoardView: NSView {
     /// Where the pointer is while a tile is dragged, which is where its proxy is drawn. See
     /// `CanvasOverlayView.drawCarried`.
     var dragPoint: CanvasPoint?
+    /// The tile carried by its handlebar or a pulled tab, from the press to the release: whether it has
+    /// come out of its slot yet. See `CanvasTileCarry`.
+    var tileCarry: CanvasTileCarry?
+    /// A tile leaning after the pointer before it comes out, and how far, in view points. Added to its
+    /// frame wherever the cards are laid out, so a layout pass mid-pull leaves it where the hand has it.
+    var leaningTile: (id: String, offset: CGSize)?
     /// A link on a card being dragged along the list it is in (canvas backlog 14): which card and list,
     /// its place, the rows in canvas coordinates as they stood when the drag began, and where it would
     /// go if let go now — nil until the press has moved.
@@ -653,6 +662,9 @@ final class CanvasBoardView: NSView {
         addSubview(overlay)
         // Above even the overlay: a tile's grip sits on the card it moves (backlog 20).
         addSubview(tileGripView)
+        // Above everything, and hidden unless one of this board's sidebar rows is being dragged — see
+        // `CanvasRowDropCatcher`.
+        addSubview(rowDropCatcher)
         // Without this AppKit offers the board no drag at all, and the only drops that ever reached it
         // were the ones a web card's page handed on — so a link carried off a card onto open ground
         // went back to being a link, and nothing dropped on the ground made a card.
@@ -732,6 +744,7 @@ final class CanvasBoardView: NSView {
         overlay.frame = NSRect(origin: .zero, size: frame.size)
         tileHandleView.frame = overlay.frame
         tileGripView.frame = overlay.frame
+        rowDropCatcher.frame = overlay.frame
 
         if let clip = scrollView?.contentView, let before, shift != .zero {
             var wanted = NSRect(origin: NSPoint(x: before.x + shift.x, y: before.y + shift.y),
@@ -936,7 +949,10 @@ final class CanvasBoardView: NSView {
             // of a stack into the middle keeps its size and loses two of them. Cheap when it hasn't,
             // which is every frame of a card being dragged around a board.
             view.refreshChrome()
-            let wanted = viewRect(layout.frame(of: node))
+            var wanted = viewRect(layout.frame(of: node))
+            if let lean = leaningTile, lean.id == id {
+                wanted = wanted.offsetBy(dx: lean.offset.width, dy: lean.offset.height)
+            }
             if animatesLayout, view.frame != wanted, !view.isHidden {
                 view.animator().frame = wanted
                 flying += 1
@@ -954,6 +970,7 @@ final class CanvasBoardView: NSView {
         overlay.frame = NSRect(origin: .zero, size: frame.size)
         tileHandleView.frame = overlay.frame
         tileGripView.frame = overlay.frame
+        rowDropCatcher.frame = overlay.frame
         // After the frame, because these are placed in it. See `refreshStripExcluders`.
         tileHandleView.refreshStripExcluders()
     }

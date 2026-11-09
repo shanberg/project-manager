@@ -656,6 +656,39 @@ struct CanvasTileSession: Equatable {
         }
     }
 
+    /// What a drag marks for `drop` on `target`: `dropMark`, except that a place beside a tile is a bar
+    /// `bar` thick, centred on the gap the tile would go into — or along the edge of the tiles where
+    /// there is no neighbour on that side. A bar between two tiles says *between* them, where shading
+    /// half of one read as taking that half's place. ⌥N's mark stays `dropMark`: it shows the room the
+    /// other tiles have made.
+    func dragMark(_ drop: Drop, on target: String, bar: Double) -> CanvasRect? {
+        guard case .beside(let side) = drop, side != .tab else { return dropMark(drop, on: target) }
+        guard let tile = tileFrames[target], let at = position(of: target) else { return nil }
+        let gap = CanvasTiling.gap
+        switch side {
+        case .left, .right:
+            let frames = tileFrames
+            let column = columns[at.column].tiles.compactMap { frames[$0.shown] }
+                .reduce(tile) { $0.union($1) }
+            let x: Double
+            if side == .left {
+                x = at.column == 0 ? column.minX : column.minX - gap / 2 - bar / 2
+            } else {
+                x = at.column == columns.count - 1 ? column.maxX - bar : column.maxX + gap / 2 - bar / 2
+            }
+            return CanvasRect(x: x, y: column.minY, width: bar, height: column.height)
+        case .above:
+            let y = at.tile == 0 ? tile.minY : tile.minY - gap / 2 - bar / 2
+            return CanvasRect(x: tile.minX, y: y, width: tile.width, height: bar)
+        case .below:
+            let last = at.tile == columns[at.column].tiles.count - 1
+            let y = last ? tile.maxY - bar : tile.maxY + gap / 2 - bar / 2
+            return CanvasRect(x: tile.minX, y: y, width: tile.width, height: bar)
+        case .tab:
+            return dropMark(drop, on: target)
+        }
+    }
+
     /// Carry out a drop: a whole tile's (`drop`), or — `pulling` — one tab's (`pull`).
     mutating func land(_ id: String, on target: String, _ drop: Drop, pulling: Bool) {
         if pulling, case .beside(let side) = drop {

@@ -63,7 +63,22 @@ extension CanvasBoardView: CanvasPageDropClaim {
     /// Registering here rather than in the board's initialiser keeps the list beside the code that
     /// interprets it. See `CanvasDrop.read` for what each type becomes.
     func registerForDrops() {
-        registerForDraggedTypes([.fileURL, .string, .URL, SpaceRowDrag.pasteboardType] + NoteImagePasteboard.imageTypes)
+        registerForDraggedTypes(Self.droppedTypes)
+        rowDropCatcher.board = self
+        NotificationCenter.default.addObserver(self, selector: #selector(rowDragChanged),
+                                               name: SpaceRowDrag.didChange, object: nil)
+    }
+
+    /// Every type the board takes a drop of — and so `CanvasRowDropCatcher`'s too.
+    static var droppedTypes: [NSPasteboard.PasteboardType] {
+        [.fileURL, .string, .URL, SpaceRowDrag.pasteboardType] + NoteImagePasteboard.imageTypes
+    }
+
+    /// A row started or stopped travelling: the catcher is up over this board while one of its own is.
+    @objc private func rowDragChanged() {
+        let ours = SpaceRowDrag.current.map { $0.canvas.standardizedFileURL == store.url.standardizedFileURL } ?? false
+        rowDropCatcher.frame = bounds
+        rowDropCatcher.isHidden = !ours
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -114,7 +129,7 @@ extension CanvasBoardView: CanvasPageDropClaim {
         guard let id = SpaceRowDrag.card(in: sender, for: store.url) else { return nil }
         let target = rowTarget(id, at: canvasPoint(convert(sender.draggingLocation, from: nil)))
         let mark = target.flatMap { target in
-            tiling?.dropMark(target.drop, on: target.target).map { (rect: $0, title: rowDropTitle(id, target.drop)) }
+            tiling?.dragMark(target.drop, on: target.target, bar: dragMarkBar).map { (rect: $0, title: rowDropTitle(id, target.drop)) }
         }
         if dropMark?.rect != mark?.rect || dropMark?.title != mark?.title {
             dropMark = mark
@@ -198,7 +213,7 @@ extension CanvasBoardView: CanvasPageDropClaim {
     private func markTileDrop(_ sender: NSDraggingInfo) {
         let target = tileDropTarget(at: canvasPoint(convert(sender.draggingLocation, from: nil)))
         let mark = target.flatMap { target in
-            tiling?.dropMark(target.drop, on: target.target).map { (rect: $0, title: target.drop.title) }
+            tiling?.dragMark(target.drop, on: target.target, bar: dragMarkBar).map { (rect: $0, title: target.drop.title) }
         }
         if dropMark?.rect != mark?.rect || dropMark?.title != mark?.title {
             dropMark = mark

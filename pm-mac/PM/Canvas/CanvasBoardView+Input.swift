@@ -178,6 +178,7 @@ extension CanvasBoardView {
             guard chip != nil ? tiling?.position(of: id) != nil : tiling?.tileFrames[id] != nil else { return }
             gesture = chip != nil ? .slideTab(id, from: where_, wasShowing: wasShowing)
                                   : .placeTile(id, base: tiling?.tileFrames ?? [:], drop: nil, pulling: false)
+            if chip == nil { tileCarry = CanvasTileCarry(start: where_, isFree: false) }
             return
         }
         if let id = tileHandle(at: where_), tiling?.tileFrames[id] != nil {
@@ -190,6 +191,7 @@ extension CanvasBoardView {
             // A maximized tile's grip is only the way back — see `tileHandle(_:)`.
             guard tiling?.maximized == nil else { return }
             gesture = .placeTile(id, base: tiling?.tileFrames ?? [:], drop: nil, pulling: false)
+            tileCarry = CanvasTileCarry(start: where_, isFree: false)
             return
         }
         if let divider = tileDivider(at: where_) {
@@ -268,6 +270,10 @@ extension CanvasBoardView {
                 tabSlide = nil
                 tabClickPending = nil
                 gesture = .placeTile(card, base: tiling?.tileFrames ?? [:], drop: nil, pulling: true)
+                // Already out: it has been pulled clear of its strip, which is the tab's own way of
+                // coming free.
+                tileCarry = CanvasTileCarry(start: now, isFree: true)
+                overlay.carryChanged(true)
                 return mouseDragged(with: event)
             }
             let chips = strip.tabs
@@ -293,6 +299,21 @@ extension CanvasBoardView {
             if next != tabSlide { tabSlide = next }
 
         case .placeTile(let id, let base, let drop, let pulling):
+            // **Short of coming out, the tile leans after the pointer in its slot** and nothing else
+            // happens: no proxy, no mark. See `CanvasTileCarry`.
+            if var carry = tileCarry, !carry.isFree {
+                let pull = CanvasTileCarry.lean(dx: (now.x - carry.start.x) * liveScale,
+                                                dy: (now.y - carry.start.y) * liveScale)
+                if !pull.free {
+                    leanTile(id, by: CGSize(width: (now.x - carry.start.x) * pull.fraction,
+                                            height: (now.y - carry.start.y) * pull.fraction))
+                    break
+                }
+                carry.isFree = true
+                tileCarry = carry
+                settleLeaningTile()
+                overlay.carryChanged(true)
+            }
             // **A proxy comes with you, and nothing else moves.** The tile stays in its slot, dimmed,
             // and the tiles around it stay where they are until you let go — a board rearranging
             // itself under the pointer was a target that moved while you aimed at it (docs/canvas-
@@ -528,7 +549,11 @@ extension CanvasBoardView {
         case .placeTile(let id, let base, let drop, let pulling):
             // Let go: what the mark said happens, and the tiles move — once, now.
             dragPoint = nil
-            if isOutsideWindow {
+            let wasFree = tileCarry?.isFree ?? true
+            tileCarry = nil
+            settleLeaningTile()
+            overlay.carryChanged(false)
+            if wasFree, isOutsideWindow {
                 NSCursor.arrow.set()
                 overlay.needsDisplay = true
                 previewDrop(of: id, nil, pulling: pulling)

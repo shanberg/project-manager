@@ -1206,13 +1206,24 @@ boundaries stay live while you choose, since every tile is still where the colum
 
 **A drag moves nothing until you let go** — **decided**, after using it. Dragging a tile by its
 handlebar or its tab carries a small proxy of the card; the tile it came from stays where it is,
-dimmed; and where it would land is marked on the tiles as they stand — a new column as the side of the
-whole column, a tile above or below as half of the tile, a tab as its top band, a swap as the tile
-itself (`CanvasTileSession.dropMark`). What the drop would do is written under the proxy, which
+dimmed; and where it would land is marked on the tiles as they stand — a new column as a bar on the
+gap beside the whole column, a tile above or below as a bar on the gap beside the tile, a tab as its
+top band, a swap as the tile itself (`CanvasTileSession.dragMark`). What the drop would do is written under the proxy, which
 travels with the pointer and is always on top, rather than in the mark, which the proxy could cover.
 The layout changes once, on the drop. The first version reflowed
 the tiles under the pointer as it moved, the way the playground does, and in the app that was
 unpredictable, took precision, and disoriented: the target kept moving because the tiles did.
+
+The carry's motion (2026-11-09, tuned in the Tile Drag Lab mock; `CanvasTileCarry`):
+
+- Pickup: the tile leans after the pointer in its slot, strip with it — niri's rubber band, up to 50%
+  of the pull — and comes out at 48 screen points; short of that, letting go puts it back.
+- Out: the tile settles back into its slot over 0.2s; the veil and the proxy fade in over 0.26s.
+- Mark: fades in and out over 0.26s; moves between targets in 0.21s on `Motion.settle`.
+- Beside marks: a bar 28 screen points thick, centred on the gap, or along the edge with no neighbour.
+- Drop: the tiles settle over 0.3s on `Motion.settle`, as before; the proxy fades where it was.
+- Kept the proxy over carrying the tile at 75% (niri's way): a carried tile covers a third of the
+  window.
 
 ### The board is the picker
 

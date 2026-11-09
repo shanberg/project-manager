@@ -1422,9 +1422,37 @@ extension CanvasBoardView {
     func previewDrop(of id: String, _ drop: (target: String, drop: CanvasTileSession.Drop)?,
                      pulling: Bool) {
         dropMark = drop.flatMap { drop in
-            tiling?.dropMark(drop.drop, on: drop.target).map { (rect: $0, title: drop.drop.title) }
+            tiling?.dragMark(drop.drop, on: drop.target, bar: dragMarkBar).map { (rect: $0, title: drop.drop.title) }
         }
         overlay.needsDisplay = true
+    }
+
+    /// How thick a "beside" mark is on the board at this zoom: `CanvasTileCarry.bar` screen points.
+    var dragMarkBar: Double { CanvasTileCarry.bar / max(0.01, liveScale) }
+
+    /// Hold the tile being pulled `offset` view points out of its slot, its tab strip with it.
+    func leanTile(_ id: String, by offset: CGSize) {
+        leaningTile = (id, offset)
+        if let view = nodeViews[id], let node = document.node(id: id) {
+            view.frame = viewRect(layout.frame(of: node)).offsetBy(dx: offset.width, dy: offset.height)
+        }
+        tileHandleView.nudge(id, by: offset)
+    }
+
+    /// Put a leaning tile back in its slot — it came out, and the proxy has it now, or the press ended
+    /// short of that — along `Motion.settle`, its tab strip on the same clock.
+    func settleLeaningTile() {
+        guard let lean = leaningTile else { return }
+        leaningTile = nil
+        tileHandleView.releaseNudge(over: CanvasTileCarry.release)
+        guard let view = nodeViews[lean.id], let node = document.node(id: lean.id) else { return }
+        let home = viewRect(layout.frame(of: node))
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Motion.duration(CanvasTileCarry.release)
+            context.timingFunction = Motion.settle
+            context.allowsImplicitAnimation = true
+            view.animator().frame = home
+        }
     }
 
     /// Let go of a carried tile: what the preview showed happens, and the card settles into its place.

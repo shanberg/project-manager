@@ -79,6 +79,43 @@ final class CanvasOverlayView: NSView {
         self?.needsDisplay = true
     }
 
+    // MARK: A carried tile's proxy and mark
+
+    /// The veil and the proxy of a carried tile, coming and going (`CanvasTileCarry.fade`). The last
+    /// proxy drawn is kept so that letting go leaves it something to fade *out* from where it was.
+    private lazy var carryFade = CanvasFade(rise: CanvasTileCarry.fade, fall: CanvasTileCarry.fade, on: self) {
+        [weak self] in self?.needsDisplay = true
+    }
+    private var drawnProxy: (id: String, point: CanvasPoint)?
+
+    /// A tile came out of its slot (or a tab off its strip), or was let go.
+    func carryChanged(_ carrying: Bool) {
+        carryFade.set(carrying)
+        needsDisplay = true
+    }
+
+    /// Where a drop would land: faded in and out, and gliding from one target to the next rather than
+    /// jumping (`CanvasTileCarry`). The last mark is kept while it fades.
+    private lazy var markFade = CanvasFade(rise: CanvasTileCarry.fade, fall: CanvasTileCarry.fade, on: self) {
+        [weak self] in self?.needsDisplay = true
+    }
+    private lazy var markGlide = CanvasGlide(seconds: CanvasTileCarry.glide, on: self) { [weak self] in
+        self?.needsDisplay = true
+    }
+    private var drawnMark: (rect: CanvasRect, title: String)?
+
+    /// `CanvasBoardView.dropMark` changed. A mark arriving out of nothing appears where it is; one
+    /// that is already showing — or still fading — travels there.
+    func dropMarkChanged(to mark: (rect: CanvasRect, title: String)?) {
+        if let mark {
+            guard drawnMark?.rect != mark.rect || drawnMark?.title != mark.title || !markFade.isVisible else { return }
+            if markFade.isVisible { markGlide.move(to: mark.rect) } else { markGlide.jump(to: mark.rect) }
+            drawnMark = mark
+        }
+        markFade.set(mark != nil)
+        needsDisplay = true
+    }
+
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -195,14 +232,36 @@ final class CanvasOverlayView: NSView {
     ///
     /// **A proxy, not the card.** Carrying the whole tile put a pane the size of a third of the window
     /// between you and what you were aiming at, and moving it meant moving a page. The proxy sits just
-    /// below the pointer, so the spot the drop is read at is never under it.
+    /// below the pointer, so the spot the drop is read at is never under it. (Tried again in the Tile
+    /// Drag Lab mock, 2026-11-09, and kept the proxy for the same reasons.)
+    ///
+    /// Only once the tile is out of its slot (`CanvasTileCarry`), and faded in and out rather than
+    /// switched: let go, and the proxy fades where it was while the tile settles.
     private func drawCarried(_ board: CanvasBoardView, _ scale: Double) {
-        guard case .placeTile(let id, _, _, _)? = board.gesture, let point = board.dragPoint,
-              let session = board.tiling else { return }
-        if let source = session.tileFrames[id] {
-            NSColor.windowBackgroundColor.withAlphaComponent(0.55).setFill()
+        var live: (id: String, point: CanvasPoint)?
+        if case .placeTile(let id, _, _, _)? = board.gesture, board.tileCarry?.isFree == true,
+           let point = board.dragPoint {
+            live = (id, point)
+            drawnProxy = live
+        }
+        guard carryFade.isVisible, let shown = live ?? drawnProxy, let session = board.tiling,
+              let context = NSGraphicsContext.current?.cgContext else { return }
+        let id = shown.id, point = shown.point
+        let presence = carryFade.presence
+        // The slot it came from is veiled while it is carried, and not after: let go, and the tile
+        // itself is on its way out of it.
+        if live != nil, let source = session.tileFrames[id] {
+            NSColor.windowBackgroundColor.withAlphaComponent(0.55 * presence).setFill()
             NSBezierPath(roundedRect: board.viewRect(source), xRadius: CanvasTiling.innerRadius,
                          yRadius: CanvasTiling.innerRadius).fill()
+        }
+        // The proxy and its caption fade as one picture, shadow and all.
+        context.saveGState()
+        context.setAlpha(presence)
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        defer {
+            context.endTransparencyLayer()
+            context.restoreGState()
         }
         guard let described = board.describeCard(id) else { return }
         let title = NSAttributedString(string: described.title, attributes: [
@@ -215,7 +274,32 @@ final class CanvasOverlayView: NSView {
         let width = pad * 2 + (icon == nil ? 0 : side + 8 / scale) + textWidth
         let height = 36 / scale
         let at = board.viewPoint(point)
-        let proxy = NSRect(x: at.x - width / 2, y: at.y + 14 / scale, width: width, height: height)
+        var proxy = NSRect(x: at.x - width / 2, y: at.y + 14 / scale, width: width, height: height)
+        // What letting go here would do — "New Column", "As a Tab", "Swap" — under the proxy. Sized
+        // here so the two can be kept inside the window together.
+        let caption = board.dropMark.map { NSAttributedString(string: $0.title, attributes: [
+            .font: NSFont.systemFont(ofSize: 11 / scale, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ]) }
+        let captionSize = caption?.size() ?? .zero
+        let captionPad = 7 / scale
+        let captionWidth = caption == nil ? 0 : captionSize.width + captionPad * 2
+        let captionHeight = caption == nil ? 0 : 5 / scale + captionSize.height + captionPad * 0.8
+        // **Inside the window, whatever the pointer is near.** Slid in from a side edge, and above the
+        // pointer rather than below it at the bottom — a caption cut off at the edge is the one word
+        // the drag has to say. Not once the pointer is out past the window: letting go there opens a
+        // window, and the proxy leaves with the pointer.
+        let room = visibleRect.insetBy(dx: 8 / scale, dy: 8 / scale)
+        let span = max(width, captionWidth)
+        if !board.isOutsideWindow {
+            if room.width > span {
+                let centre = min(max(at.x, room.minX + span / 2), room.maxX - span / 2)
+                proxy.origin.x = centre - width / 2
+            }
+            if proxy.maxY + captionHeight > room.maxY {
+                proxy.origin.y = at.y - 14 / scale - height - captionHeight
+            }
+        }
 
         NSGraphicsContext.saveGraphicsState()
         let shadow = NSShadow()
@@ -245,15 +329,9 @@ final class CanvasOverlayView: NSView {
         text.draw(with: NSRect(x: left, y: proxy.midY - size.height / 2, width: textWidth, height: size.height),
                   options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
 
-        // What letting go here would do — "New Column", "As a Tab", "Swap" — under the proxy, where it
-        // travels with the pointer and nothing can cover it. Nothing when the pointer is over nowhere.
-        guard let action = board.dropMark?.title else { return }
-        let caption = NSAttributedString(string: action, attributes: [
-            .font: NSFont.systemFont(ofSize: 11 / scale, weight: .semibold),
-            .foregroundColor: NSColor.white,
-        ])
-        let captionSize = caption.size()
-        let captionPad = 7 / scale
+        // The caption under the proxy, where it travels with the pointer and nothing can cover it.
+        // Nothing when the pointer is over nowhere.
+        guard let caption else { return }
         let pill = NSRect(x: proxy.midX - captionSize.width / 2 - captionPad,
                           y: proxy.maxY + 5 / scale,
                           width: captionSize.width + captionPad * 2,
@@ -299,11 +377,22 @@ final class CanvasOverlayView: NSView {
     private func drawTileMark(_ board: CanvasBoardView, _ scale: Double) {
         guard let session = board.tiling, !board.isPicking else { return }
         let mark: (rect: CanvasRect, title: String)
-        if let drop = board.dropMark {
-            mark = drop
-        } else if let rect = session.placementFrame, let side = session.preselection?.side {
+        let presence: Double
+        let labelled: Bool
+        if let drawn = drawnMark, markFade.isVisible {
+            // A drop's mark, where its glide has it, as present as its fade.
+            mark = (markGlide.current ?? drawn.rect, drawn.title)
+            presence = markFade.presence
+            // A drag says what it will do under its proxy instead (`drawCarried`), which is the one
+            // thing on screen always in sight and always on top — a label in the mark could sit under
+            // the proxy, or off the part of a tile you are looking at. A sidebar row's drag has no
+            // proxy, so its mark carries the words itself — while it is live; a fading one goes quiet.
+            labelled = board.dropMark != nil && board.tileDropMarked
+        } else if board.dropMark == nil, let rect = session.placementFrame, let side = session.preselection?.side {
             mark = (rect, board.isChoosingPlacement
                         ? "\(side.title) · Arrows to Move · Return to Choose a Card" : side.title)
+            presence = 1
+            labelled = true
         } else {
             return
         }
@@ -311,26 +400,22 @@ final class CanvasOverlayView: NSView {
         let radii = CanvasTiling.corners(of: mark.rect, in: CanvasTiling.space(of: session.area))
             .radii(inner: CanvasTiling.innerRadius, outer: CanvasTiling.outerRadius)
         let path = CanvasNodeView.path(in: rect, radii: radii)
-        NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
+        NSColor.controlAccentColor.withAlphaComponent(0.12 * presence).setFill()
         path.fill()
-        NSColor.controlAccentColor.withAlphaComponent(0.7).setStroke()
+        NSColor.controlAccentColor.withAlphaComponent(0.7 * presence).setStroke()
         path.lineWidth = 2 / scale
         path.stroke()
 
-        // A drag says what it will do under its proxy instead (`drawCarried`), which is the one thing
-        // on screen always in sight and always on top — a label in the mark could sit under the proxy,
-        // or off the part of a tile you are looking at. A sidebar row's drag has no proxy, so its mark
-        // carries the words itself.
-        guard board.dropMark == nil || board.tileDropMarked else { return }
+        guard labelled else { return }
         let text = NSAttributedString(string: mark.title, attributes: [
             .font: NSFont.systemFont(ofSize: 12 / scale, weight: .semibold),
-            .foregroundColor: NSColor.controlAccentColor,
+            .foregroundColor: NSColor.controlAccentColor.withAlphaComponent(presence),
         ])
         let size = text.size()
         let pad = 6 / scale
         let pill = NSRect(x: rect.midX - size.width / 2 - pad * 1.5, y: rect.midY - size.height / 2 - pad,
                           width: size.width + pad * 3, height: size.height + pad * 2)
-        NSColor.windowBackgroundColor.withAlphaComponent(0.92).setFill()
+        NSColor.windowBackgroundColor.withAlphaComponent(0.92 * presence).setFill()
         NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
         text.draw(at: NSPoint(x: pill.minX + pad * 1.5, y: pill.minY + pad))
     }

@@ -83,6 +83,36 @@ final class CanvasTileHandleView: NSView {
         self?.needsDisplay = true
     }
 
+    /// A tile leaning after the pointer before it comes out of its slot (`CanvasTileCarry`): its strip
+    /// is drawn that far over, so the tabs stay on the card they belong to. Then, going back, the
+    /// distance it was at and the clock it returns on.
+    private var nudged: (card: String, offset: CGSize)?
+    private var nudgeReturn: (card: String, from: CGSize, fade: CanvasFade)?
+
+    func nudge(_ card: String, by offset: CGSize) {
+        nudgeReturn = nil
+        nudged = (card, offset)
+        needsDisplay = true
+    }
+
+    /// Ease the leaning strip back to its place over `seconds`, along `Motion.settle` — the curve the
+    /// card it sits on goes back on.
+    func releaseNudge(over seconds: Double) {
+        guard let nudged else { return }
+        self.nudged = nil
+        let fade = CanvasFade(rise: seconds, fall: seconds, on: self) { [weak self] in self?.needsDisplay = true }
+        fade.hold(1)
+        nudgeReturn = (nudged.card, nudged.offset, fade)
+        fade.set(false)
+    }
+
+    private func nudge(of strip: CanvasTileSession.TabStrip) -> CGSize {
+        if let nudged, strip.cards.contains(nudged.card) { return nudged.offset }
+        guard let back = nudgeReturn, strip.cards.contains(back.card), back.fade.isVisible else { return .zero }
+        let left = 1 - Motion.settled(1 - back.fade.presence)
+        return CGSize(width: back.from.width * left, height: back.from.height * left)
+    }
+
     /// The tab under the pointer changed: fade the old one's hover out and the new one's in.
     func hoverChanged(from old: String?, to new: String?) {
         guard old != new else { return needsDisplay = true }
@@ -216,6 +246,14 @@ final class CanvasTileHandleView: NSView {
         let space = CanvasTiling.space(of: session.area)
         let picked = board.selection.filter(session.cards.contains)
         for strip in session.tabStrips {
+            let nudge = nudge(of: strip)
+            if nudge != .zero {
+                NSGraphicsContext.saveGraphicsState()
+                let shift = NSAffineTransform()
+                shift.translateX(by: nudge.width, yBy: nudge.height)
+                shift.concat()
+            }
+            defer { if nudge != .zero { NSGraphicsContext.restoreGraphicsState() } }
             // The band's own ground, rounded on the tile's outer corners and run a radius in under the
             // card, so the card's corners round off into the strip rather than onto the ground behind.
             let outer = CanvasTiling.corners(of: strip.band, in: space)
