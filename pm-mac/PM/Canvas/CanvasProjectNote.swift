@@ -154,6 +154,11 @@ struct CanvasProjectNote: View {
     /// commits against that, which is what makes it safe for the list underneath to be reindexed by
     /// somebody else while it is open.
     @State private var openNote: Int?
+    /// Which opening of a session note this is. The takeover holds its sitting in `@State` from the
+    /// moment it is made, so pointing `openNote` at another sitting while one is open — New Session,
+    /// which puts the new one at index 0 where the old one was — kept the old editor up. Bumped to make
+    /// a fresh one.
+    @State private var noteOpening = 0
 
     /// Every open parent's subtasks, done and all — see `countSubtasks`. Held rather than worked out per
     /// row, which would walk the task list once for every row drawn.
@@ -336,6 +341,7 @@ struct CanvasProjectNote: View {
                                         if open { display.noteUndo = stack }
                                         else if display.noteUndo === stack { display.noteUndo = nil }
                                     })
+                .id(noteOpening)
             } else {
                 list
             }
@@ -1529,7 +1535,13 @@ struct CanvasProjectNote: View {
         guard store.projectName != nil else { return }
         activeEditor = nil
         // Only on success: a session that couldn't be opened leaves whatever note was showing alone.
-        store.openCurrentSession(forcingNew: forcingNew) { index in if let index { openNote = index } }
+        store.openCurrentSession(forcingNew: forcingNew) { index in
+            guard let index else { return }
+            // A note already open is another sitting's when the index moved or a new one was made at
+            // its index: a new editor, on this one (`noteOpening`).
+            if openNote != nil, forcingNew || openNote != index { noteOpening &+= 1 }
+            openNote = index
+        }
     }
 
     /// New Task: appended to the current session rather than placed against a row, which is what the
