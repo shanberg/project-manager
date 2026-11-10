@@ -530,26 +530,60 @@ final class CanvasPageView: WKWebView {
     /// the press is delivered), so a pulse then hid the page for exactly the frame the press arrived
     /// in, and WebKit dropped it: the first click on a tile in a layout did nothing but focus it. The
     /// rate itself is set at once; the pulse waits for the button to come up.
+    ///
+    /// **And then for the page to have heard it come up.** The button being up is the hardware; the
+    /// release is still in WebKit's queue until the page has answered the press, and a page slow to
+    /// answer (Figma, picking up a layer) was hidden before the release reached it. The page dropped
+    /// the release and went on holding the layer: a drag nobody was making, deaf to Escape, until the
+    /// next click put it down (2026-11-10).
     private func pulseWhenReleased() {
         pulseWait?.invalidate()
         pulseWait = nil
-        guard Self.buttonHeld() else { return pulse() }
+        pulseTicket += 1
+        guard Self.buttonHeld() else { return pulseOnceInputIsHandled() }
         let wait = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
                 guard !Self.buttonHeld() else { return }
                 timer.invalidate()
                 self?.pulseWait = nil
-                self?.pulse()
+                self?.pulseOnceInputIsHandled()
             }
         }
         RunLoop.main.add(wait, forMode: .common)
         pulseWait = wait
     }
 
+    /// Pulse once WebKit has no mouse event left to hand the page. A press that started meanwhile
+    /// sends it back to waiting for the button.
+    private func pulseOnceInputIsHandled() {
+        let ticket = pulseTicket
+        Self.afterPendingMouseEvents(self) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, ticket == self.pulseTicket else { return }
+                if Self.buttonHeld() { return self.pulseWhenReleased() }
+                self.pulse()
+            }
+        }
+    }
+
+    /// Bumped by each request, so only the latest one's wait ends in a pulse.
+    private var pulseTicket = 0
+
     private var pulseWait: Timer?
 
     /// Whether the left button is down. Read from the hardware, so tests stand in for it.
     static var buttonHeld: () -> Bool = { NSEvent.pressedMouseButtons & 0x1 != 0 }
+
+    /// Run `then` once the page has handled every mouse event WebKit is holding for it.
+    /// - WebKit's `_doAfterProcessingAllPendingMouseEvents:` (private; Safari's tests use it).
+    /// - Missing: the next turn of the run loop, which is what the pulse had before.
+    /// - Tests stand in for it.
+    static var afterPendingMouseEvents: (WKWebView, @escaping () -> Void) -> Void = { view, then in
+        let selector = NSSelectorFromString("_doAfterProcessingAllPendingMouseEvents:")
+        guard view.responds(to: selector) else { return DispatchQueue.main.async(execute: then) }
+        typealias Call = @convention(c) (AnyObject, Selector, @escaping @convention(block) () -> Void) -> Void
+        unsafeBitCast(view.method(for: selector), to: Call.self)(view, selector, then)
+    }
 
     private func pulse() {
         guard window != nil, !super.isHiddenOrHasHiddenAncestor, !reportsHidden else { return }

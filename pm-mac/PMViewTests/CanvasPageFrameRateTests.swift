@@ -9,6 +9,7 @@ final class CanvasPageFrameRateTests: XCTestCase {
     private var window: NSWindow!
     private var page: CanvasPageView!
     private let realButton = CanvasPageView.buttonHeld
+    private let realAfterPending = CanvasPageView.afterPendingMouseEvents
 
     override func setUpWithError() throws {
         window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: 400, height: 300),
@@ -21,6 +22,7 @@ final class CanvasPageFrameRateTests: XCTestCase {
 
     override func tearDownWithError() throws {
         CanvasPageView.buttonHeld = realButton
+        CanvasPageView.afterPendingMouseEvents = realAfterPending
         window.orderOut(nil)
     }
 
@@ -52,6 +54,48 @@ final class CanvasPageFrameRateTests: XCTestCase {
             pulsed = page.isHiddenOrHasHiddenAncestor
         }
         XCTAssertTrue(pulsed, "released: the pulse runs")
+    }
+
+    /// Released, but the page has not handled the release yet: no pulse until it has, or the page
+    /// drops the release and goes on holding what was pressed (Figma's stuck layer drag).
+    func testTheReleaseReachesThePageBeforeThePulse() {
+        var held = true
+        CanvasPageView.buttonHeld = { held }
+        var pending: [() -> Void] = []
+        CanvasPageView.afterPendingMouseEvents = { _, then in pending.append(then) }
+        page.setFullFrameRate(true)
+        held = false
+        spin(0.1)
+        XCTAssertFalse(page.isHiddenOrHasHiddenAncestor, "the release is still the page's to handle")
+        XCTAssertEqual(pending.count, 1, "asked once the button came up")
+        pending.removeFirst()()
+        XCTAssertTrue(page.isHiddenOrHasHiddenAncestor, "handled: the pulse runs")
+    }
+
+    /// A new press before the page caught up: the pulse waits for that one's release too.
+    func testANewPressPutsThePulseBackToWaiting() {
+        var held = false
+        CanvasPageView.buttonHeld = { held }
+        var pending: [() -> Void] = []
+        CanvasPageView.afterPendingMouseEvents = { _, then in pending.append(then) }
+        page.setFullFrameRate(true)
+        held = true
+        pending.removeFirst()()
+        XCTAssertFalse(page.isHiddenOrHasHiddenAncestor, "pressed again: no pulse under the button")
+        held = false
+        spin(0.1)
+        XCTAssertEqual(pending.count, 1, "asked again after this release")
+        pending.removeFirst()()
+        XCTAssertTrue(page.isHiddenOrHasHiddenAncestor)
+    }
+
+    /// The real WebKit hook answers, so a pulse is never left waiting forever.
+    func testWebKitSaysWhenItsMouseEventsAreHandled() {
+        var answered = false
+        CanvasPageView.afterPendingMouseEvents(page) { answered = true }
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline, !answered { spin(0.01) }
+        XCTAssertTrue(answered)
     }
 }
 
