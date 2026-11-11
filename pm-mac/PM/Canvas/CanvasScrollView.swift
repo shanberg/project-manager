@@ -533,7 +533,7 @@ final class CanvasScrollView: NSScrollView {
                 self.travelling = nil
                 self.refitPanRoom()
                 self.board.refreshVisibleCards()
-                self.board.settlePageBudget()
+                self.board.landPageBudget()
             }
         }
     }

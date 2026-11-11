@@ -164,7 +164,17 @@ enum CanvasWebSession {
     /// itself differently from the card it was opened for would be signing in as a different browser.
     static func identify(_ configuration: WKWebViewConfiguration) {
         configuration.applicationNameForUserAgent = applicationName
+        configuration.processPool = processPool
     }
+
+    /// One process pool for every page, kept for the life of the app.
+    ///
+    /// A configuration without one gets a pool of its own, and each new pool lists every installed font
+    /// on the main thread when its first page starts: ~20 ms of font scan plus ~5–15 ms making the pool,
+    /// per page, every time. A switch to a four-tile workspace froze the window for ~170 ms that way.
+    /// Shared, only the first page of the launch pays it. Deprecated API, but not a no-op on macOS 27.
+    /// Data stores, and so sign-ins and profiles, are separate from the pool and unaffected.
+    static let processPool = WKProcessPool()
 
     /// And on the view, for a site that has been told to expect a different browser — see
     /// `CanvasBrowserIdentity`. A whole user agent can only be set per view, so this is the second half

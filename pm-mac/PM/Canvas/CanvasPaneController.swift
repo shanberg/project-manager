@@ -1951,7 +1951,7 @@ extension CanvasPaneController: ProjectTabContent {
         // The pages the tab you came from was running for these cards come with you, as they were —
         // before the crossing starts, so the tiles fly in already showing them. See `CanvasPageHandover`.
         scroll.board.reclaimPages()
-        scroll.board.settlePageBudget()
+        scroll.board.landPageBudget()
         // **Lay the tiles out for the window this pane is coming back to.**
         //
         // A hidden pane cannot be re-tiled — it has no visible rectangle to fill, and

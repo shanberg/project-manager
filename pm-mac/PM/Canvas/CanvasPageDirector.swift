@@ -151,6 +151,28 @@ final class CanvasPageDirector {
         schedule.after(Self.settleDelay, work)
     }
 
+    /// Decide again now that a movement has ended — the tiles landed, a flight arrived, a tab came
+    /// forward. End of this turn, not `settleDelay` later.
+    ///
+    /// - `settle` waits for a gesture that may not be over; a landing is over by definition.
+    /// - Measured on a workspace switch: pages started ~1.1 s after the switch, ~0.75 s of that waiting
+    ///   on a view that had already stopped.
+    /// - Starting pages costs 3–17 ms of main thread per switch since pages share a process pool
+    ///   (`CanvasWebSession.processPool`); it was the 50–180 ms stall the delay used to hide.
+    /// - A crossing still going (the fade a frame behind the cards) is checked again every
+    ///   `crossingCheck` until it ends, cancelling any settle a card asked for mid-crossing.
+    func land() {
+        guard let stage else { return }
+        settleWork?.cancel()
+        settleWork = nil
+        landWork?.cancel()
+        landWork = nil
+        guard stage.isCrossing else { return review() }
+        let work = DispatchWorkItem { [weak self] in self?.land() }
+        landWork = work
+        schedule.after(Self.crossingCheck, work)
+    }
+
     func apply() {
         FrameMeter.span("pageBudget") { applyBody() }
     }
@@ -186,6 +208,8 @@ final class CanvasPageDirector {
     func pauseEverything() {
         settleWork?.cancel()
         settleWork = nil
+        landWork?.cancel()
+        landWork = nil
         if !live.isEmpty { Log.write("canvas pages paused: \(live.count)") }
         live = []
         keepWatching(false)
@@ -202,6 +226,8 @@ final class CanvasPageDirector {
         guard let stage, stage.hasWindow else { return pauseEverything() }
         settleWork?.cancel()
         settleWork = nil
+        landWork?.cancel()
+        landWork = nil
         let spared = CanvasPageBudget.liveWhileAway(among: candidates(), onScreen: stage.isOnScreen)
         if live != spared {
             Log.write("canvas pages paused: \(live.subtracting(spared).count), "
@@ -221,6 +247,8 @@ final class CanvasPageDirector {
     private func applyBody() {
         settleWork?.cancel()
         settleWork = nil
+        landWork?.cancel()
+        landWork = nil
         guard let stage, stage.hasWindow else { return }
         let candidates = candidates()
         // A tiled view is not a budget problem — every tile runs. See `CanvasPageBudget.liveWhileTiled`.
@@ -326,8 +354,12 @@ final class CanvasPageDirector {
     let schedule = Schedule()
 
     static let settleDelay: TimeInterval = 0.75
+    static let crossingCheck: TimeInterval = 0.05
     private static let heartbeatInterval: TimeInterval = 20
 
     private var reviewQueued = false
     private var settleWork: DispatchWorkItem?
+    /// A landing waiting out the end of a crossing. Apart from `settleWork` so a card asking mid-crossing
+    /// (which settles) cannot push the landing back to `settleDelay`.
+    private var landWork: DispatchWorkItem?
 }

@@ -140,6 +140,60 @@ final class CanvasPageDirectorTests: XCTestCase {
         XCTAssertEqual(card.live, true)
     }
 
+    /// A landing decides at the end of the turn: no `settleDelay` after a movement that has already
+    /// stopped. Cards that asked mid-crossing were waiting on a settle; the landing replaces it.
+    func testALandingDecidesThisTurnAndDropsTheSettle() {
+        let card = stage.add("a")
+        stage.isCrossing = true
+        director.review()
+        stage.isCrossing = false
+
+        director.land()
+        XCTAssertTrue(clock.delayed.allSatisfy { $0.work.isCancelled }, "the settle was dropped")
+        clock.runTurn()
+        XCTAssertEqual(card.live, true)
+    }
+
+    /// The fade can still be travelling a frame after the cards land; the landing waits for it in
+    /// short checks rather than a whole settle.
+    func testALandingMidCrossingChecksAgainUntilTheCrossingEnds() {
+        let card = stage.add("a")
+        stage.isCrossing = true
+
+        director.land()
+        clock.runTurn()
+        XCTAssertNil(card.live)
+        XCTAssertEqual(clock.delayed.map(\.delay), [CanvasPageDirector.crossingCheck])
+
+        clock.runDelayed()
+        XCTAssertNil(card.live, "still crossing")
+        XCTAssertEqual(clock.delayed.map(\.delay), [CanvasPageDirector.crossingCheck])
+
+        stage.isCrossing = false
+        clock.runDelayed()
+        clock.runTurn()
+        XCTAssertEqual(card.live, true)
+    }
+
+    /// A card asking while the landing waits out the fade settles, and that settle must not replace
+    /// the landing's short check.
+    func testACardAskingMidCrossingDoesNotPushTheLandingBack() {
+        let card = stage.add("a")
+        stage.isCrossing = true
+        director.land()
+        director.review()
+
+        let check = clock.delayed.first { $0.delay == CanvasPageDirector.crossingCheck }
+        XCTAssertEqual(check?.work.isCancelled, false, "the landing still checks back soon")
+
+        stage.isCrossing = false
+        check?.work.perform()
+        clock.runTurn()
+        XCTAssertEqual(card.live, true)
+        XCTAssertTrue(clock.delayed.filter { $0.delay == CanvasPageDirector.settleDelay }
+            .allSatisfy { $0.work.isCancelled }, "the decision dropped the card's settle")
+    }
+
     /// Each scroll pushes the decision back, so the board acts on where you stopped rather than on
     /// everywhere you passed through.
     func testEachSettleCancelsTheOneBeforeIt() {

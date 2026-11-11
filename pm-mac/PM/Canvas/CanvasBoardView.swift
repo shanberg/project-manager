@@ -1010,7 +1010,7 @@ final class CanvasBoardView: NSView {
             layoutNodeViews()
             overlay.needsDisplay = true
             needsDisplay = true
-            settlePageBudget()
+            landPageBudget()
             return
         }
         settleIntoLayout(seconds: seconds, timing: timing)
@@ -1039,7 +1039,7 @@ final class CanvasBoardView: NSView {
             // tidy-up pass, which is not animated, would drop every card on its mark mid-flight.
             guard let self, generation == settling else { return }
             layoutNodeViews()
-            settlePageBudget()
+            landPageBudget()
         }
     }
 
@@ -1108,6 +1108,7 @@ final class CanvasBoardView: NSView {
     func reviewPageBudget() { pages.review() }
     func settlePageBudget() { pages.settle() }
     func applyPageBudget() { pages.apply() }
+    func landPageBudget() { pages.land() }
     func pauseAllPages() { pages.pauseEverything() }
     func pauseIdlePages() { pages.pauseWhileAway() }
 
