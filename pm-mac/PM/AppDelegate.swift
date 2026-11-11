@@ -141,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reloadAllStores()
 
         // Reopen the projects that were open when the app was last quit.
-        windows.restoreOnLaunch()
+        if LayoutBench.isActive { LayoutBench.startIfAsked() } else { windows.restoreOnLaunch() }
 
         // Index projects and open tasks for Spotlight / Siri semantic search (macOS 15+; no-op below).
         PMSpotlight.reindex()

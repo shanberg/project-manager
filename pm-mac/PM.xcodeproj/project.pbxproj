@@ -512,6 +512,7 @@
 		E6B127AADEDAC13C797897D4 /* ProjectRendererMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0473C3A97FAFD880BAE5EFD0 /* ProjectRendererMemory.swift */; };
 		E7207615A5A4EA0940132AA6 /* WindowSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B93B124205F7B7EBB6253439 /* WindowSnapshot.swift */; };
 		E72FC312F57CA385A3CD74C8 /* CanvasContentBlocker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EF0D38D9DB80542D10BF94C /* CanvasContentBlocker.swift */; };
+		E7442DA8EC07858C96EF6E73 /* LayoutBench.swift in Sources */ = {isa = PBXBuildFile; fileRef = 057E253C55E181EA9793A03E /* LayoutBench.swift */; };
 		E798FC4283E0B4AEA1AD2B51 /* CanvasTidy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D574BBA43BD3B35293A5CE81 /* CanvasTidy.swift */; };
 		E7E72625A1DDBBC28E057302 /* FrameMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E973D36CA5E6F39110E907DE /* FrameMeter.swift */; };
 		E87A74E4DFF6B5ADD4D33CF7 /* TaskLineLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1827632D51602B8F2EAA6994 /* TaskLineLayout.swift */; };
@@ -570,6 +571,7 @@
 		03D61F922F8CA7E0774CC25B /* TaskMenuRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMenuRow.swift; sourceTree = "<group>"; };
 		0473C3A97FAFD880BAE5EFD0 /* ProjectRendererMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectRendererMemory.swift; sourceTree = "<group>"; };
 		053622CC7B04FF4A6B36E098 /* PMSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMSpotlight.swift; sourceTree = "<group>"; };
+		057E253C55E181EA9793A03E /* LayoutBench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutBench.swift; sourceTree = "<group>"; };
 		06CE7F2375F92C78D56D1662 /* CanvasTileCapsule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTileCapsule.swift; sourceTree = "<group>"; };
 		0800A6E26FE4509244BE8D3A /* CanvasLinkStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasLinkStatusTests.swift; sourceTree = "<group>"; };
 		090D85598854A8F62FD766A8 /* ProjectContentGroundTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectContentGroundTests.swift; sourceTree = "<group>"; };
@@ -1420,6 +1422,7 @@
 				EBBE74620B47E8414B209A08 /* FolioType.swift */,
 				E973D36CA5E6F39110E907DE /* FrameMeter.swift */,
 				8F5AF9B9F2692316AA0D48C8 /* HangWatchdog.swift */,
+				057E253C55E181EA9793A03E /* LayoutBench.swift */,
 				AE94A27BEC038FA8D6A21C77 /* Motion.swift */,
 				2E52B44B7F4AC0E0782F167C /* MouseMonitors.swift */,
 				32D3EAF7280E872B11710296 /* ObservationRelay.swift */,
@@ -1909,6 +1912,7 @@
 				5DD5AB6388B0EAE8942EB4FB /* ImmersiveStage.swift in Sources */,
 				DC1B98EADE02EE480B84CDD4 /* KeyCombo.swift in Sources */,
 				AA58C2295ED6D49DF8DEC01A /* KeyablePanel.swift in Sources */,
+				E7442DA8EC07858C96EF6E73 /* LayoutBench.swift in Sources */,
 				D56BC8BD1BB75F3818FC89FA /* LinkTitleLoader.swift in Sources */,
 				AD87754AE94FBD5626E38304 /* LiveSessionNote.swift in Sources */,
 				C1920D4ABB2E832B9F975126 /* Log.swift in Sources */,

@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import WebKit
 
 /// Telling a page from a blank web view, which is the whole of how a card decides it is ready.
 ///
@@ -99,5 +100,40 @@ final class CanvasPagePaintTests: XCTestCase {
         }
         image.unlockFocus()
         return image
+    }
+}
+
+/// The page's own word on whether it has painted, as `CanvasLinkNodeView.probeForPaint` asks it first.
+@MainActor
+final class CanvasPagePaintTimingTests: XCTestCase {
+
+    private func painted(_ html: String) async throws -> Bool {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.backgroundColor = .windowBackgroundColor
+        let web = WKWebView(frame: window.contentView!.bounds)
+        window.contentView!.addSubview(web)
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        web.loadHTMLString(html, baseURL: nil)
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            let answer = try? await web.evaluateJavaScript(CanvasPagePaint.paintedScript, in: nil, contentWorld: .defaultClient)
+            if answer as? Bool == true { return true }
+        }
+        return false
+    }
+
+    /// Text on the page is a contentful paint, and the app's script world can see the page's timeline.
+    func testTextIsAPaintTheAppCanSee() async throws {
+        let seen = try await painted("<p>Loading your file</p>")
+        XCTAssertTrue(seen)
+    }
+
+    /// An empty document never reports one, so the card falls back to the snapshot and the timer.
+    func testAnEmptyPageIsNot() async throws {
+        let seen = try await painted("<html><body></body></html>")
+        XCTAssertFalse(seen)
     }
 }

@@ -472,6 +472,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// waking up through the placeholder instead of through a picture. The session capture is not: it
     /// is a synchronous property read that cannot fail or be refused.
     private func freeze() {
+        LayoutBench.mark(node.id, "freeze")
         // Not while it is full screen: the view is in WebKit's window, not this card, and a paused video
         // there is still what you are looking at.
         guard let web, !freezing, web.fullscreenState == .notInFullscreen, lentTo == nil else { return }
@@ -701,6 +702,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     private func installScripts(in configuration: WKWebViewConfiguration, for host: String?) {
         CanvasAdvancedRules.attach(to: configuration, for: host)
         CanvasCardMedia.installScript(muted: isMuted, to: configuration)
+        LayoutBench.install(in: configuration, for: host)
     }
 
     /// Mute or unmute the page that is already on screen, and set the switch for the pages after it.
@@ -785,6 +787,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     }
 
     private func showPage(_ url: URL) {
+        LayoutBench.mark(node.id, "asked")
         let configuration = WKWebViewConfiguration()
         // Every card, on every board, and the sign-in window too — unless this card has been put on a
         // profile of its own, which is how one board holds two accounts. See `CanvasCardSession`.
@@ -872,7 +875,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         // transparent, and over a view drawing white it was no cover at all: a card whose server was
         // down flashed white on every retry. Alpha rather than `isHidden`, so WebKit still counts the
         // page as on screen and paints it for `probeForPaint`.
-        view.alphaValue = 0
+        view.alphaValue = LayoutBench.showsPagesAtOnce ? 1 : 0
         if let resumeState {
             // Puts the page, the scroll position and the back-forward list back as they were, and
             // starts the navigation itself — so no `load` here.
@@ -960,6 +963,26 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     private func probeForPaint() {
         guard !revealed, !probing, let web, web.bounds.width > 1, web.bounds.height > 1 else { return }
         probing = true
+        // The page's own word first: its first contentful paint is the moment it put something on the
+        // card, and it is the only judge that knows a loading screen from a blank one. Figma's is mostly
+        // white, so the snapshot read it as nothing and the card sat empty until the eight seconds ran
+        // out while Figma's own progress bar was already up. Asked from the app's script world, which
+        // reads the same document's timeline and is out of the page's reach.
+        web.evaluateJavaScript(CanvasPagePaint.paintedScript, in: nil, in: .defaultClient) { [weak self] (result: Result<Any, Error>) in
+            MainActor.assumeIsolated {
+                guard let self, !self.revealed else { self?.probing = false; return }
+                if case .success(let painted) = result, painted as? Bool == true {
+                    self.probing = false
+                    return self.revealPage()
+                }
+                self.probeSnapshot()
+            }
+        }
+    }
+
+    /// Whether the page has drawn anything, judged from a thumbnail: for a page that reports no paint.
+    private func probeSnapshot() {
+        guard !revealed, let web, web.bounds.width > 1, web.bounds.height > 1 else { probing = false; return }
         let wanted = WKSnapshotConfiguration()
         wanted.snapshotWidth = 48
         // The card, not the page: a tall page snapshotted whole would be mostly the part you cannot
@@ -1000,6 +1023,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     private static let revealDuration = 0.2
 
     private func revealPage() {
+        LayoutBench.mark(node.id, "reveal")
         giveUp?.cancel()
         giveUp = nil
         stopProbingForPaint()
@@ -1038,6 +1062,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     }
 
     private func tearDownPage() {
+        LayoutBench.mark(node.id, "teardown")
         giveUp?.cancel()
         giveUp = nil
         stopProbingForPaint()
@@ -1963,6 +1988,7 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
     /// reason the address is shown at all: during a single sign-on you are handed between hosts, and a
     /// password field is only safe to type into if you can see whose it is.
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        LayoutBench.mark(node.id, "commit")
         noteVisit()
         describeYourself()
         // There is a document now, so there is something to photograph: start asking whether it has
@@ -1976,6 +2002,7 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
     /// A card mid-navigation is otherwise indistinguishable from one sitting still — it goes on drawing
     /// the page it already had until the new one paints.
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        LayoutBench.mark(node.id, "start")
         // When it started, which is the whole of what `showsLoad` needs — and a nudge at the moment it
         // becomes worth saying, because a load that is *stuck* is exactly the one that will send no
         // further progress for the header to notice it on.
@@ -1988,6 +2015,7 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        LayoutBench.mark(node.id, "finish")
         loadingSince = nil
         CanvasHistory.record(webView.url, title: webView.title, profile: profile, counts: true)
         revealPage()

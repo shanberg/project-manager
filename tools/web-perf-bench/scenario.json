@@ -1,0 +1,83 @@
+{
+  "screen": {
+    "name": "LG UltraFine 5K (scaled 3200x1800)",
+    "width": 3200,
+    "height": 1800,
+    "scale": 2
+  },
+  "gap": 8,
+  "sites": {
+    "figmaA": {
+      "url": "https://www.figma.com/design/HYCoUh9uIyohJWdQzcmkWB/iOS-and-iPadOS-26--Community-?node-id=0-3329",
+      "ready": "canvas",
+      "notReady": "[class*='progress_bar--outer']"
+    },
+    "figmaB": {
+      "url": "https://www.figma.com/design/OL6yCcySrvUK4ujywtWDJi/Material-3-Design-Kit--Community-?node-id=55141-14251",
+      "ready": "canvas",
+      "notReady": "[class*='progress_bar--outer']"
+    },
+    "discordA": {
+      "url": "https://discord.com/channels/341414079673401346/549673720588009483",
+      "ready": "[data-list-id='chat-messages'] li",
+      "notReady": "[data-testid='app-spinner']"
+    },
+    "discordB": {
+      "url": "https://discord.com/channels/341414079673401346/431972835083419649",
+      "ready": "[data-list-id='chat-messages'] li",
+      "notReady": "[data-testid='app-spinner']"
+    }
+  },
+  "layouts": [
+    {
+      "name": "figma-pair",
+      "columns": [
+        [
+          "figmaA"
+        ],
+        [
+          "figmaB"
+        ]
+      ]
+    },
+    {
+      "name": "discord-pair",
+      "columns": [
+        [
+          "discordA"
+        ],
+        [
+          "discordB"
+        ]
+      ]
+    },
+    {
+      "name": "mixed-quad",
+      "columns": [
+        [
+          "figmaA",
+          "discordA"
+        ],
+        [
+          "figmaB",
+          "discordB"
+        ]
+      ]
+    },
+    {
+      "name": "figma-solo",
+      "columns": [
+        [
+          "figmaA"
+        ]
+      ]
+    }
+  ],
+  "rounds": 3,
+  "dwell": {
+    "settleSeconds": 8,
+    "readyTimeoutSeconds": 45,
+    "scrollSecondsPerTile": 3,
+    "quietSeconds": 2
+  }
+}

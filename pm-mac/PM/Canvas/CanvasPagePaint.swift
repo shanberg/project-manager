@@ -31,6 +31,12 @@ import AppKit
 /// A tolerance of 8 over 255 on any channel, so a gradient or a subpixel-antialiased edge on an
 /// otherwise empty page doesn't read as content.
 enum CanvasPagePaint {
+    /// True once the page has had its first contentful paint, by its own Paint Timing entry. Asked
+    /// before any snapshot: the page knows a loading screen from a blank view, and a mostly-white one
+    /// (Figma's) reads as blank to `hasSomethingOnIt`. Run in `.defaultClient`, out of the page's reach.
+    static let paintedScript =
+        "performance.getEntriesByType('paint').some(e => e.name === 'first-contentful-paint')"
+
     static func hasSomethingOnIt(_ image: NSImage) -> Bool {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return false }
         return hasSomethingOnIt(cg)
