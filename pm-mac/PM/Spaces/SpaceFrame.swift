@@ -214,7 +214,9 @@ final class SpaceFrame {
         var byID: [String: Row] = [:]
         var favorites: [Row] = [], pinned = Group(), today = Group()
         func folderOrder(_ id: String) -> Double? { document.node(id: id).flatMap(SpaceCardMarks.order) }
+        var sectioned = Set<String>()
         for section in sections {
+            if let frame = section.frame { sectioned.insert(frame) }
             var rows = section.items.compactMap(row)
             for row in rows { byID[row.id] = row }
             // A card in the layout up is in front there, under the layout's row; here it's only on screen.
@@ -236,7 +238,8 @@ final class SpaceFrame {
         }
         // A folder with nothing in it yet (one just made) is still a folder: it shows among Today's,
         // where a card dropped on it goes.
-        let listed = Set(pinned.folders.map(\.id) + today.folders.map(\.id))
+        // Not one whose cards are all under layouts: it has nothing to list.
+        let listed = Set(pinned.folders.map(\.id) + today.folders.map(\.id)).union(sectioned)
         for node in document.nodes where node.isGroup && !listed.contains(node.id) {
             guard case .group(let label, _, _) = node.content else { continue }
             today.folders.append(Folder(id: node.id, label: label ?? "Folder", rows: [],
@@ -295,9 +298,10 @@ final class SpaceFrame {
         heldInPlayer = heldInPlayer.filter { id in everyRow.contains { $0.id == id && !$0.showing } }
         player = everyRow.first { $0.playing && !$0.showing } ?? everyRow.first { heldInPlayer.contains($0.id) }
         guard let spaceID else {
-            // A project's board: nothing archives, and its colour is the project's.
+            // A project's board: nothing archives, and its colour is the project's. Its cards move to
+            // any space, as a space's do.
             archiveAfter = nil
-            otherSpaces = []
+            otherSpaces = Spaces.shared.all.map { ($0.id, $0.title) }
             spaceTitle = ""
             washColor = project?.color
             spaceColor = Color(nsColor: washColor?.nsColor ?? .systemGray)
@@ -407,7 +411,7 @@ final class SpaceFrame {
         if case .link(let url) = node.content { address = url }
         let edges = store.document.edges.filter { $0.fromNode == node.id || $0.toNode == node.id }
         CanvasHistory.didClose(.init(address: address, spaceID: spaceID, canvas: canvas, cardID: node.id,
-                                     node: node, edges: edges, archiveEntry: entry))
+                                     node: node, edges: edges, archiveEntry: entry, projectKey: project?.projectKey))
     }
 
     /// A card taken off the screen but still on the board, for ⇧⌘T: shown again.
@@ -416,7 +420,8 @@ final class SpaceFrame {
         if case .link(let url)? = store.document.node(id: id)?.content {
             address = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL?.absoluteString ?? url
         }
-        CanvasHistory.didClose(address, card: id, canvas: canvas, inSpace: spaceID)
+        CanvasHistory.didClose(.init(address: address, spaceID: spaceID, canvas: canvas, cardID: id,
+                                     projectKey: project?.projectKey))
     }
 
     /// When each card was last on screen, by space and card. A card first seen now counts from now.
@@ -484,11 +489,7 @@ final class SpaceFrame {
         refresh()
     }
 
-    func moveToSpace(_ id: String, _ target: String) {
-        guard let spaceID else { return }
-        Spaces.shared.move(id, from: spaceID, to: target)
-        refresh()
-    }
+    func moveToSpace(_ id: String, _ target: String) { moveToSpace([id], target) }
 
     /// A second card on the page this one has got to, with its back list (`openPageAsNewCard`).
     func duplicate(_ id: String) {
@@ -963,8 +964,13 @@ final class SpaceFrame {
         }
     }
 
+    /// Off this board — a space's or a project's — onto the space's, as Today. Out of its layouts first,
+    /// which go with their last card.
     func moveToSpace(_ ids: [String], _ target: String) {
         guard let to = Spaces.shared.canvas(of: target) else { return }
+        for name in Set(ids.flatMap { id in layoutCardsNow.filter { $0.cards.contains(id) }.map(\.name) }) {
+            removeFromLayout(ids, name)
+        }
         if !FileManager.default.fileExists(atPath: to.path) { try? Spaces.shared.makeCanvas(at: to) }
         picked = []
         Spaces.shared.move(ids, fromCanvas: canvas, toCanvas: to) { [weak self] in self?.refresh() }

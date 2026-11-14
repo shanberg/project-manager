@@ -21,7 +21,7 @@ Rebuilt 2026-11-04 on workspaces (`Spaces`, `SpaceModel`). The first build, a br
 - Comes back at launch with the other windows (Settings' Restore).
 - Web cards in a space use the shared sign-ins, or a card's own Session; there's no per-space store.
 - Spaces from the first build: their tabs became web cards in a row on the new board, once (`Spaces.carryOverTabs`).
-- Links from other apps (Folio as the default browser) go to a space whenever one exists: the space whose window is furthest forward, else the one last in front (`Spaces.lastUsed`), else the first. The card on that address if the space has one, else a new card in Today, shown. With no spaces, the front window's board as before.
+- Links from other apps (Folio as the default browser) go to a space whenever one exists: the space whose window is furthest forward, else the one last in front (`Spaces.lastUsed`), else the first. The card on that address if the space has one, else a new card in Today, shown. With no spaces, the front window: under its frame, as a space's (the card on that address, else a new one in Cards, shown); a window without one, its board as before (2026-11-13).
 
 ## The frame
 
@@ -131,7 +131,7 @@ Built 2026-11-05.
 - History: `~/.config/pm/history.json`, one row per address (title, last visit, count), newest 10,000 kept (`CanvasHistory`). Recorded on a card's finished load and on title changes (sites that move without loading). Not from a Private card; http and https only.
 - History menu: Reopen Closed Card (⇧⌘T), Show All History (⌘Y), Archived Cards… (the front window's, a space's or a project's; off when the front window has no frame), the last 15 pages, Clear History… (all, or today).
 - History window: search, pages by day, Open / Copy Address / Remove from History; double-click opens. Opening a page goes where links from other apps go.
-- ⇧⌘T: the last card closed (§ Closing) or taken out of a layout, this run only, 50 kept. Still on the board (a pinned card, Keep, ⌘Z): shown again. Gone: put back as it was, any kind of card, with its lines, and out of Archived Cards; a web card at the page it had got to. A board without a frame: a new card on the address. A project's window must be open.
+- ⇧⌘T: the last card closed (§ Closing) or taken out of a layout, this run only, 50 kept. Still on the board (a pinned card, Keep, ⌘Z): shown again. Gone: put back as it was, any kind of card, with its lines, and out of Archived Cards; a web card at the page it had got to. A board without a frame: a new card on the address. A project's closed window is opened first (`Closed.projectKey`, `whenFramed`).
 - File ▸ Print… (⌘P) and Export as PDF…: the page you're in, else the focused tile's, else the one selected web card. Paged to the paper's width.
 - Clear: on the rule above Today while the pointer is in the sidebar; every Today card off the board (⌘Z brings them back). Pinned and favourites stay.
 - Archive (the rule's or the space name's menu, per space, `Space.archiveAfter`): Never, 12 hours, a day, a week, 30 days. A Today card not on screen (and not playing) for that long goes, checked at most once a minute. When a card was last on screen: `PMSpaceCardSeen`, by space and card; a card first seen counts from then.
@@ -142,9 +142,9 @@ Built 2026-11-05.
   - Archived Cards window (`SpaceArchive.present(spaceID:)`): one per space, brought forward if open. Search (title, address), by day newest first; favicon or the card's symbol, title, reason · address, time. Restore (↩, double-click, or the menu), Copy Address, Remove from Archive; Clear Archive… (asks). Empty: No archived cards.
   - Restore: the card back as it was, unpinned, at the top of Today, right of everything on the board; one undo step (Restore Card) on that board; the entry goes. Shown when the board's window is open. A card still on the board (⌘Z) is left as it is.
 - Downloads: Window ▸ Downloads (⌥⌘L) and an arrow at the sidebar's foot (a ring while one runs, a dot when one has finished). Progress while running; click opens, the magnifier shows in Finder, a row drags out as the file. Newest 30 kept (`PMRecentDownloads`). Clear forgets finished rows; files stay.
-- A row's menu: Copy Address, Duplicate (the page it's at, with its back list), Mute / Unmute (the card's own Mute), Move to Space ▸ (off this board, onto the other's as Today, unpinned), or drag the row onto the space's dock mark.
+- A row's menu: Copy Address, Duplicate (the page it's at, with its back list), Mute / Unmute (the card's own Mute), Move to Space ▸ (off this board, a space's or a project's, onto the space's as Today, unpinned; out of its layouts first), or drag the row onto the space's dock mark.
 - ⇧-click a link, in a space or (since 2026-11-05) a project: a preview over the window, Arc's Peek (`CanvasLinkPreview`). Same sign-ins, blocking and scripts as the card. Open as Card (⌘↩) makes it a Today card in front; Esc, ✕ or a click outside drops it. Links inside stay in the preview.
-- The hovered link's status says what ⌘ (a new tab in a space, a new card elsewhere) and ⇧ (a preview) do.
+- The hovered link's status says what ⌘ (a new tab under a frame, a space's or a project's; a new card on a board without one) and ⇧ (a preview) do.
 - Mini player at the sidebar's foot: a card making sound that isn't on screen, or one it paused until that card is shown. Click goes to the card; play/pause; picture in picture (the page's largest video); ✕ pauses and hides it.
 - Page menu: Show Reader (⇧⌘R) — the page's article (`<article>`, `<main>`, or the block with the most paragraph text) over the page in plain type; again, Esc or Close Reader takes it away (`CanvasReader`). Mute Page. More Page Commands ▸ Copy Address.
 - ⇧⌘C under a frame, a space's or a project's: the page's address on the pasteboard, as Arc's. Windows without a frame keep Canvas in New Window.
@@ -261,6 +261,7 @@ Built 2026-11-06.
 - `>` with New Project, New Space, Settings or Take Notes for This Meeting selected: no session preview under the rows, and no project name in the hint (`PMCommand.actsOnFocusedProject`).
 - `@`: spaces after the projects. Empty field: recent projects, then spaces, 7 rows in all. Typed: projects that match, then spaces whose name starts with it, then spaces with a word that does (`SpaceOrder.matching`).
 - `@` with nothing matching: New Project… and New Space “<typed>”.
+- A project row with a page carried in from a browser (2026-11-13): under the project's frame, the card on that address or a new one in Cards, shown in the tile you're in; without a frame, into a workspace as before.
 - A space row: goes to it. With a page carried in from a browser: the page goes into that space as a link from another app does.
 - Not while the bar picks a project for something (Services ▸ Send to Project): no spaces, no New Space.
 

@@ -45,6 +45,13 @@ enum CanvasIncomingLinks {
         let front = NSApp.orderedWindows.lazy
             .compactMap { $0.windowController as? ProjectWindowController }.first
             ?? WindowManager.shared.openFocusedProject()
+        // Under the frame: a card in Cards shown in the tile you're in, as a space's.
+        if front.spaceFrame != nil || (ProjectSplitViewController.projectFramesOn && front.projectKey != nil) {
+            front.show()
+            return front.whenFramed(otherwise: { onBoard(of: front) { $0.openIncomingLink(url.absoluteString) } }) {
+                $0.openIncoming(url.absoluteString)
+            }
+        }
         onBoard(of: front) { $0.openIncomingLink(url.absoluteString) }
     }
 
@@ -55,6 +62,11 @@ enum CanvasIncomingLinks {
     /// own; the card keeps its tile in the workspace, so Bring Back has somewhere to put it.
     static func open(_ url: URL, inProject key: String, inNewWindow: Bool) {
         let window = WindowManager.shared.open(projectKey: key)
+        // Under the frame there's no tab row to pick a workspace from: a card in Cards, shown in the
+        // tile you're in, as a space's.
+        if !inNewWindow, ProjectSplitViewController.projectFramesOn {
+            return window.whenFramed(otherwise: { NSSound.beep() }) { $0.openIncoming(url.absoluteString) }
+        }
         window.showWorkspaceForIncomingPage()
         // A window just opened, or just switched tabs, builds its board on the next pass, and a
         // workspace lays its tiles out a turn or more after that.

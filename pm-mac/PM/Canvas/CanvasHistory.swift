@@ -149,6 +149,8 @@ enum CanvasHistory {
         var edges: [CanvasEdge] = []
         /// Its entry in Archived Cards, which goes when the card comes back.
         var archiveEntry: String? = nil
+        /// The project whose board it was on, so ⇧⌘T can open its window.
+        var projectKey: String? = nil
     }
 
     private(set) static var closed: [Closed] = []

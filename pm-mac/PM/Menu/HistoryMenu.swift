@@ -71,6 +71,11 @@ final class HistoryMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
             window.window?.makeKeyAndOrderFront(nil)
             return frame.reopen(closed)
         }
+        // Its project's window closed: opened, then the card put back once its frame is up.
+        if let key = closed.projectKey {
+            let window = WindowManager.shared.open(projectKey: key)
+            return window.whenFramed { $0.reopen(closed) }
+        }
         guard ProjectWindowController.reopen(closed) else { return NSSound.beep() }
     }
 
