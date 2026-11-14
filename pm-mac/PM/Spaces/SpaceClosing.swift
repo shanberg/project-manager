@@ -25,10 +25,11 @@ enum SpaceClosing {
     /// The card in front, if it closes, goes as a browser's tab does:
     /// - a tab in a tile of several: the tab of that tile in front most lately comes forward;
     /// - a tile among others (a split): the tile goes and the layout closes up, as Arc's;
-    /// - the only tile: the card in front before it, from anywhere on the board, takes its slot.
+    /// - the only tile: the card in front before it, from anywhere on the board, takes its slot —
+    ///   unless `fillsSlot` is false (a named layout, whose cards are its own: § Cards in layouts).
     /// With nothing remembered, the layout's own rule: the neighbouring tab or tile, or the board.
     static func plan(closing ids: [String], front: String?, tiling: CanvasTileSession, recent: [String],
-                     exists: (String) -> Bool) -> Plan {
+                     fillsSlot: Bool = true, exists: (String) -> Bool) -> Plan {
         let up = ids.filter(tiling.cards.contains)
         guard !up.isEmpty else { return Plan(replace: nil, leave: [], next: nil) }
         let going = Set(ids)
@@ -40,7 +41,7 @@ enum SpaceClosing {
                 next = nextFront(closing: closingFront, recent: recent, tabs: tabs) {
                     exists($0) && !going.contains($0)
                 }
-            } else if tiling.ids.count == 1 {
+            } else if tiling.ids.count == 1, fillsSlot {
                 next = nextFront(closing: closingFront, recent: recent, tabs: []) {
                     exists($0) && !going.contains($0) && !tiling.cards.contains($0)
                 }
@@ -78,3 +79,35 @@ enum SpaceClosing {
     }
 }
 
+/// Cards in layouts (docs/spaces.md § Cards in layouts): an unpinned card lives in one place, Today /
+/// Cards or one layout; a card in two layouts is pinned. The decisions, apart from the sidebar.
+enum SpaceLayoutCards {
+    /// The layouts holding each card, in the order given (the sidebar's).
+    static func membership(_ layouts: [(name: String, cards: [String])]) -> [String: [String]] {
+        var held: [String: [String]] = [:]
+        for layout in layouts {
+            for id in Set(layout.cards) { held[id, default: []].append(layout.name) }
+        }
+        return held
+    }
+
+    /// Unpinned cards in two or more layouts, which are pinned for you. `exempt`: the project's notes.
+    static func toPin(_ held: [String: [String]], isPinned: (String) -> Bool, exempt: String? = nil) -> [String] {
+        held.filter { $0.value.count > 1 && $0.key != exempt && !isPinned($0.key) }.keys.sorted()
+    }
+
+    /// The layouts a card has joined since `before`.
+    static func joined(_ id: String, now: [String: [String]], before: [String: [String]]) -> [String] {
+        let was = Set(before[id] ?? [])
+        return (now[id] ?? []).filter { !was.contains($0) }
+    }
+
+    /// The layouts left with no cards once `going` have left them (cards gone from the board count as
+    /// gone).
+    static func emptied(by going: Set<String>, layouts: [(name: String, cards: [String])],
+                        exists: (String) -> Bool) -> [String] {
+        layouts.filter { layout in
+            !layout.cards.isEmpty && layout.cards.allSatisfy { going.contains($0) || !exists($0) }
+        }.map(\.name)
+    }
+}

@@ -161,7 +161,7 @@ Decided 2026-11-13: a tile is a tab. Spaces and projects alike (`SpaceFrame.clos
 - What comes forward, as a browser closing a tab (`SpaceClosing.plan`):
   - a tab in a tile of several: the tab of that tile in front most lately;
   - a tile among others: the tile goes and the layout closes up, as Arc's split;
-  - the only tile: the card in front before it, into its slot;
+  - the only tile of an unnamed tiling: the card in front before it, into its slot; a named layout's slot is never filled from outside it (§ Cards in layouts);
   - nothing remembered: the neighbouring tab or tile, else the board.
 - Toast at the window's foot after an unpinned close (`CanvasToast`): Closed “<name>” (or Closed N Cards), Undo, Keep in Space / Keep in Project.
   - Undo: the cards back as they were, and the layout if nothing has changed it since (else the first card shown). Out of Archived Cards and ⇧⌘T.
@@ -169,6 +169,29 @@ Decided 2026-11-13: a tile is a tab. Spaces and projects alike (`SpaceFrame.clos
   - Stays while the pointer is on it; goes 5s after it leaves, on a button, or when another toast or HUD line comes. Fades in and out.
 - Remove from Layout and Remove Tile from Layout (a tile's menu, View): out of the layout only, the card stays on the board.
 - Windows without a frame (a file that's neither, `PMProjectFrameOff`): ✕ and ⌘W only take the tile out of the layout, as before.
+
+## Cards in layouts
+
+Decided 2026-11-13 in `.claude/mocks/folio-layout-cards.html`; built the same day (`SpaceLayoutCards`, `SpaceFrame.autoPin`, `removeFromLayout`). Spaces and projects alike.
+
+- An unpinned card lives in one place: Today / Cards, or one layout.
+- A layout's own cards are rows under the layout's row, and nowhere else. Arc's split.
+- A card used in a second layout is pinned. A pinned card can be in any number of layouts.
+- Under each layout using it, a pinned card is a row with a pin mark at its end. Its own row is in Pinned.
+- A pinned card's row in Pinned: a layout mark with a count (no count for one). Click: that layout, the card in front; with two or more, a menu of them.
+- Layouts are pinned: rows at the head of Pinned, always.
+- Only the layout on screen is unfolded. A folded layout row shows its tiles' icons.
+- Click a row under a layout: that layout, that tile in front. Click a row in Pinned or Today: the card alone (`openAlone`).
+- Add to Layout (a row's menu, or a drag onto a layout row or its tiles): an unpinned card moves under that layout, out of Today / Cards. One already in a layout is pinned, and a toast says so: Pinned “<name>”: it’s in 2 layouts, with Undo.
+- Move to Today / Cards (a row's menu, or dragging it out): out of the layout.
+- Close a layout's own card: as § Closing; Keep puts it back under its layout. Close a pinned card under a layout: Remove from “<layout>”, it leaves that layout only.
+- A layout whose last card goes goes too (`dropEmptiedWorkspace`, no question); ⌘Z brings it back, and so do the close toast's Undo and Keep. Closing the last card of the layout on screen shows the card in front before it, alone.
+- Unpin a card two or more layouts use: dimmed, “Unpin (used in Dashboard, Reading)”. Used by one: it then lives under that layout. By none: Today / Cards.
+- A project's notes card: as a pinned card, never under a layout as its own. The Notes layout isn't a layout row.
+- The layout on screen is read as its board has it; the others as saved. A card in front in the layout on screen is the front row under it; its Pinned row is only on screen.
+- Cards under a layout aren't in ⌘1…9, ⌃⇥ or ⇧-click runs: the layout's row is. They never auto-archive.
+- The auto-pin's Undo: the card out of the layouts it had just joined, and unpinned. The first look at a board after launch pins shared cards quietly.
+- Existing boards, once: a card in two or more layouts is pinned; an unpinned card in one layout leaves Today / Cards for it.
 
 ## Adding cards from the sidebar
 

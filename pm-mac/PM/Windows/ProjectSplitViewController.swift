@@ -1065,6 +1065,23 @@ final class ProjectSplitViewController: NSSplitViewController {
                               redo: { $0.dropWorkspace(named: name) })
     }
 
+    /// A layout whose last card has gone — closed, or taken out of it (docs/spaces.md § Cards in
+    /// layouts): gone without asking, as an Arc split goes with its last tab. ⌘Z puts it back, from
+    /// `tiling` as it was before.
+    func dropEmptiedWorkspace(named name: String, was tiling: CanvasViewState.Tiling?) {
+        dropWorkspace(named: name)
+        guard let tiling else { return }
+        registerWorkspaceStep("Close Layout",
+                              undo: { $0.putWorkspace(tiling, named: name, opening: false) },
+                              redo: { $0.dropWorkspace(named: name) })
+    }
+
+    /// A layout a close took with it, back: the close toast's Undo and Keep.
+    func putBackWorkspace(_ tiling: CanvasViewState.Tiling, named name: String) {
+        guard let url = canvasSource().url, !CanvasWorkspaces.exists(name, of: url) else { return }
+        putWorkspace(tiling, named: name, opening: false)
+    }
+
     /// The delete itself: the workspace and its chips gone, with no question and no undo step.
     private func dropWorkspace(named name: String) {
         guard let url = canvasSource().url else { return }
