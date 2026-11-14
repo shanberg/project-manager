@@ -1654,7 +1654,7 @@ extension CanvasBoardView {
     /// Close Tab, or Close 3 Tabs: out of the workspace, the cards left on the board.
     @objc func closeMenuTabs(_ sender: Any?) {
         guard let id = menuTile else { return }
-        closeInTiling(tabGroup(for: id))
+        closeCards(tabGroup(for: id))
     }
 
     /// Right-clicking a strip anywhere but on a tab: the tile's menu. What can go into it first — a new
@@ -1693,7 +1693,7 @@ extension CanvasBoardView {
     /// Every tab in the right-clicked one's tile but it.
     @objc func closeOtherMenuTabs(_ sender: Any?) {
         guard let id = menuTile, let tiling else { return }
-        closeInTiling(tiling.tabs(of: id).filter { $0 != id })
+        closeCards(tiling.tabs(of: id).filter { $0 != id })
     }
 
     /// The right-clicked strip's whole tile, every tab of it, out of the view.

@@ -789,6 +789,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         pane.board.opensNewTab = spaceFrame == nil ? nil : { [weak self] address, front in
             self?.spaceFrame?.openNewCard(address, showing: front)
         }
+        pane.board.closesCards = spaceFrame == nil ? nil : { [weak self] ids in self?.spaceFrame?.close(ids) }
         pane.onFrontPageChanged = { [weak self] in self?.spaceFrame?.frontChanged() }
         pane.onTilingChanged = { [weak self] in
             self?.refreshTabModel()

@@ -146,6 +146,7 @@
 		402094994D6C9FE19DED3601 /* WindowDragView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83C040A2290C645914C9A466 /* WindowDragView.swift */; };
 		41B9DEAC817E7DFD3C744F40 /* CanvasTileCarryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0417E3490F8A367E9A3FF67 /* CanvasTileCarryTests.swift */; };
 		41E0C9332A3B58A1D0FF62EA /* SpaceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26CCD9F4DE85780DF4369CB2 /* SpaceSettings.swift */; };
+		42480FA4ADD36788733491BE /* SpaceClosingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05437D4834F11F7F9314BA70 /* SpaceClosingTests.swift */; };
 		4464FDACBB3036114607AB8C /* CanvasPageDirector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1110F98AE94B9C2A4600D870 /* CanvasPageDirector.swift */; };
 		44CC6CD4EF657AFAD7AA486E /* CanvasStoreRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5DCD6578456BB1EDE344CF4 /* CanvasStoreRegistry.swift */; };
 		45DD25433C054305789627E1 /* CanvasLinkZonesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFAC2997B70435B617C7322E /* CanvasLinkZonesTests.swift */; };
@@ -227,6 +228,7 @@
 		6928D4167DAD7A53AF2177F8 /* CanvasNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 638B1B5554C563993A9A241C /* CanvasNavigation.swift */; };
 		6A02BDACC60D2013AD7DCD81 /* ObsidianLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17912D894364C3FC66AC8134 /* ObsidianLink.swift */; };
 		6AA3D09C8E9E32EA80368753 /* TokenText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99C570936D1A1391DEB446C1 /* TokenText.swift */; };
+		6ACF3D567093E65574FD7B25 /* SpaceClosing.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF477B6A226101B7D7388B5A /* SpaceClosing.swift */; };
 		6BD5C8D351D6E2583686C75C /* CanvasExistingCardsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C771B484D30A90938391A4F /* CanvasExistingCardsTests.swift */; };
 		6CDCB9D6554AC24464A08044 /* CanvasSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7963646EDFE60D73D2417458 /* CanvasSearchTests.swift */; };
 		6CF1E5F502EA45F0E6D47671 /* CanvasLinkDropTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54172B99BA97A1ADEED78728 /* CanvasLinkDropTests.swift */; };
@@ -438,6 +440,7 @@
 		C91733537C319EF059B04FDC /* SettingsControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7EC3750E3CD74DF2702A0AE /* SettingsControls.swift */; };
 		C931E53458F447617D187FA4 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D21CEAF17AC4CFEA6D38A99 /* NotificationManager.swift */; };
 		C999074851038AB74E38F3D7 /* DueBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65950860262038F37EFA373 /* DueBadge.swift */; };
+		C9E1883DCC19E288BB148BA2 /* SpaceClosing.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF477B6A226101B7D7388B5A /* SpaceClosing.swift */; };
 		C9E966262C9254FED6D53571 /* ProjectContentPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ECFDF5D89C4016A603F2DEF /* ProjectContentPane.swift */; };
 		CA4CB349CDB748A305F51EDD /* QuickBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8D6887BB1AC952591EA84A3 /* QuickBarController.swift */; };
 		CA9F764467F88E876656F87D /* CanvasRowDropCatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 036D6A017A744D7DB5953F3D /* CanvasRowDropCatcher.swift */; };
@@ -571,6 +574,7 @@
 		03D61F922F8CA7E0774CC25B /* TaskMenuRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMenuRow.swift; sourceTree = "<group>"; };
 		0473C3A97FAFD880BAE5EFD0 /* ProjectRendererMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectRendererMemory.swift; sourceTree = "<group>"; };
 		053622CC7B04FF4A6B36E098 /* PMSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMSpotlight.swift; sourceTree = "<group>"; };
+		05437D4834F11F7F9314BA70 /* SpaceClosingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceClosingTests.swift; sourceTree = "<group>"; };
 		057E253C55E181EA9793A03E /* LayoutBench.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutBench.swift; sourceTree = "<group>"; };
 		06CE7F2375F92C78D56D1662 /* CanvasTileCapsule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTileCapsule.swift; sourceTree = "<group>"; };
 		0800A6E26FE4509244BE8D3A /* CanvasLinkStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasLinkStatusTests.swift; sourceTree = "<group>"; };
@@ -994,6 +998,7 @@
 		FB98746EBDDA3B6B0491156B /* CanvasPageHandoverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasPageHandoverTests.swift; sourceTree = "<group>"; };
 		FC91C59007ABC53958980A0C /* RowSelectionBand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RowSelectionBand.swift; sourceTree = "<group>"; };
 		FCC72D30EB9E944089C22D2F /* WaitingWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaitingWindowController.swift; sourceTree = "<group>"; };
+		FF477B6A226101B7D7388B5A /* SpaceClosing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceClosing.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1132,6 +1137,7 @@
 				79BED95E0E18D18163947229 /* SpaceArchiveWindow.swift */,
 				8F00187B4D5A74D5D80661B5 /* SpaceCardKinds.swift */,
 				7ECF6593D982366B529E8BEB /* SpaceCardMarks.swift */,
+				FF477B6A226101B7D7388B5A /* SpaceClosing.swift */,
 				1BA91AF42671A0BAA13697EE /* SpaceDockCard.swift */,
 				9EB80D0E303077FED4728835 /* SpaceFrame.swift */,
 				43B1FB7602D9B9AFC9A92410 /* SpaceModel.swift */,
@@ -1588,6 +1594,7 @@
 				95860C36530F5CD38188EE26 /* SpaceArchiveTests.swift */,
 				BC6C653238CDC6A94A1922AB /* SpaceCardKindsTests.swift */,
 				6B2DD491BB71B6E2CACA119B /* SpaceCardMarksTests.swift */,
+				05437D4834F11F7F9314BA70 /* SpaceClosingTests.swift */,
 				43E40B7A425C60A322FB5BBA /* SpaceModelTests.swift */,
 				D33DF155DB315F92FFEE5F26 /* SpaceRowDragTests.swift */,
 				7C83138169424E7CE3A881B7 /* Stubs.swift */,
@@ -1995,6 +2002,7 @@
 				10FF9EAAE7784883ED1186AB /* SpaceArchiveWindow.swift in Sources */,
 				532350DDA4508E2CB286394C /* SpaceCardKinds.swift in Sources */,
 				6EC544B6373563B1B25ACE31 /* SpaceCardMarks.swift in Sources */,
+				C9E1883DCC19E288BB148BA2 /* SpaceClosing.swift in Sources */,
 				1345161EAE04A6F91F8C59D6 /* SpaceDockCard.swift in Sources */,
 				2A32707C2FA6ED1B9CBBEA8A /* SpaceFrame.swift in Sources */,
 				0951ED1A45B7EF4530A3FDE7 /* SpaceModel.swift in Sources */,
@@ -2267,6 +2275,8 @@
 				C598FBF1AC2F21ACCEA300DB /* SpaceCardKindsTests.swift in Sources */,
 				3363D0FE9D6126AFDDED14FE /* SpaceCardMarks.swift in Sources */,
 				D5420BA45B0CE2EA61C744B3 /* SpaceCardMarksTests.swift in Sources */,
+				6ACF3D567093E65574FD7B25 /* SpaceClosing.swift in Sources */,
+				42480FA4ADD36788733491BE /* SpaceClosingTests.swift in Sources */,
 				3A87569A4ACE823EC2BC8684 /* SpaceModel.swift in Sources */,
 				E1B80B889011F8364B6B46DB /* SpaceModelTests.swift in Sources */,
 				0C8C6E6240C113A93B44DEA6 /* SpaceRowDragTests.swift in Sources */,

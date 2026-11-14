@@ -310,8 +310,8 @@ final class CanvasTileControls {
         later()
     }
 
-    /// Out of the layout, as ⌘W: the card stays on the board (and a space's sidebar); ⌘Z or ⇧⌘T puts
-    /// it back.
+    /// Close, as ⌘W: under a frame, the card closed as a tab (`SpaceFrame.close`); elsewhere out of the
+    /// layout, the card left on the board. ⌘Z or ⇧⌘T puts it back.
     func outOfLayout() {
         guard let board, let tile else { return }
         let frame = self.frame
@@ -459,7 +459,7 @@ struct CanvasTileControlsView: View {
                 icon(model.maximized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                      model.maximized ? "Restore (⌥⌘↩)" : "Maximize (⌥⌘↩)") { controls.toggleMaximize() }
             }
-            icon("xmark", "Out of the Layout (⌘W)") { controls.outOfLayout() }
+            icon("xmark", model.inSpace ? "Close (⌘W)" : "Out of the Layout (⌘W)") { controls.outOfLayout() }
             MoreButton(controls: controls)
                 .frame(width: 26, height: 26)
                 .help("More")

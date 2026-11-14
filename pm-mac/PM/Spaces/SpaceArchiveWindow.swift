@@ -4,13 +4,13 @@ import SwiftUI
 
 /// Restoring an archived card, and the Archived Cards window. docs/spaces.md § Archived cards.
 extension SpaceArchive {
-    /// The card back on its space's board — unpinned, at the top of Today — and the entry gone. One
-    /// undo step on that board. Shown when the space's window is open.
+    /// The card back on its board — unpinned, at the top of Today / Cards — and the entry gone. One
+    /// undo step on that board. Shown when the board's window is open.
     func restore(entryID: String) {
         guard let entry = entries.first(where: { $0.id == entryID }), let card = entry.card,
-              let canvas = Spaces.shared.canvas(of: entry.spaceID) else { return NSSound.beep() }
-        if !FileManager.default.fileExists(atPath: canvas.path) { try? Spaces.shared.makeCanvas(at: canvas) }
-        let spaceID = entry.spaceID
+              let canvas = Self.canvas(forKey: entry.spaceID) else { return NSSound.beep() }
+        let isSpace = !entry.spaceID.hasPrefix("canvas:")
+        if isSpace, !FileManager.default.fileExists(atPath: canvas.path) { try? Spaces.shared.makeCanvas(at: canvas) }
         // The board read off main when it isn't open, as `Spaces.move`.
         CanvasStoreRegistry.withStores([canvas]) { [weak self] stores in
             guard let self, let store = stores.first else { return NSSound.beep() }
@@ -18,7 +18,8 @@ extension SpaceArchive {
             store.change("Restore Card") { id = Self.place(card, into: &$0) }
             store.save()
             remove([entryID])
-            guard let window = Spaces.shared.window(of: spaceID), window.isVisible,
+            CanvasHistory.forgetClosed(cards: [id])
+            guard let window = Self.window(onCanvas: canvas), window.isVisible,
                   let frame = window.spaceFrame else { return }
             frame.refresh()
             frame.show(id)
@@ -28,7 +29,28 @@ extension SpaceArchive {
 
     /// The Archived Cards window for a space: one per space, brought forward.
     static func present(spaceID: String) {
-        SpaceArchiveWindows.shared.show(spaceID)
+        guard let space = Spaces.shared.space(spaceID) else { return NSSound.beep() }
+        SpaceArchiveWindows.shared.show(spaceID, title: space.title)
+    }
+
+    /// The Archived Cards window for any framed board — a space's or a project's.
+    static func present(_ frame: SpaceFrame) {
+        if let spaceID = frame.spaceID { return present(spaceID: spaceID) }
+        SpaceArchiveWindows.shared.show(key(spaceID: nil, canvas: frame.canvasURL), title: frame.boardTitle)
+    }
+
+    /// The board file a key names (`key(spaceID:canvas:)`).
+    static func canvas(forKey key: String) -> URL? {
+        if key.hasPrefix("canvas:") { return URL(fileURLWithPath: String(key.dropFirst("canvas:".count))) }
+        return Spaces.shared.canvas(of: key)
+    }
+
+    /// The window open on a board file, if any.
+    static func window(onCanvas canvas: URL) -> ProjectWindowController? {
+        let target = canvas.standardizedFileURL
+        return WindowManager.shared.controllers.first {
+            $0.openedCanvas?.standardizedFileURL == target && !$0.isCarrier
+        }
     }
 }
 
@@ -37,16 +59,15 @@ private final class SpaceArchiveWindows: NSObject, NSWindowDelegate {
     static let shared = SpaceArchiveWindows()
     private var windows: [String: NSWindow] = [:]
 
-    func show(_ spaceID: String) {
-        guard let space = Spaces.shared.space(spaceID) else { return NSSound.beep() }
+    func show(_ spaceID: String, title: String) {
         if let window = windows[spaceID] {
-            window.title = "Archived Cards \u{2014} \(space.title)"
+            window.title = "Archived Cards \u{2014} \(title)"
             return window.makeKeyAndOrderFront(nil)
         }
         let made = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 600),
                             styleMask: [.titled, .closable, .resizable, .miniaturizable],
                             backing: .buffered, defer: false)
-        made.title = "Archived Cards \u{2014} \(space.title)"
+        made.title = "Archived Cards \u{2014} \(title)"
         made.isReleasedWhenClosed = false
         made.contentMinSize = NSSize(width: 380, height: 300)
         made.contentView = NSHostingView(rootView: SpaceArchiveView(spaceID: spaceID))
@@ -186,7 +207,8 @@ private struct SpaceArchiveView: View {
 
     private func clear() {
         let alert = NSAlert()
-        let title = Spaces.shared.space(spaceID)?.title ?? "this space"
+        let title = Spaces.shared.space(spaceID)?.title
+            ?? (spaceID.hasPrefix("canvas:") ? "this project" : "this space")
         alert.messageText = "Clear Archived Cards?"
         alert.informativeText = "Every archived card of \u{201C}\(title)\u{201D} is removed for good. Cards on the board stay."
         alert.addButton(withTitle: "Clear Archive")

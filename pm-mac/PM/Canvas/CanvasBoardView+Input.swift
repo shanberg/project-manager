@@ -151,7 +151,7 @@ extension CanvasBoardView {
             if let tile = newTabButton(at: where_) { return popUpNewTabMenu(for: tile) }
             if let closing = tabClose(at: where_) {
                 hoveredTab = nil
-                return closeInTiling([closing])
+                return closeCards([closing])
             }
             let chip = tabChip(at: where_)
             let id = chip?.card ?? owner

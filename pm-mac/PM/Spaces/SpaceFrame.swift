@@ -172,6 +172,7 @@ final class SpaceFrame {
         if !isSpace, let notes = CanvasProjectNoteCard.notes(forCanvasAt: canvas) {
             notesCard = CanvasProjectNoteCard.id(on: document, notes: notes, resolver: store.resolver)
         }
+        notesCardID = notesCard
         // The workspace holding the notes card alone (`CanvasProjectNoteCard.notesWorkspace`), read
         // the way the workspace rows are, so the two agree on which one it is.
         let names = CanvasWorkspaces.names(of: canvas)
@@ -321,8 +322,9 @@ final class SpaceFrame {
     }
 
     private func remove(_ ids: Set<String>, actionName: String, reason: SpaceArchive.Reason) {
-        for id in ids { noteClosed(id) }
-        archive(ids, reason: reason)
+        let nodes = leaving(ids)
+        let entries = archive(nodes, reason: reason)
+        for node in nodes { remember(node, entry: entries[node.id]) }
         store.change(actionName) { doc in
             doc.nodes.removeAll { ids.contains($0.id) }
             doc.edges.removeAll { ids.contains($0.fromNode) || ids.contains($0.toNode) }
@@ -330,24 +332,58 @@ final class SpaceFrame {
         refresh()
     }
 
-    /// Cards leaving a space's board kept in its Archived Cards (`SpaceArchive`), so they can come back
-    /// after ⌘Z and ⇧⌘T have forgotten them. A project's board keeps no archive.
-    private func archive(_ ids: Set<String>, reason: SpaceArchive.Reason) {
-        guard let spaceID else { return }
-        // A web card kept at the page it had got to, as ⇧⌘T remembers it, not where it was saved.
-        let nodes = store.document.nodes.filter { ids.contains($0.id) && !$0.isGroup }.map { node -> CanvasNode in
+    /// The cards about to leave the board, as they'll be kept: a web card at the page it had got to,
+    /// not where it was saved — which is where ⇧⌘T, Undo and Archived Cards bring it back.
+    private func leaving(_ ids: Set<String>) -> [CanvasNode] {
+        store.document.nodes.filter { ids.contains($0.id) && !$0.isGroup }.map { node -> CanvasNode in
             guard case .link = node.content,
                   let live = (board?.nodeViews[node.id] as? CanvasLinkNodeView)?.liveURL else { return node }
             var kept = node
             kept.content = .link(url: live.absoluteString)
             return kept
         }
-        guard !nodes.isEmpty else { return }
+    }
+
+    /// Cards leaving the board kept in its Archived Cards (`SpaceArchive`), a space's or a project's,
+    /// so they can come back after ⌘Z and ⇧⌘T have forgotten them. Each card's entry, by card id.
+    private func archive(_ nodes: [CanvasNode], reason: SpaceArchive.Reason) -> [String: String] {
+        guard !nodes.isEmpty else { return [:] }
         var titles: [String: String] = [:]
-        for node in nodes {
-            titles[node.id] = board?.describeCard(node.id)?.title ?? SpaceCardMarks.title(node)
+        for node in nodes { titles[node.id] = cardTitle(node) }
+        return SpaceArchive.shared.record(nodes, titles: titles, spaceID: archiveKey, reason: reason)
+    }
+
+    /// Where this board's archived cards are kept (`SpaceArchive.key`).
+    var archiveKey: String { SpaceArchive.key(spaceID: spaceID, canvas: canvas) }
+
+    /// What the board is called: the space's name, or the project's.
+    var boardTitle: String {
+        if let spaceID { return Spaces.shared.space(spaceID)?.title ?? "Untitled Space" }
+        let title = project?.notes?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let title, !title.isEmpty { return title }
+        return project?.projectName.map { ProjectCodes.display($0) } ?? canvas.deletingPathExtension().lastPathComponent
+    }
+
+    private func cardTitle(_ node: CanvasNode) -> String {
+        board?.describeCard(node.id)?.title ?? SpaceCardMarks.title(node) ?? "Untitled"
+    }
+
+    /// A card coming off the board, for ⇧⌘T: the whole card, whatever kind, with its lines.
+    private func remember(_ node: CanvasNode, entry: String?) {
+        var address = ""
+        if case .link(let url) = node.content { address = url }
+        let edges = store.document.edges.filter { $0.fromNode == node.id || $0.toNode == node.id }
+        CanvasHistory.didClose(.init(address: address, spaceID: spaceID, canvas: canvas, cardID: node.id,
+                                     node: node, edges: edges, archiveEntry: entry))
+    }
+
+    /// A card taken off the screen but still on the board, for ⇧⌘T: shown again.
+    private func rememberOnScreen(_ id: String) {
+        var address = ""
+        if case .link(let url)? = store.document.node(id: id)?.content {
+            address = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL?.absoluteString ?? url
         }
-        SpaceArchive.shared.record(nodes, titles: titles, spaceID: spaceID, reason: reason)
+        CanvasHistory.didClose(address, card: id, canvas: canvas, inSpace: spaceID)
     }
 
     /// When each card was last on screen, by space and card. A card first seen now counts from now.
@@ -643,62 +679,125 @@ final class SpaceFrame {
         }
     }
 
-    /// Close: a pinned card comes off the screen and stays pinned (Arc's); any other comes off the
-    /// board (⌘Z brings it back).
-    func close(_ id: String) {
-        guard let node = store.document.node(id: id) else { return }
-        if SpaceCardMarks.isPinned(node) { return closePinned(id) }
-        guard let board else { return }
-        // **Closing the card in front goes to the one you were on before it**, as a browser does — into
-        // its slot, so the layout keeps its shape. See `nextFront`.
-        let tiling = board.tiling
-        let front = board.focusedTile ?? (tiling?.ids.count == 1 ? tiling?.ids.first : nil)
+    // MARK: Closing: a tile is a tab
+
+    /// Close — ⌘W, a row's ✕ or Close, the grip's ✕, a tab's ✕ — is what a browser does to a tab:
+    /// - Pinned, and a project's notes card: off the screen, still in the sidebar (`closePinned`).
+    /// - Any other card: off the board, into Archived Cards; ⇧⌘T brings it back, ⌘Z too, and a toast
+    ///   offers Undo and Keep (back in the sidebar, off the screen).
+    /// - The card in front before it takes the slot it leaves (`leaveScreen`).
+    func close(_ id: String) { close([id]) }
+
+    /// Several as one act: pinned ones off the screen, the rest off the board in one ⌘Z and one toast.
+    func close(_ ids: [String]) {
         let document = store.document
-        let next = id == front ? tiling.flatMap {
-            Self.nextFront(closing: id, recent: recentFronts, tabs: $0.tabs(of: id)) { document.node(id: $0) != nil }
-        } : nil
-        noteClosed(id)
-        archive([id], reason: .closed)
-        if let next, tiling?.cards.contains(next) == false {
-            board.replaceInTiling(id, with: next, animated: false)
-        }
-        board.select([id])
-        board.deleteSelection()
-        if let next { show(next) }
-        refresh()
+        let ids = ids.filter { document.node(id: $0) != nil }
+        let stays = ids.filter(staysListed)
+        for id in stays { closePinned(id) }
+        let going = ids.filter { !stays.contains($0) }
+        guard !going.isEmpty else { return }
+        takeOff(going)
     }
 
-    /// A pinned card's ✕, middle-click or Close: out of the layout, its sound stopped, the card where it
-    /// was in Pinned. The card in front before it takes its slot, as closing any card in front does.
+    /// A card whose close leaves it in the sidebar: pinned (favourites are pinned too), or the project's
+    /// notes card, which is the Notes row and never comes off its board.
+    private func staysListed(_ id: String) -> Bool {
+        guard let node = store.document.node(id: id) else { return false }
+        return SpaceCardMarks.isPinned(node) || id == notesCardID
+    }
+
+    /// A pinned card's close: out of the layout, its sound stopped, the card where it was in Pinned.
     /// Nothing to do for one that isn't on screen.
     func closePinned(_ id: String) {
-        guard let board, let tiling = board.tiling, tiling.cards.contains(id) else { return }
+        guard let board, board.tiling?.cards.contains(id) == true else { return }
         CanvasLinkNodeView.card(id, onCanvas: canvas)?.pauseMedia()
-        let document = store.document
-        let next = Self.nextFront(closing: id, recent: recentFronts, tabs: tiling.tabs(of: id)) {
-            document.node(id: $0) != nil && !tiling.cards.contains($0)
-        }
-        if let next {
-            board.replaceInTiling(id, with: next, animated: false)
-            board.select([next])
-        } else {
-            board.closeTileRemembering(id, inSpace: spaceID)
-        }
+        rememberOnScreen(id)
+        leaveScreen([id])
         refresh()
     }
 
-    /// Close several rows as one act: pinned ones off the screen, the rest off the board in one ⌘Z.
-    func close(_ ids: [String]) {
-        guard ids.count > 1 else { return ids.first.map(close) ?? () }
+    /// What a close took off the board, for the toast to put back.
+    private struct Closing {
+        var nodes: [CanvasNode]
+        var edges: [CanvasEdge]
+        var entries: [String]
+        /// The first card's name, read while it was on the board.
+        var title: String
+        /// The arrangement before the close, and the one it left.
+        var before: CanvasTileSession?
+        var after: CanvasTileSession?
+    }
+
+    private func takeOff(_ ids: [String]) {
+        let going = Set(ids)
+        let nodes = leaving(going)
+        let edges = store.document.edges.filter { going.contains($0.fromNode) || going.contains($0.toNode) }
+        let entries = archive(nodes, reason: .closed)
+        for node in nodes { remember(node, entry: entries[node.id]) }
+        let title = nodes.first.map(cardTitle) ?? ""
+        let before = board?.tiling
+        let name = ids.count > 1 ? "Close \(ids.count) Cards" : "Close Card"
+        // One ⌘Z: the cards back, then the layout as it was.
+        let undo = store.undoManager
+        undo.beginUndoGrouping()
+        leaveScreen(ids)
+        store.change(name) { SpaceClosing.takeOff(going, from: &$0) }
+        undo.endUndoGrouping()
+        undo.setActionName(name)
+        refresh()
+        offer(Closing(nodes: nodes, edges: edges, entries: Array(entries.values), title: title, before: before,
+                      after: board?.tiling))
+    }
+
+    /// Closing cards off the screen, as `SpaceClosing.plan` says: the card in front gives its slot to
+    /// the card in front before it, or the layout closes up. Returns the card brought forward.
+    @discardableResult
+    private func leaveScreen(_ ids: [String]) -> String? {
+        guard let board, let tiling = board.tiling else { return nil }
         let document = store.document
-        let pins = ids.filter { document.node(id: $0).map(SpaceCardMarks.isPinned) ?? false }
-        for id in pins { closePinned(id) }
-        let rest = Set(ids).subtracting(pins)
-        guard !rest.isEmpty else { return }
-        if let board, let tiling = board.tiling {
-            for id in rest where tiling.cards.contains(id) { board.closeTileRemembering(id, inSpace: spaceID) }
+        let plan = SpaceClosing.plan(closing: ids, front: board.focusedTile ?? (tiling.ids.count == 1 ? tiling.ids.first : nil),
+                                     tiling: tiling, recent: recentFronts) { document.node(id: $0) != nil }
+        if let replace = plan.replace { board.replaceInTiling(replace.closing, with: replace.with, animated: false) }
+        if !plan.leave.isEmpty { board.closeInTiling(plan.leave) }
+        if let next = plan.next, board.tiling?.cards.contains(next) == true {
+            board.showTab(next)
+            board.select([next])
         }
-        remove(rest, actionName: "Close \(rest.count) Cards", reason: .closed)
+        return plan.next
+    }
+
+    /// The toast after a close: Undo, and Keep (in the sidebar, off the screen).
+    private func offer(_ closing: Closing) {
+        guard let pane, !closing.nodes.isEmpty else { return }
+        let text = closing.nodes.count > 1 ? "Closed \(closing.nodes.count) Cards"
+            : "Closed \u{201C}\(closing.title)\u{201D}"
+        pane.showToast(text, actions: [
+            .init(title: "Undo") { [weak self] in self?.undoClose(closing) },
+            .init(title: isSpace ? "Keep in Space" : "Keep in Project") { [weak self] in self?.keep(closing) },
+        ])
+    }
+
+    /// The toast's Undo: the cards back on the board, and the layout as it was if nothing has changed
+    /// it since; else the first card shown.
+    private func undoClose(_ closing: Closing) {
+        reinstate(closing.nodes, edges: closing.edges, entries: closing.entries,
+                  name: closing.nodes.count > 1 ? "Undo Close \(closing.nodes.count) Cards" : "Undo Close Card")
+        if let before = closing.before, board?.putBack(before, ifStill: closing.after) == true { return refresh() }
+        if let first = closing.nodes.first { show(first.id) }
+    }
+
+    /// The toast's Keep: the cards back in the sidebar where they were, not on the screen.
+    private func keep(_ closing: Closing) {
+        reinstate(closing.nodes, edges: closing.edges, entries: closing.entries,
+                  name: closing.nodes.count > 1 ? "Keep \(closing.nodes.count) Cards" : "Keep Card")
+    }
+
+    /// Cards back on the board as they were, their lines with them; out of Archived Cards and ⇧⌘T.
+    private func reinstate(_ nodes: [CanvasNode], edges: [CanvasEdge], entries: [String], name: String) {
+        store.change(name) { SpaceClosing.putBack(nodes, edges: edges, into: &$0) }
+        SpaceArchive.shared.remove(Set(entries))
+        CanvasHistory.forgetClosed(cards: Set(nodes.map(\.id)))
+        refresh()
     }
 
     func setPinned(_ ids: [String], _ on: Bool) {
@@ -819,27 +918,16 @@ final class SpaceFrame {
 
     /// The cards that have been in front, most recent first: where closing the one in front goes.
     @ObservationIgnored private var recentFronts: [String] = []
+    /// A project's notes card, which a close never takes off the board.
+    @ObservationIgnored private var notesCardID: String?
 
-    /// Where closing `closed`, the card in front, sends you: the card in front before it that is still
-    /// on the board (`recent`, most recent first) — a tab of the same tile first, when it had others,
-    /// so closing a tab stays in its tile. Nil for nowhere remembered, which leaves the tiling's own
-    /// rule (the neighbouring tab, or the board).
-    static func nextFront(closing closed: String, recent: [String], tabs: [String],
-                          exists: (String) -> Bool) -> String? {
-        let candidates = recent.filter { $0 != closed && exists($0) }
-        if tabs.count > 1 { return candidates.first(where: tabs.contains) }
-        return candidates.first
-    }
 
-    /// ⌘W: the card in front, closed as above. False when there's none, so the window closes instead.
-    /// ⌘W: the focused tile out of the layout — the card stays in the sidebar, and ⌘Z puts it back.
-    /// False with no tile focused, so the window closes instead.
+    /// ⌘W: the card in front, closed as a tab (`close`). False with nothing up, so the window closes.
     func closeFront() -> Bool {
         // In a project's notes, ⌘W goes to the board: the notes don't close.
         if notesShowing { showBoard(); return true }
         guard let board, board.isTiled, let id = board.focusedTile ?? board.tiling?.ids.first else { return false }
-        board.closeTileRemembering(id, inSpace: spaceID)
-        refresh()
+        close(id)
         return true
     }
 
@@ -879,26 +967,26 @@ final class SpaceFrame {
         return true
     }
 
-    /// ⇧⌘T: the card if it's still on the board (⌘W leaves it there), else a new card on its address.
+    /// ⇧⌘T: the card if it's still on the board (a pinned card's close, ⌘Z, Keep), else the card put
+    /// back as it was — any kind — else a new web card on its address.
     func reopen(_ closed: CanvasHistory.Closed) {
         if store.document.node(id: closed.cardID) != nil { return show(closed.cardID) }
+        if let node = closed.node {
+            reinstate([node], edges: closed.edges, entries: closed.archiveEntry.map { [$0] } ?? [],
+                      name: "Reopen Closed Card")
+            return show(node.id)
+        }
+        guard !closed.address.isEmpty else { return NSSound.beep() }
         openNewCard(closed.address, showing: true)
     }
 
-    /// The grip's ✕: this tile out of the layout, as ⌘W on it.
+    /// The grip's ✕: as ⌘W on that tile.
     func closeTile(_ id: String) {
         guard let board, board.isTiled, board.tiling?.ids.contains(id) == true else { return }
-        board.closeTileRemembering(id, inSpace: spaceID)
-        refresh()
+        close(id)
     }
 
     /// For ⇧⌘T, a card coming off the board (a row's Close, Clear): its address and where it was.
-    /// Tiles taken out of the layout are remembered by `closeTileRemembering`.
-    private func noteClosed(_ id: String) {
-        guard let node = store.document.node(id: id), case .link(let address) = node.content else { return }
-        let live = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL?.absoluteString
-        CanvasHistory.didClose(live ?? address, card: id, canvas: canvas, inSpace: spaceID)
-    }
 
     /// ⌃⇥ and ⇧⌘]: the card after the one in front, round to the first.
     func cycleCards(by step: Int) {
