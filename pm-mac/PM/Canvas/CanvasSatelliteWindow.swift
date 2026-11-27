@@ -103,8 +103,14 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     }
 
     /// Lend `cards` to a new window. Nil when none of them had anything to lend.
-    static func open(_ cards: [CanvasNodeView], showing: String?, frame: NSRect?, on board: CanvasBoardView)
-        -> CanvasSatelliteWindow? {
+    ///
+    /// - Parameter lifting: the window flies out of the tile it came from (`CanvasSatelliteFlight`),
+    ///   for a move asked for in so many words; otherwise it fades in where it is.
+    static func open(_ cards: [CanvasNodeView], showing: String?, frame: NSRect?, on board: CanvasBoardView,
+                     lifting: Bool = false) -> CanvasSatelliteWindow? {
+        // Before the content is lent, while the tile still shows it.
+        let origin = lifting ? (cards.first { $0.node.id == showing } ?? cards.first)
+            .flatMap(CanvasSatelliteFlight.origin(of:)) : nil
         let satellite = CanvasSatelliteWindow(board: board, frame: frame)
         for card in cards { satellite.take(card) }
         guard !satellite.cards.isEmpty else { return nil }
@@ -112,7 +118,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         satellite.showTab(satellite.cards.firstIndex { $0.node.id == showing } ?? 0)
         satellite.refreshAppearance()
         if frame == nil { satellite.window?.center() }
-        satellite.showWindow(nil)
+        CanvasSatelliteFlight.arrive(satellite, from: origin)
         satellite.remember()
         return satellite
     }
@@ -544,8 +550,9 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     @objc private func goBack() { page?.goBack() }
     @objc private func reloadPage() { page?.reload() }
     @objc private func returnToWorkspace() {
+        guard !bringingBack else { return }
         bringingBack = true
-        close()
+        CanvasSatelliteFlight.home([self]) { [weak self] in self?.close() }
     }
     @objc private func gatherWorkspace() { board?.gatherWorkspace() }
 
@@ -859,10 +866,10 @@ extension CanvasBoardView {
     /// - Parameter frame: where the window goes, in screen coordinates; nil centres it.
     @discardableResult
     func moveToWindow(_ ids: [String], showing: String? = nil, frame: NSRect? = nil,
-                      restoring: Bool = false) -> CanvasSatelliteWindow? {
+                      restoring: Bool = false, lifting: Bool = false) -> CanvasSatelliteWindow? {
         let cards = ids.compactMap { nodeViews[$0] }.filter { $0.lentTo == nil }
         guard !cards.isEmpty else { return nil }
-        let satellite = CanvasSatelliteWindow.open(cards, showing: showing, frame: frame, on: self)
+        let satellite = CanvasSatelliteWindow.open(cards, showing: showing, frame: frame, on: self, lifting: lifting)
         CanvasSatelliteDock.shared.refresh()
         if !restoring, isAllOut, (tiling?.ids.count ?? 0) > 1 { putWindowAway() }
         return satellite
@@ -877,10 +884,12 @@ extension CanvasBoardView {
 
     /// Move the whole tile holding `id` — every tab of it — into a window of its own.
     @discardableResult
-    func moveTileToWindow(_ id: String, frame: NSRect? = nil) -> CanvasSatelliteWindow? {
-        guard let tiling, let at = tiling.position(of: id) else { return moveToWindow([id], frame: frame) }
+    func moveTileToWindow(_ id: String, frame: NSRect? = nil, lifting: Bool = false) -> CanvasSatelliteWindow? {
+        guard let tiling, let at = tiling.position(of: id) else {
+            return moveToWindow([id], frame: frame, lifting: lifting)
+        }
         let tile = tiling.columns[at.column].tiles[at.tile]
-        return moveToWindow(tile.cards, showing: tile.shown, frame: frame)
+        return moveToWindow(tile.cards, showing: tile.shown, frame: frame, lifting: lifting)
     }
 
     /// A satellite has come home. Its cards kept their slots, so there is nothing to place.
@@ -945,7 +954,8 @@ extension CanvasBoardView {
             guard tile.cards.contains(where: { nodeViews[$0]?.lentTo == nil }), let frame = frames[tile.shown]
             else { continue }
             moveToWindow(tile.cards, showing: tile.shown,
-                         frame: window.convertToScreen(convert(viewRect(frame), to: nil)), restoring: true)
+                         frame: window.convertToScreen(convert(viewRect(frame), to: nil)), restoring: true,
+                         lifting: true)
         }
         if isAllOut { putWindowAway() }
     }
@@ -960,6 +970,11 @@ extension CanvasBoardView {
     func gatherWorkspace() {
         let out = satellites
         guard !out.isEmpty else { return showWorkspaceWindow() }
+        // Every window's picture flies home into the slot its card ends up in, once the windows have gone.
+        CanvasSatelliteFlight.home(out) { [weak self] in self?.gather(out) }
+    }
+
+    private func gather(_ out: [CanvasSatelliteWindow]) {
         let undoFrom = beginTilingUndo()
         defer { endTilingUndo("Gather Workspace", from: undoFrom) }
         let rebuilt = isAllOut ? tiling.flatMap { session in
