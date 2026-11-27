@@ -919,7 +919,7 @@ export default function ProjectView({ projectName, basePath }: Props) {
         <List.Item
           title="Configure"
           icon={Icon.Gear}
-          detail={sectionDetail("Open Project Manager configuration.", "")}
+          detail={sectionDetail("Open Folio configuration.", "")}
           actions={
             <ActionPanel>
               <Action

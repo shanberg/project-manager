@@ -1,7 +1,7 @@
 {
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "project-manager",
-  "title": "Project Manager",
+  "title": "Folio",
   "description": "Create and manage projects. Configure paths, create projects, list, and archive.",
   "icon": "icon.png",
   "author": "shanberg",
@@ -12,7 +12,7 @@
   "commands": [
     {
       "name": "configure",
-      "title": "Configure Project Manager",
+      "title": "Configure Folio",
       "description": "Set active and archive project paths",
       "mode": "view",
       "keywords": [

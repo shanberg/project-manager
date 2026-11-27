@@ -1,4 +1,4 @@
-# pm - Project Manager
+# Folio and pm
 
 CLI for project creation with domain-based numbering. **Raycast is the main frontend** – configure paths and run all commands from the extension.
 
@@ -6,7 +6,7 @@ CLI for project creation with domain-based numbering. **Raycast is the main fron
 
 What each thing is — project, area, session, task, pick, canvas, workspace, link — is listed in [docs/concepts.md](docs/concepts.md).
 
-PM tracks two kinds of thing. A **project** is numbered, lives in `active/`, and ends. An **area** is the ongoing sort — a standing responsibility, a recurring meeting — is named rather than numbered, lives in `areas/`, and doesn’t. They share everything else: the same notes file, tasks, sessions, focus and capture. See [docs/areas.md](docs/areas.md).
+Folio and `pm` track two kinds of thing. A **project** is numbered, lives in `active/`, and ends. An **area** is the ongoing sort — a standing responsibility, a recurring meeting — is named rather than numbered, lives in `areas/`, and doesn’t. They share everything else: the same notes file, tasks, sessions, focus and capture. See [docs/areas.md](docs/areas.md).
 
 ## Install
 
@@ -50,7 +50,7 @@ These can be anywhere (e.g. different drives, cloud sync folders).
 
 **Raycast (recommended):**
 
-- **Configure Project Manager** – View paths (from pm config), domains, structure
+- **Configure Folio** – View paths (from pm config), domains, structure
 - **New Project** – Create a project (domain + title)
 - **New Area** – Create an area (name only)
 - **Take On a Folder as an Area** – Turn a folder you already keep into an area

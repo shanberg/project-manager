@@ -228,7 +228,7 @@ private func handle(_ message: JSONValue, allowed: [ApiActionSpec]) {
             "capabilities": .object(["tools": .object(["listChanged": .bool(false)])]),
             "serverInfo": .object(["name": .string("pm"), "version": .string(pmVersion)]),
             "instructions": .string(
-                "PM keeps each project's tasks in a markdown file the user also edits by hand. "
+                "Folio keeps each project's tasks in a markdown file the user also edits by hand. "
                 + "Read with task_list or notes_get before acting, and pass task references back "
                 + "exactly as given — they carry a digest that proves the task hasn't changed since "
                 + "you read it. A staleReference means read again rather than retrying."),
