@@ -204,6 +204,10 @@ private func run(_ spec: ApiActionSpec, _ input: ApiInput, _ options: ApiOptions
         return try document(spec, input, options) { (context: DocumentContext) in
             try releasing(input, context, source: options.source)
         }
+    case "task.keep":
+        return try document(spec, input, options) { (context: DocumentContext) in
+            try keeping(input, context, source: options.source)
+        }
     case "task.setText":
         return try document(spec, input, options) { (context: DocumentContext) in
             // One task takes `text`; a batch gives each its own, since renaming several to one text is
@@ -1447,6 +1451,41 @@ private func releasing(_ input: ApiInput, _ context: DocumentContext, source: St
     let what = released.count == 1 ? "\u{201C}\(released[0])\u{201D}" : "\(released.count) tasks"
     return Outcome(rawText: context.rawText, relocated: relocated,
                    note: Phrase(past: "Put back \(what)", future: "put back \(what)"), sidecar: events)
+}
+
+/// `task.keep`: say each task is still meant, without working on it now — Keep, in a catch-up review
+/// (`TaskStaleness`). Records a `kept` of each task's tree in the pick log, which starts its untouched
+/// clock again. The notes aren't touched and no sitting is started, which is what sets it apart from a
+/// pick: nothing lands in today's Picked up.
+private func keeping(_ input: ApiInput, _ context: DocumentContext, source: String) throws -> Outcome {
+    let notes = normalizeFocusMarker(notes: try parseNotes(markdown: context.rawText))
+    let todos = try parseTodos(notes: notes)
+    let at = timestamp()
+    var events: [PickEvent] = []
+    var kept: [String] = []
+    var seen = Set<String>()
+    var relocated = false
+    for reference in try references(input) {
+        guard let position = try resolve(reference, in: context.rawText, batch: input.tasks != nil) else { continue }
+        relocated = relocated || position.relocated
+        guard let touched = todos.first(where: {
+            $0.sessionIndex == position.sessionIndex && $0.lineIndex == position.lineIndex
+        }) else { continue }
+        let tree = TaskTree.root(of: touched, in: todos)
+        guard seen.insert(treeKey(tree)).inserted else { continue }
+        guard let task = PickLog.task(tree, in: notes) else {
+            throw ApiError(.invalidField, "\u{201C}\(tree.text)\u{201D} is under a heading Folio can't date, so it can't be kept.",
+                           detail: .string("task"))
+        }
+        events.append(PickEvent(at: at, event: .kept, task: task, source: source))
+        kept.append(tree.text)
+    }
+    guard !events.isEmpty else {
+        return Outcome(rawText: context.rawText, relocated: relocated, note: .statement("Nothing to keep"))
+    }
+    let what = kept.count == 1 ? "\u{201C}\(kept[0])\u{201D}" : "\(kept.count) tasks"
+    return Outcome(rawText: context.rawText, relocated: relocated,
+                   note: Phrase(past: "Kept \(what)", future: "keep \(what)"), sidecar: events)
 }
 
 /// The `retargeted` a rename owes the picks of the task it renamed, so they follow it rather than go

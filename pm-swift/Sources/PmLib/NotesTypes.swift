@@ -118,6 +118,9 @@ public struct Todo: Codable, Equatable {
     /// The latest sitting this task was picked up into, when it has been (docs/sessions.md D2). Filled
     /// in by a read that knows the project folder, since the picks live beside the notes, not in them.
     public var picked: PickMark?
+    /// When this task's tree was last kept in a catch-up review, ISO 8601 in UTC — the pick log's
+    /// `kept`. Read, like `picked`, only by a read that knows the project folder. See `TaskStaleness`.
+    public var kept: String?
 
     /// `state`, when given, wins over `checked`, so the two can't be constructed disagreeing.
     public init(text: String, checked: Bool, state: TaskState? = nil, rawLine: String, context: String, depth: Int = 0, sessionIndex: Int = 0, lineIndex: Int = 0, isFocused: Bool = false, dueDate: String? = nil, effectiveDueDate: String? = nil, waiting: String? = nil, effectiveWaiting: String? = nil, digest: String? = nil, sessionISODate: String? = nil) {

@@ -82,7 +82,8 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Recorded in `.pm-picked.ndjson` in the project folder: append-only, never pruned.
   - `picked` — the task (`session`, `ordinal`, `line`, `digest`, `text`) and the session it went `into`;
   - `released` — `reverses` the pick it cancels;
-  - `retargeted` — the task's new digest after its text changed.
+  - `retargeted` — the task's new digest after its text changed;
+  - `kept` — the task's tree was kept in a catch-up review: no `into`, cancelled by a `released` naming it. See [Stale](#stale).
 - A pick whose task or session no longer resolves isn't drawn. It is never an error.
 - Picks up: focusing an older task; Pick Up on the row menu; dragging a task onto the current session; ticking, editing, or setting a due date or wait on an older task; adding a child to an older tree.
 - Doesn't pick up: focus advancing on its own; reopening; dropping.
@@ -95,6 +96,16 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Closing a task without doing it, written `- [-]`.
 - `task.drop` drops open descendants too and advances focus. `task.reopen` reopens done or dropped.
 - Progress counts a dropped task as resolved, not done. `pm done` leaves dropped tasks out unless given `--dropped`.
+
+## Stale
+
+([stale-tasks.md](stale-tasks.md), [TaskStaleness.swift](../pm-swift/Sources/PmLib/TaskStaleness.swift))
+
+- A tree is stale when every open line in it is undated, not focused, and untouched for 21 days.
+- Touched: the end of its sitting's day, its tree's latest pick (`picked`), or its latest keep (`kept`), whichever is latest.
+- A project card's pile, the dock's card and the menubar fold stale trees under one line: "N older tasks, untouched for 3+ weeks". A find unfolds them.
+- Catch Up (from that line, the menubar, or a Projects card row): one stale tree at a time, oldest first. Keep, Pick Up, Drop, Skip, Drop the Rest. Each is one ⌘Z step.
+- `task.keep` writes `kept` and nothing else.
 
 ## Done log
 
