@@ -187,6 +187,8 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 
 ([canvas-workspaces.md](canvas-workspaces.md))
 
+"Workspace" in code and in these docs; **Layout** on screen. See § Menu words.
+
 - A named set of tiles in columns. A column is a stack of tiles; a tile holds one card, or several as tabs.
 - ⌘Return tiles the selection into a workspace named automatically ("Workspace", "Workspace 2"). The same cards reopen the same workspace.
 - The canvas is a permanent tab of its own; each workspace is a tab.
@@ -194,7 +196,7 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Tabs in a tile: ⌥[ and ⌥]; dragged along the strip or off it.
 - Maximize fills the window with one tile or card. It isn't saved.
 - A satellite is a tile moved out into a window of its own; a tile of tabs becomes a window of tabs. Its content is lent to the window, not reloaded.
-- Move to Window: a tile's menu, a tab's menu, a tile dragged out past the window's edge, and (2026-11-13) any one card on the free canvas, not only web cards. A tile let go over one of the board's satellites joins it as tabs.
+- Move to New Window: a tile's menu, a tab's menu, a tile dragged out past the window's edge, and (2026-11-13) any one card on the free canvas, not only web cards. A tile let go over one of the board's satellites joins it as tabs.
 - A satellite opened with no frame of its own cascades from the last one up; with none up, it is centred. A remembered frame whose title bar is on no screen comes back on the screen it overlaps most, else the main one, shrunk to fit (`CanvasSatelliteWindow.onScreen`).
 - Satellites off the free canvas are remembered and restored as tiled ones are (scope `""`); before 2026-11-13 they were remembered and never restored.
 - A tile out keeps its slot in the tiling, shown as an Empty: the card's icon and name, "In a window", Show, Bring Back. Bring Back and closing the window put the card back into that slot. The name and icon follow the card while it is out: a page that navigates renames its slot.
@@ -213,8 +215,8 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Satellite tabs: the icon becomes × under the pointer. Dragged along the row, a tab reorders; dragged off it (24 pt above or below, or out of the window) and let go: over another satellite of the board, it joins that one; over the board's window, it comes back; elsewhere, a window of its own there, this one's size. Right-click: Bring Back to the workspace, Move to New Window, Close Tab, Close Other Tabs.
 - A link in a list that reorders, inside a satellite, drags along its list as on the board: the row lit, a line where it goes. Let go along the list, it moves and is not followed.
 - A satellite of a space's board is named for the space (window title, the mark's tooltip). It becoming key makes that space the one used last.
-- Pop Out Workspace: every tile into its own satellite, opened over its tile; the workspace's window is put away. A verb on the workspace, never a tile: the header's button (any workspace, a single tile included), a workspace chip's menu, and the menu bar's workspace items.
-- Gather Workspace: every satellite of the workspace home, and its window back. With every tile out, the tiling is rebuilt from where the windows are: columns left to right, tiles top to bottom. With some out, each fills its slot. The rearranging is one undo step.
+- Move Tiles to Windows (was Pop Out Workspace): every tile into its own satellite, opened over its tile; the workspace's window is put away. A verb on the workspace, never a tile: the header's button (any workspace, a single tile included), a workspace chip's menu, and the menu bar's workspace items.
+- Gather Windows (was Gather Workspace): every satellite of the workspace home, and its window back. With every tile out, the tiling is rebuilt from where the windows are: columns left to right, tiles top to bottom. With some out, each fills its slot. The rearranging is one undo step.
 - Satellite dock: a floating panel while any project window is open or any satellite is out, whichever app is in front, on every Space. At the screen's leading edge until dragged — by a mark or the glass between — then where it was left (UserDefaults `PMSatelliteDockPlace`: screen, inset, middle as a fraction of the screen's height). Re-placed when displays change, always inside the visible frame. Its corners are concentric with its icons'. Liquid Glass, as the Mac's Dock. One mark per open project — each project window, and any project with windows out and no window of its own — drawn as an app icon: a squircle in the project's colour with its icon (or the workspace's initial) in white. No count badge. The flyout is glass tinted toward the project. Hover opens a flyout to the right: for a project, its card, 320 × 553 (11:19) whatever it holds — the companion's header (New Task, New Session, Show Window), then the card set to Current with the focused task pinned first, the latest session's last 3 note lines, the line to add to its note, and 5 still-open tasks before "N more"; no origin chips (`CanvasDockCard`). The card scrolls; a row per workspace with windows out sits at its foot: its name, a button per window, Gather. For a window on a file: its name, Show Window and the rows. The card takes the keyboard when it asks for it (a row picked, an editor or the note line opened); while it has it, the flyout stays up with the pointer away, and goes when the keyboard goes elsewhere. Escape gives the keyboard back, or closes the flyout. Clicking the mark shows the project's window — a popped-out workspace's window at that workspace; for a project with no window, one opened on it.
 - Dock buttons draw their own tooltips (`CanvasDockTip`): the panel never activates Folio, and AppKit shows tooltips only in the active app.
 - Focus hint: hovering a window's button in the flyout rings that window on screen in the project's colour, concentric with its corners, until the pointer leaves (`CanvasFocusHint`). A window under others (wholly covered, or 40% or more) also comes up at 85% opacity and goes back to its place in the stack when the pointer leaves; clicking keeps it up (`CanvasWindowGhost`). Used nowhere else.
@@ -319,3 +321,25 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - [links.md](links.md) lists parent/child projects as not built; master projects are built.
 - Comments in `CanvasWorkspaces.swift` and `CanvasViewState.swift` still describe unnamed workspaces; [canvas-workspaces.md](canvas-workspaces.md) §7i names every workspace.
 - [task-identity.md](task-identity.md) cites `NotesRawEdit.swift:562` for `sessionAddPreservingFormat`; it is now at line 632.
+
+## Menu words
+
+(2026-11-27.) One word for each thing and each act, in every menu, tooltip and undo step. Code identifiers keep their old names (`workspace`, `pin`, `masterStack`, `removeMenuTile`).
+
+| Word | Means | Retired |
+|---|---|---|
+| Layout | A named set of tiles (a workspace) | Workspace, on screen |
+| Close (Tile, Tab, Tile and Its Tabs) | Out of the layout; the card stays | Remove from Layout, Remove Tile from Layout, Out of the Layout, Remove from "X" |
+| Delete Card | The card is gone (⌘Z brings it back). Always last, after a line, never beside Close | |
+| Move to New Window | A card, tile or tab into a satellite | Move to Window, Move Tab(s) to Window |
+| Open in New Window | A second project window showing a layout | |
+| Move Tiles to Windows / Gather Windows | Every tile out, and every one back | Pop Out Workspace, Gather Workspace |
+| Put Back in "X" | One satellite back into its slot | Bring Back to Workspace |
+| Pin | Keep a card in the sidebar | |
+| Lock Width / Lock Height; Lock Left Column | Hold a tile's or column's size | Pin Width, Pin Tile Width, Pin Left Column |
+| Make Main Tile; Main and Stack | The big tile, and the arrangement with one | Master |
+| Browser Profile ▸ | A web card's cookie jar | Session ▸ (a session is a sitting on a project) |
+| Add Card ▸, Open Beside, Replace With ▸ | An existing card into a layout, beside the one in front, or into a tile's place | Add Card from Canvas, Open in a Tile Beside |
+| Show ▸ | A card kind's settings: a project card's halves, a folder's view, a view card's period, projects and layout | Shows, Show As, View As, Period ▸ and Projects ▸ |
+
+Every right-click menu runs from the smallest scope to the largest, then the removals: the card's own commands, Cut/Copy/Duplicate/Size (canvas only), the tile's or tab's section, Share, Close, then Delete Card. A tile's menu has no submenu of tile options; the strip's menu is what goes in, where the tabs sit, and Close Tile. A divider's is Lock and Even Out. A layout's menu is the same on its tab chip and its sidebar row (`WorkspaceCommands`): Open in New Window, Move Tiles to Windows, Arrange ▸, Rename…, Duplicate…, Delete…. A web card's Autoplay, Mute and Keep Running are at the foot of Page ▸.

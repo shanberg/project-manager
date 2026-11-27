@@ -413,7 +413,7 @@ struct CanvasControlCapsule: View {
             // a second control for the thing you are already doing. ⌘F still pulls the keyboard back.
             // Back only once the field has gone, so the two are never in the capsule together.
             if model.canPopOut, model.showsBoardControls {
-                HeaderSymbolButton(symbol: "macwindow.on.rectangle", help: "Pop Out Workspace") { model.popOut() }
+                HeaderSymbolButton(symbol: "macwindow.on.rectangle", help: "Move Tiles to Windows") { model.popOut() }
             }
             if find.shown == nil, model.showsBoardControls {
                 HeaderSymbolButton(symbol: "magnifyingglass", help: "Find on this canvas") {

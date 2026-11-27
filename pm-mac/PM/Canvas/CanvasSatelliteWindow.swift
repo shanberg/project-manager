@@ -417,8 +417,8 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         // Held, or right-clicked: where Back or Forward would go, several steps at once.
         back.history = { [weak self] in self?.historyMenu(back: true) }
         forward.history = { [weak self] in self?.historyMenu(back: false) }
-        configure(bringBack, "arrow.down.left", "Bring Back to Workspace", #selector(returnToWorkspace))
-        configure(gather, "rectangle.grid.2x2", "Gather Workspace", #selector(gatherWorkspace))
+        configure(bringBack, "arrow.down.left", "Put Back in Layout", #selector(returnToWorkspace))
+        configure(gather, "rectangle.grid.2x2", "Gather Windows", #selector(gatherWorkspace))
         configure(more, "ellipsis.circle", "More", #selector(showMenu))
         configure(newTask, "plus", "New Task", #selector(newTaskInCard))
         configure(newSession, "calendar.badge.plus", "New Session", #selector(newSessionInCard))
@@ -669,8 +669,8 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         refreshPlaceholders()
         workspaceLabel.stringValue = workspace.isEmpty ? "" : "· \(workspace)"
         workspaceLabel.isHidden = workspace.isEmpty
-        bringBack.toolTip = workspace.isEmpty ? "Bring Back" : "Bring Back to \(workspace)"
-        gather.toolTip = workspace.isEmpty ? "Gather" : "Gather \(workspace)"
+        bringBack.toolTip = workspace.isEmpty ? "Put Back in Layout" : "Put Back in “\(workspace)”"
+        gather.toolTip = "Gather Windows"
         rebuildTabs()
         // The Window menu and Mission Control have only this to go on, so it names the project too.
         let named = title.isEmpty ? "Card" : title
@@ -798,7 +798,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
             item.isEnabled = enabled
             menu.addItem(item)
         }
-        add(workspace.isEmpty ? "Bring Back" : "Bring Back to \(workspace)", #selector(bringBackTab(_:)))
+        add(workspace.isEmpty ? "Put Back in Layout" : "Put Back in “\(workspace)”", #selector(bringBackTab(_:)))
         add("Move to New Window", #selector(tabToNewWindow(_:)), enabled: cards.count > 1)
         menu.addItem(.separator())
         add("Close Tab", #selector(closeTabFromMenu(_:)))
@@ -857,7 +857,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         let workspaces = CanvasWorkspaces.names(of: canvas)
         if !workspaces.isEmpty {
             menu.addItem(.separator())
-            menu.addItem(.sectionHeader(title: "Workspaces"))
+            menu.addItem(.sectionHeader(title: "Layouts"))
             for name in workspaces {
                 let item = NSMenuItem(title: name, action: #selector(openWorkspace(_:)), keyEquivalent: "")
                 item.target = self
@@ -1505,7 +1505,7 @@ extension CanvasBoardView {
 
     private func gather(_ out: [CanvasSatelliteWindow]) {
         let undoFrom = beginTilingUndo()
-        defer { endTilingUndo("Gather Workspace", from: undoFrom) }
+        defer { endTilingUndo("Gather Windows", from: undoFrom) }
         let rebuilt = isAllOut ? tiling.flatMap { session in
             CanvasSatelliteGather.columns(from: out.compactMap { satellite in
                 satellite.window.map { (satellite.tile(in: session), $0.frame) }

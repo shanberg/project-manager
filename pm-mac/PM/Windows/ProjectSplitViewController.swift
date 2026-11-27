@@ -407,6 +407,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         tabModel.renameWorkspace = { [weak self] name in self?.renameWorkspace(named: name) }
         tabModel.duplicateWorkspace = { [weak self] name in self?.duplicateWorkspace(named: name) }
         tabModel.deleteWorkspace = { [weak self] name in self?.deleteWorkspace(named: name) }
+        tabModel.arrangeWorkspace = { [weak self] name, arrangement in self?.arrangeWorkspace(name, arrangement) }
         tabModel.renameTab = { [weak self] id, name in self?.renameTab(id, to: name) }
     }
 
@@ -432,6 +433,14 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// Pop Out from a workspace's chip: its tab up, then every tile out — once the tiles are there,
     /// which for a pane just built for the tab is a turn or more after it is shown. See
     /// `CanvasPaneController.whenInWorkspace`.
+    /// Arrange from a workspace's chip or its sidebar row: its tab up, then its tiles dealt out again —
+    /// once they are there, as `popOutWorkspace` waits.
+    func arrangeWorkspace(_ name: String, _ arrangement: CanvasTiling.Arrangement) {
+        openTab(.board(.workspace(name)))
+        guard let pane = canvasPane else { return }
+        pane.whenInWorkspace(name) { [weak pane] in pane?.board.setArrangement(arrangement) }
+    }
+
     func popOutWorkspace(_ name: String) {
         openTab(.board(.workspace(name)))
         guard let pane = canvasPane else { return }
