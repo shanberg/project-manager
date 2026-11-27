@@ -1709,9 +1709,17 @@ struct SpaceFrameSidebar: View {
             if !frame.favorites.isEmpty { favorites } else if frame.dragging != nil { favoritesWell }
             // The list fills the scroll area at least, so the empty sidebar under the last row is the
             // drag area behind the rows rather than the scroll view's own ground (which moves nothing).
-            GeometryReader { area in
+            //
+            // **Filled by layout, not by a `GeometryReader`.** The fill used to be the reader's height
+            // handed in as a `minHeight`, which made every row's body a function of the window's height:
+            // each frame of a window resize re-ran this whole list, at 12.7 ms a frame — most of the
+            // budget, and more than the board's own re-tile (FrameMeter, 2026-11-27). A clear spacer as
+            // tall as the scroll area, behind rows that size themselves, is the same minimum height as
+            // a layout fact: a resize re-measures one spacer and nothing re-runs.
             ScrollViewReader { scroller in
             ScrollView {
+                ZStack(alignment: .topLeading) {
+                Color.clear.containerRelativeFrame(.vertical)
                 VStack(alignment: .leading, spacing: 2) {
                     if !frame.isSpace {
                         SpaceSidebarRow(title: "Notes", symbol: "doc.text", on: frame.notesShowing) { frame.showNotes() }
@@ -1735,7 +1743,10 @@ struct SpaceFrameSidebar: View {
                     group(frame.today, pinned: false)
                 }
                 .padding(.bottom, 8)
-                .frame(maxWidth: .infinity, minHeight: area.size.height, alignment: .topLeading)
+                // Its own height whatever the scroll area's, so a resize never re-lays the rows out.
+                .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .background { WindowDragArea { frame.addMenu() } }
                 // Files let go anywhere a row doesn't take them (Notes, Board, the empty sidebar below
                 // the rows): the end of Today / Cards. Files only — a row has to land on a row.
@@ -1747,7 +1758,6 @@ struct SpaceFrameSidebar: View {
             .onChange(of: frontRowID) { _, id in
                 guard let id else { return }
                 withAnimation(Motion.animation(.easeOut(duration: Motion.Tempo.quick))) { scroller.scrollTo(id) }
-            }
             }
             }
             .accessibilityElement(children: .contain)
