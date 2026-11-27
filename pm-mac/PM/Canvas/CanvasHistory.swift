@@ -133,24 +133,40 @@ enum CanvasHistory {
 
     // MARK: Closed cards
 
-    /// A web tile taken out of a layout, in a space or a project: where it was, so ⇧⌘T can show it
-    /// again or make it anew.
+    /// A card closed, or a web tile taken out of a layout: where it was, so ⇧⌘T can show it again or
+    /// put it back.
     struct Closed {
+        /// A web card's address, the page it had got to; empty for any other card.
         var address: String
         /// The space it was in; nil for a project's board.
         var spaceID: String?
         /// The board's canvas file, which finds a project's window again.
         var canvas: URL
         var cardID: String
+        /// The whole card, when it came off the board: ⇧⌘T puts it back as it was, any kind of card.
+        var node: CanvasNode? = nil
+        /// Its lines to cards still on the board.
+        var edges: [CanvasEdge] = []
+        /// Its entry in Archived Cards, which goes when the card comes back.
+        var archiveEntry: String? = nil
+        /// The project whose board it was on, so ⇧⌘T can open its window.
+        var projectKey: String? = nil
     }
 
     private(set) static var closed: [Closed] = []
 
     static func didClose(_ address: String, card: String, canvas: URL, inSpace space: String?) {
-        closed.removeAll { $0.cardID == card }
-        closed.append(Closed(address: address, spaceID: space, canvas: canvas, cardID: card))
+        didClose(Closed(address: address, spaceID: space, canvas: canvas, cardID: card))
+    }
+
+    static func didClose(_ entry: Closed) {
+        closed.removeAll { $0.cardID == entry.cardID }
+        closed.append(entry)
         if closed.count > 50 { closed.removeFirst(closed.count - 50) }
     }
+
+    /// A card back on its board some other way (the toast's Undo or Keep): ⇧⌘T has nothing to bring.
+    static func forgetClosed(cards: Set<String>) { closed.removeAll { cards.contains($0.cardID) } }
 
     static func takeLastClosed() -> Closed? { closed.popLast() }
 }

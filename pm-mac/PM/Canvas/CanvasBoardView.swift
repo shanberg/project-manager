@@ -92,6 +92,9 @@ final class CanvasBoardView: NSView {
     /// Where a page's new tab goes (a link that asks for a new window, ⌘-click): set in a space, where
     /// it's a card in Today. The flag is whether it comes to the front. Nil elsewhere: a tab in the tile.
     var opensNewTab: ((String, Bool) -> Void)?
+    /// Closing cards as a browser closes tabs, under a space's or project's frame (`SpaceFrame.close`):
+    /// a tab's ✕, Close Tab, Close Other Tabs. Nil elsewhere, where they only leave the layout.
+    var closesCards: (([String]) -> Void)?
 
     /// Room at the top for the floating header, and nothing else.
     ///

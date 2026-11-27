@@ -115,7 +115,12 @@ final class CanvasSatelliteDock: NSObject {
 
     /// Satellites have come or gone, or changed what they show: rebuilt on the next turn, once for any
     /// number of asks in this one.
+    /// Off in test harnesses, which drive satellites with no dock: its rebuild reads the real spaces
+    /// and projects.
+    static var isEnabled = true
+
     func refresh() {
+        guard Self.isEnabled else { return }
         _ = audioWatch
         guard !refreshQueued else { return }
         refreshQueued = true
@@ -1819,4 +1824,21 @@ extension CanvasSatelliteDock: NSWindowDelegate {
         guard let flyout, flyout.isVisible else { return }
         if !flyout.frame.contains(NSEvent.mouseLocation) { closeFlyout() }
     }
+}
+
+/// A view that says when the pointer comes over it and goes, wherever in it — the dock's, for what it
+/// shows on hover.
+@MainActor
+final class CanvasHoverView: NSView {
+    var onHover: (Bool) -> Void = { _ in }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHover(true) }
+    override func mouseExited(with event: NSEvent) { onHover(false) }
 }

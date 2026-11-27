@@ -235,6 +235,8 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     fileprivate var focusHideTimer: Timer?
     /// The HUD line showing, if any — see `showHUD`.
     fileprivate weak var hud: CanvasHUD?
+    /// The toast showing, if any — see `showToast`.
+    fileprivate weak var toast: CanvasToast?
     /// How focus mode asks the window to leave it — Escape, from the board or the pane.
     var onLeaveFocus: (() -> Void)?
     fileprivate var titlebarReachForFocus: CGFloat { titlebarReach }
@@ -2149,6 +2151,7 @@ extension CanvasPaneController {
     /// one showing rather than stacking over it.
     func showHUD(_ text: String) {
         hud?.removeFromSuperview()
+        toast?.dismiss(animated: false)
         let hint = CanvasHUD(text: text)
         hint.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(hint)
@@ -2164,6 +2167,23 @@ extension CanvasPaneController {
             NSAnimationContext.runAnimationGroup({ $0.duration = 0.4; hint.animator().alphaValue = 0 },  // motion: fade-only
                                                  completionHandler: { hint.removeFromSuperview() })
         }
+    }
+
+    /// A line with buttons at the foot of the window — a close's Undo and Keep. It replaces any HUD
+    /// line or toast showing, stays while the pointer is on it, and goes `CanvasToast.lifetime` after
+    /// the pointer leaves (or it appears), or when a button is pressed.
+    func showToast(_ text: String, actions: [CanvasToast.Action]) {
+        hud?.removeFromSuperview()
+        toast?.dismiss(animated: false)
+        let made = CanvasToast(text: text, actions: actions)
+        made.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(made)
+        NSLayoutConstraint.activate([
+            made.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            made.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -18),
+        ])
+        toast = made
+        made.present()
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -2259,6 +2279,118 @@ final class CanvasHUD: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// A HUD line with buttons: "Closed “Weather”  Undo  Keep in Space". docs/spaces.md § Closing.
+final class CanvasToast: NSView {
+    struct Action {
+        var title: String
+        var run: () -> Void
+    }
+
+    /// How long it stays once the pointer isn't on it.
+    static let lifetime: TimeInterval = 5
+    private let actions: [Action]
+    private var hovering = false
+    private var expiry: DispatchWorkItem?
+    private(set) var isGone = false
+
+    init(text: String, actions: [Action]) {
+        self.actions = actions
+        super.init(frame: .zero)
+        let glass = NSGlassEffectView()
+        glass.cornerRadius = 16
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingMiddle
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let buttons = actions.enumerated().map { index, action -> NSButton in
+            let button = NSButton(title: action.title, target: self, action: #selector(pressed(_:)))
+            button.tag = index
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 12, weight: .semibold)
+            button.contentTintColor = .controlAccentColor
+            button.setContentCompressionResistancePriority(.required, for: .horizontal)
+            return button
+        }
+        let row = NSStackView(views: [label] + buttons)
+        row.orientation = .horizontal
+        row.spacing = 14
+        row.setCustomSpacing(18, after: label)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        let content = NSView()
+        content.addSubview(row)
+        glass.contentView = content
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(glass)
+        NSLayoutConstraint.activate([
+            glass.topAnchor.constraint(equalTo: topAnchor),
+            glass.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glass.bottomAnchor.constraint(equalTo: bottomAnchor),
+            row.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            row.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            row.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            heightAnchor.constraint(equalToConstant: 32),
+            label.widthAnchor.constraint(lessThanOrEqualToConstant: 320),
+        ])
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(text)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        expiry?.cancel()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        scheduleExpiry()
+    }
+
+    /// In: a fade (0.2s), as the HUD's.
+    func present() {
+        alphaValue = 0
+        NSAnimationContext.runAnimationGroup { $0.duration = 0.2; animator().alphaValue = 1 }  // motion: fade-only
+        scheduleExpiry()
+    }
+
+    private func scheduleExpiry() {
+        expiry?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.hovering else { return }
+            self.dismiss(animated: true)
+        }
+        expiry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.lifetime, execute: work)
+    }
+
+    /// Out: a fade (0.15s), or at once.
+    func dismiss(animated: Bool) {
+        guard !isGone else { return }
+        isGone = true
+        expiry?.cancel()
+        guard animated else { return removeFromSuperview() }
+        NSAnimationContext.runAnimationGroup({ $0.duration = 0.15; animator().alphaValue = 0 },  // motion: fade-only
+                                             completionHandler: { [weak self] in self?.removeFromSuperview() })
+    }
+
+    @objc private func pressed(_ sender: NSButton) {
+        guard !isGone, actions.indices.contains(sender.tag) else { return }
+        let action = actions[sender.tag]
+        dismiss(animated: true)
+        action.run()
+    }
 }
 
 /// A drag-band blocker that takes no clicks itself: see `CanvasPaneController.bandBlocker`.

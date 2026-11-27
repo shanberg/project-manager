@@ -861,6 +861,22 @@ class CanvasNodeView: NSView {
     /// The content that is out, while it is.
     private(set) var lentContent: NSView?
 
+    /// What the card's slot shows while its content is out. See `CanvasSatelliteEmpty`.
+    var satelliteEmpty: CanvasSatelliteEmpty? { lentTo == nil ? nil : clip.subviews.first as? CanvasSatelliteEmpty }
+
+    /// The row of a reorderable list under a point in the satellite's window, while the content is
+    /// out there — `linkRow(at:)`'s answer for a card with no board around it.
+    func lentLinkRow(atWindowPoint point: NSPoint) -> (list: UUID, slot: Int)? {
+        guard lentLink(atWindowPoint: point) != nil, let space = linkSpace else { return nil }
+        return linkZones.row(at: space.convert(point, from: nil))
+    }
+
+    /// A reorderable list's rows, in order, in the satellite's window's coordinates.
+    func lentLinkRows(of list: UUID) -> [NSRect] {
+        guard lentTo != nil, let space = linkSpace, let rows = linkZones.list(list)?.ordered else { return [] }
+        return rows.map { space.convert($0, to: nil) }
+    }
+
     /// The card's content, wherever it is — in the card, or out in a satellite.
     var cardContent: NSView? { lentContent ?? clip.subviews.first }
 
