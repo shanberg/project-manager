@@ -65,6 +65,8 @@ struct ProjectTabBar: View {
     var openWorkspaceInNewWindow: (String) -> Void = { _ in }
     /// Every tile of the workspace out into a window of its own — see `CanvasBoardView.popOutWorkspace`.
     var popOutWorkspace: (String) -> Void = { _ in }
+    /// Deal the workspace's tiles out as an arrangement — see `ProjectSplitViewController.arrangeWorkspace`.
+    var arrangeWorkspace: (String, CanvasTiling.Arrangement) -> Void = { _, _ in }
 
     /// The chip under the pointer, which is the only one that offers its close button. A row of tabs
     /// each carrying a permanent × is a row of things to click by accident — **the current one
@@ -264,6 +266,7 @@ struct ProjectTabBar: View {
             WorkspaceCommands(name: name,
                               openInNewWindow: { openWorkspaceInNewWindow(name) },
                               popOut: { popOutWorkspace(name) },
+                              arrange: { arrangeWorkspace(name, $0) },
                               rename: { renameWorkspace(name) },
                               duplicate: { duplicateWorkspace(name) },
                               delete: { deleteWorkspace(name) })
@@ -542,6 +545,9 @@ final class ProjectTabModel {
     /// Pop the workspace out, from its chip — see `ProjectSplitViewController.popOutWorkspace`.
     @ObservationIgnored
     var popOutWorkspace: (String) -> Void = { _ in }
+    /// Arrange a workspace from its chip — see `ProjectSplitViewController.arrangeWorkspace`.
+    @ObservationIgnored
+    var arrangeWorkspace: (String, CanvasTiling.Arrangement) -> Void = { _, _ in }
     /// A chip's label, typed rather than picked. By tab id, because it covers both naming and renaming
     /// and only the tab knows which it was.
     @ObservationIgnored
@@ -577,7 +583,8 @@ struct ProjectTabBarHost: View {
                       deleteWorkspace: model.deleteWorkspace,
                       renameTab: model.renameTab,
                       openWorkspaceInNewWindow: model.openWorkspaceInNewWindow,
-                      popOutWorkspace: model.popOutWorkspace)
+                      popOutWorkspace: model.popOutWorkspace,
+                      arrangeWorkspace: model.arrangeWorkspace)
     }
 }
 
@@ -600,6 +607,8 @@ struct WorkspaceCommands: View {
     var openInNewWindow: (() -> Void)?
     /// Every tile out into a window of its own. A verb on the workspace — never on a tile.
     var popOut: (() -> Void)?
+    /// The workspace's tiles dealt out again as Grid or Main and Stack.
+    var arrange: ((CanvasTiling.Arrangement) -> Void)? = nil
     var rename: () -> Void
     var duplicate: () -> Void
     var delete: () -> Void
@@ -609,15 +618,22 @@ struct WorkspaceCommands: View {
             Button("Open in New Window", action: openInNewWindow)
         }
         if let popOut {
-            Button("Pop Out “\(name)”", action: popOut)
+            Button("Move Tiles to Windows", action: popOut)
         }
-        if openInNewWindow != nil || popOut != nil {
+        if let arrange {
+            Menu("Arrange") {
+                ForEach(CanvasTiling.Arrangement.allCases, id: \.self) { arrangement in
+                    Button(arrangement.title) { arrange(arrangement) }
+                }
+            }
+        }
+        if openInNewWindow != nil || popOut != nil || arrange != nil {
             Divider()
         }
-        Button("Rename “\(name)”…", action: rename)
-        Button("Duplicate “\(name)”…", action: duplicate)
+        Button("Rename\u{2026}", action: rename)
+        Button("Duplicate\u{2026}", action: duplicate)
         Divider()
-        Button("Delete “\(name)”", action: delete)
+        Button("Delete \u{201C}\(name)\u{201D}\u{2026}", action: delete)
     }
 }
 

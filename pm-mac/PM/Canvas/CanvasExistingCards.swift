@@ -18,7 +18,7 @@ import PmLib
 enum CanvasExistingCards {
     /// One name for the command in every place it is offered — the tile's menu, the board's, the `+`
     /// menu and the View menu — for the reason `CanvasAddCommand` gives.
-    static let title = "Add Card from Canvas"
+    static let title = "Add Card"
 
     typealias Card = CanvasItem
     typealias Section = CanvasItemSection

@@ -460,7 +460,7 @@ struct CanvasTileControlsView: View {
                 icon(model.maximized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                      model.maximized ? "Restore (⌥⌘↩)" : "Maximize (⌥⌘↩)") { controls.toggleMaximize() }
             }
-            icon("xmark", model.inSpace ? "Close (⌘W)" : "Out of the Layout (⌘W)") { controls.outOfLayout() }
+            icon("xmark", "Close (⌘W)") { controls.outOfLayout() }
             MoreButton(controls: controls)
                 .frame(width: 26, height: 26)
                 .help("More")

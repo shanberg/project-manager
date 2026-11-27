@@ -1604,7 +1604,7 @@ extension CanvasBoardView {
     /// if dragging pinned things, every tile you ever adjusted would stop responding to the window and
     /// the arrangement would gradually turn into a fixed layout without anyone asking for it.
     func togglePinTile(_ id: String) {
-        let undoName = (isTilePinned(id) ? "Unpin Tile" : "Pin Tile")
+        let undoName = (isTilePinned(id) ? "Unlock Tile" : "Lock Tile")
         let undoFrom = beginTilingUndo()
         defer { endTilingUndo(undoName, from: undoFrom, shows: false) }
         guard var session = tiling else { return }
@@ -1616,7 +1616,7 @@ extension CanvasBoardView {
     /// either side of it rather than about a card.
     func togglePin(_ run: CanvasTileDivider.Run, at index: Int) {
         let undoFrom = beginTilingUndo()
-        defer { endTilingUndo("Pin", from: undoFrom, shows: false) }
+        defer { endTilingUndo("Lock", from: undoFrom, shows: false) }
         guard var session = tiling else { return }
         session.togglePin(run, at: index)
         commitTiling(session)
@@ -1653,7 +1653,7 @@ extension CanvasBoardView {
     /// and the double-click is gone rather than fixed — see `CanvasBoardView.mouseDown`.
     func promoteInTiling(_ id: String) {
         let undoFrom = beginTilingUndo()
-        defer { endTilingUndo("Make Master Tile", from: undoFrom) }
+        defer { endTilingUndo("Make Main Tile", from: undoFrom) }
         guard var session = tiling else { return }
         session.promote(id)
         tiling = session

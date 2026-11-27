@@ -520,6 +520,16 @@ final class SpaceFrame {
         openNewCard(address, showing: true)
     }
 
+    /// Reload, from a card's sidebar row — the same as its tile's Page ▸ Reload.
+    func reload(_ id: String) { CanvasLinkNodeView.card(id, onCanvas: canvas)?.reload() }
+
+    /// What Share ▸ offers from a card's sidebar row: the page it is showing, else its saved address.
+    func shareURL(_ id: String) -> URL? {
+        if let live = CanvasLinkNodeView.card(id, onCanvas: canvas)?.liveURL { return live }
+        guard case .link(let address)? = store.document.node(id: id)?.content else { return nil }
+        return URL(string: address)
+    }
+
     func copyAddress(_ id: String) {
         if let card = CanvasLinkNodeView.card(id, onCanvas: canvas) { return card.copyAddress() }
         guard case .link(let address)? = store.document.node(id: id)?.content else { return }
@@ -707,6 +717,17 @@ final class SpaceFrame {
 
     func deleteWorkspace(_ name: String) {
         split?.tabModel.deleteWorkspace(name)
+        refresh()
+    }
+
+    // The rest of a layout's menu, as its tab chip has them — see `WorkspaceCommands`.
+    func openWorkspaceInNewWindow(_ name: String) { split?.tabModel.openWorkspaceInNewWindow(name) }
+    func popOutWorkspace(_ name: String) { split?.tabModel.popOutWorkspace(name) }
+    func arrangeWorkspace(_ name: String, _ arrangement: CanvasTiling.Arrangement) {
+        split?.tabModel.arrangeWorkspace(name, arrangement)
+    }
+    func duplicateWorkspace(_ name: String) {
+        split?.tabModel.duplicateWorkspace(name)
         refresh()
     }
 
@@ -1937,9 +1958,16 @@ struct SpaceFrameSidebar: View {
         }
         .opacity(frame.draggingWorkspace == workspace.name ? 0.4 : 1)
         .contextMenu {
-            // "Layout", as the View menu and the undo steps call it.
-            Button("Rename Layout\u{2026}") { renamingWorkspace = workspace.name }
-            Button("Delete Layout\u{2026}") { frame.deleteWorkspace(workspace.name) }
+            // The same menu as the layout's tab chip, so a layout answers the same wherever you
+            // right-click it. Rename is the row's own, in place.
+            let name = workspace.name
+            WorkspaceCommands(name: name,
+                              openInNewWindow: { frame.openWorkspaceInNewWindow(name) },
+                              popOut: { frame.popOutWorkspace(name) },
+                              arrange: { frame.arrangeWorkspace(name, $0) },
+                              rename: { renamingWorkspace = name },
+                              duplicate: { frame.duplicateWorkspace(name) },
+                              delete: { frame.deleteWorkspace(name) })
         }
         // Not while its name is being typed into: a drag there is selecting text.
         .onDrag(if: renamingWorkspace != workspace.name) { frame.beginWorkspaceDrag(workspace.name) }
@@ -2226,16 +2254,18 @@ struct SpaceFrameSidebar: View {
         if inLayout != nil, !row.pinned {
             Button(frame.isSpace ? "Move to Today" : "Move to Cards") { frame.moveToList([row.id]) }
         }
-        Button("Open in a Tile Beside") { frame.tileBeside(row.id) }
+        Button("Open Beside") { frame.tileBeside(row.id) }
         Divider()
         Button("Rename\u{2026}") { renamingCard = row.id }
         if row.renamed {
             Button("Use the Page\u{2019}s Name") { frame.renameCard(row.id, to: nil) }
         }
         if row.host != nil {
+            Button("Reload") { frame.reload(row.id) }
             Button("Copy Address") { frame.copyAddress(row.id) }
             Button("Duplicate") { frame.duplicate(row.id) }
             Button(row.muted ? "Unmute" : "Mute") { frame.setMuted(row.id, !row.muted) }
+            if let url = frame.shareURL(row.id) { ShareLink("Share\u{2026}", item: url) }
         }
         if !frame.otherSpaces.isEmpty {
             Menu("Move to Space") {
@@ -2247,13 +2277,11 @@ struct SpaceFrameSidebar: View {
         // A pinned card's Close takes it off the screen and leaves it pinned; Unpin is above. Not
         // offered for a pinned card that's already off the screen: there's nothing to close. Under a
         // layout, a pinned card's is Remove from that layout.
+        // Under a layout, a pinned card's Close takes it out of that layout: one word for taking a
+        // card off the screen, wherever it is (docs/spaces.md § Closing).
         if row.closable {
             Divider()
-            if let inLayout, row.pinned {
-                Button("Remove from \u{201C}\(inLayout)\u{201D}") { frame.close(row.id) }
-            } else {
-                Button("Close") { frame.close(row.id) }
-            }
+            Button("Close") { frame.close(row.id) }
         }
     }
 

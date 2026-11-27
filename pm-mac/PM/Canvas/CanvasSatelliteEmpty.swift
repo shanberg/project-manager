@@ -35,7 +35,7 @@ final class CanvasSatelliteEmpty: NSView {
 
         let show = NSButton(title: "Show", target: self, action: #selector(showWindow))
         show.toolTip = "Bring its window forward"
-        let back = NSButton(title: "Bring Back", target: self, action: #selector(bringBack))
+        let back = NSButton(title: "Put Back", target: self, action: #selector(bringBack))
         back.toolTip = "Put it back in this tile"
         back.bezelColor = .controlAccentColor
         for button in [show, back] {
