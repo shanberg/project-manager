@@ -1356,6 +1356,34 @@ final class CanvasTilingPlanTests: XCTestCase {
         XCTAssertEqual(CanvasTiling.preferredArrangement(for: 4), .masterStack)
     }
 
+    // MARK: Holding still
+
+    private let standing = CanvasRect(x: 100, y: 50, width: 1200, height: 700)
+
+    /// A tiled board's region moved at the same size: something scrolled it, and it goes back to where
+    /// it stood (`CanvasScrollView.putBackStrayMove`).
+    func testAScrollOfATiledBoardIsPutBack() {
+        let slid = CanvasRect(x: 100, y: 78, width: 1200, height: 700)
+        let back = CanvasTiling.strayMove(from: standing, to: slid)
+        XCTAssertEqual(back, CanvasPoint(x: standing.midX, y: standing.midY))
+    }
+
+    /// A resize or a zoom changes the region's size, and lays the tiles out again; it is not undone.
+    func testAResizeStands() {
+        let grown = CanvasRect(x: 100, y: 50, width: 1440, height: 700)
+        XCTAssertNil(CanvasTiling.strayMove(from: standing, to: grown))
+        let zoomed = CanvasRect(x: 80, y: 40, width: 1240, height: 720)
+        XCTAssertNil(CanvasTiling.strayMove(from: standing, to: zoomed))
+    }
+
+    /// Standing where it stood, give or take a rounding, is not a move; nor is the first region seen.
+    func testNoMoveIsNotPutBack() {
+        XCTAssertNil(CanvasTiling.strayMove(from: standing, to: standing))
+        let rounded = CanvasRect(x: 100.3, y: 49.8, width: 1200.2, height: 700)
+        XCTAssertNil(CanvasTiling.strayMove(from: standing, to: rounded))
+        XCTAssertNil(CanvasTiling.strayMove(from: nil, to: standing))
+    }
+
     // MARK: Summary
 
     func testTheSummaryCountsCardsAndNotFrames() {

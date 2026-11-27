@@ -238,6 +238,15 @@ final class CanvasScrollView: NSScrollView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
     }
 
+    /// A two-finger double-tap: AppKit's own zoom to what is under the fingers, which `allowsMagnification`
+    /// turns on along with the pinch. Declined while tiled for the pinch's reason — and it was the one
+    /// that wasn't: a double-tap on the ground between tiles, or on the band above them, zoomed and
+    /// slid the whole tiling at once. A page under the fingers answers it itself, long before this.
+    override func smartMagnify(with event: NSEvent) {
+        guard !board.showsTiles else { return }
+        super.smartMagnify(with: event)
+    }
+
     override func magnify(with event: NSEvent) {
         guard !board.showsTiles else { return }
         // A pinch: room for where this step is going, then AppKit's own magnify. `liveMagnifying`
@@ -263,6 +272,7 @@ final class CanvasScrollView: NSScrollView {
     }
 
     @objc private func visibleRegionChanged() {
+        if putBackStrayMove() { return }
         refitPanRoom()
         // Build what has come into reach; place nothing. Scrolling moves the board, not the cards on
         // it — see `CanvasBoardView.refreshVisibleCards`.
@@ -270,6 +280,39 @@ final class CanvasScrollView: NSScrollView {
         // Which pages are worth running is a question about where you stopped, not about every frame
         // of the scroll that got you there.
         board.settlePageBudget()
+    }
+
+    /// The region a tiled board last stood on, in canvas points — see `putBackStrayMove`.
+    private var heldRegion: CanvasRect?
+    /// Above zero while this view is moving the board on purpose (`centre(on:)`).
+    private var steering = 0
+
+    /// **While tiled, the board doesn't move** — whatever asked it to. The rule `scrollWheel`,
+    /// `magnify`, `smartMagnify` and `CanvasClipView` each keep for one way in, kept here for all of
+    /// them, because the ways in are not a closed list: any view inside a tile can ask the clip to
+    /// scroll (`scrollRectToVisible` walks every enclosing clip view on its way up, and a press that
+    /// wobbles past a tile's edge is an `autoscroll` the clip answers), and the board's own frame
+    /// shrinking pulls the clip in with it. The tiles were laid out for the region the board was on, so
+    /// each of those slid the whole arrangement partly out of the window, and nothing put it back short
+    /// of leaving the workspace — the "click near the header and the tiles lurch" of 2026-11-27.
+    ///
+    /// So every change of the visible region is checked against the last one the board stood on, and a
+    /// move nobody here made is undone before anything is built for it. A move this view makes —
+    /// a crossing, a zoom, `centre(on:)` — and any resize stand, and become the region held. True when
+    /// it put the board back, in which case the put-back's own change has already done the refresh.
+    private func putBackStrayMove() -> Bool {
+        guard !board.visibleRect.isEmpty else { return false }
+        let now = board.canvasRect(documentVisibleRect)
+        let movingOnPurpose = steering > 0 || zooming > 0 || liveMagnifying || isFlying
+        if board.showsTiles, !movingOnPurpose, let back = CanvasTiling.strayMove(from: heldRegion, to: now) {
+            Log.write("tiled board held still: moved \(Int(now.minX - (heldRegion?.minX ?? 0))), "
+                + "\(Int(now.minY - (heldRegion?.minY ?? 0))) by "
+                + Thread.callStackSymbols.dropFirst(2).prefix(10).joined(separator: " | "))
+            centre(on: back)
+            return true
+        }
+        heldRegion = now
+        return false
     }
 
     @objc private func zoomStarted() { liveMagnifying = true }
@@ -611,6 +654,8 @@ final class CanvasScrollView: NSScrollView {
 
     /// Put a point on the board in the middle of the window — how ⌘F frames what it found.
     func centre(on point: CanvasPoint) {
+        steering += 1
+        defer { steering -= 1 }
         let at = board.viewPoint(point)
         let visible = documentVisibleRect.size
         board.scroll(NSPoint(x: at.x - visible.width / 2, y: at.y - visible.height / 2))
