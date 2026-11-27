@@ -218,6 +218,7 @@ targets:
       - path: PM/Spaces/SpaceCardMarks.swift
       - path: PM/Spaces/SpaceArchive.swift
       - path: PM/Spaces/SpaceClosing.swift
+      - path: PM/Spaces/SpaceSidebarGlyphs.swift
       - path: PM/Spaces/SpaceCardKinds.swift
       - path: PM/Spaces/WindowDragView.swift
       - path: PM/Canvas/CanvasWebPopup.swift

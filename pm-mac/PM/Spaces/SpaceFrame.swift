@@ -71,7 +71,8 @@ final class SpaceFrame {
     struct Workspace: Identifiable, Equatable {
         var id: String { name }
         var name: String
-        var hosts: [String?]
+        /// Its icon: a drawing of its columns and tiles (`LayoutShapeGlyph`).
+        var shape: LayoutShape
         var showing: Bool
         /// Its cards, in reading order: its own and the pinned ones it uses (§ Cards in layouts).
         var rows: [Row] = []
@@ -261,14 +262,20 @@ final class SpaceFrame {
         let selectedTab = split?.tabs.selected.view
         notesShowing = !isSpace && (selectedTab?.isNotesTab == true
             || (current != nil && current == notesWorkspace && (board?.isTiled ?? false)))
+        // A web card's tile in a layout's icon wears its site's hue, as its letter badge does.
+        func tint(_ id: String) -> LayoutShape.Tint {
+            guard case .link(let url)? = document.node(id: id)?.content,
+                  let host = URL(string: url)?.host() else { return .plain }
+            return .hue(SidebarHue.index(host: host, title: ""))
+        }
+        let liveTiling = live.flatMap { _ in board?.tilingMemory }
         workspaces = CanvasWorkspaces.ordered(of: canvas).filter { $0 != notesWorkspace }.map { name in
-            let ids = CanvasWorkspaces.tiling(named: name, of: canvas)?.ids ?? []
-            let hosts = ids.prefix(3).map { id -> String? in
-                if case .link(let url)? = document.node(id: id)?.content { return URL(string: url)?.host() }
-                return nil
-            }
+            // The one up as its board has it now (a column just dragged wider shows at once); the rest
+            // as saved — already decoded and cached by `CanvasWorkspaces`, so nothing is read here.
+            let tiling = (name == live ? liveTiling : nil) ?? saved[name]
             let cards = layoutCards.first { $0.name == name }?.cards ?? []
-            return Workspace(name: name, hosts: hosts, showing: current == name && (board?.isTiled ?? false),
+            return Workspace(name: name, shape: LayoutShape(tiling, tint: tint),
+                             showing: current == name && (board?.isTiled ?? false),
                              rows: cards.compactMap { byID[$0] })
         }
         layoutCardsNow = layoutCards
@@ -1885,7 +1892,7 @@ struct SpaceFrameSidebar: View {
     private func workspaceRow(_ workspace: SpaceFrame.Workspace, index: Int) -> some View {
         let into = SpaceFrame.DropSpot.workspace(workspace.name)
         let count = frame.workspaces.count
-        return SpaceSidebarRow(title: workspace.name, stack: workspace.hosts, on: workspace.showing,
+        return SpaceSidebarRow(title: workspace.name, shape: workspace.shape, on: workspace.showing,
                                editing: renamingWorkspace == workspace.name,
                                rename: { renamingWorkspace = workspace.name },
                                endRename: { new in
@@ -2039,14 +2046,14 @@ struct SpaceFrameSidebar: View {
     private func group(_ group: SpaceFrame.Group, pinned: Bool) -> some View {
         let loose: SpaceCardMarks.List = pinned ? .pinned(folder: nil) : .today(folder: nil)
         ForEach(Array(group.loose.enumerated()), id: \.element.id) { index, row in
-            cardRow(row, indent: false, list: loose, index: index, count: group.loose.count)
+            cardRow(row, indent: false, list: loose, index: index, in: group.loose)
         }
         ForEach(Array(group.folders.enumerated()), id: \.element.id) { index, folder in
             folderRow(folder, pinned: pinned, index: index, count: group.folders.count)
             if !frame.closedFolders.contains(folder.id) {
                 let list: SpaceCardMarks.List = pinned ? .pinned(folder: folder.id) : .today(folder: folder.id)
                 ForEach(Array(folder.rows.enumerated()), id: \.element.id) { index, row in
-                    cardRow(row, indent: true, list: list, index: index, count: folder.rows.count)
+                    cardRow(row, indent: true, list: list, index: index, in: folder.rows)
                 }
             }
         }
@@ -2102,7 +2109,7 @@ struct SpaceFrameSidebar: View {
     /// A card's row under the layout on screen: its own card, or a pinned one it uses (a pin at its
     /// end). Click: that tile in front. Its ✕ closes as § Closing; a pinned one only leaves the layout.
     private func layoutCardRow(_ row: SpaceFrame.Row, in layout: String) -> some View {
-        SpaceSidebarRow(row: row, indent: true, picked: false, glyphs: nil,
+        SpaceSidebarRow(row: row, indent: true, picked: false, glyphs: nil, inLayout: true,
                         close: { frame.close(row.id) },
                         pause: { row.muted ? frame.setMuted(row.id, false) : frame.pause(row.id) }) {
             frame.showInLayout(layout, card: row.id)
@@ -2114,9 +2121,22 @@ struct SpaceFrameSidebar: View {
         .onDrag { frame.beginDrag(row.id) }
     }
 
+    /// How a row is lit, for joining it to its neighbours: the front card's chip stands alone, but a
+    /// run of picked rows, or of rows on screen, reads as one block (`SpaceRowGround`).
+    private func ground(_ row: SpaceFrame.Row?) -> SpaceRowGround.Kind {
+        guard let row else { return .none }
+        if row.front { return .front }
+        if frame.picked.contains(row.id) { return .picked }
+        return row.showing ? .on : .none
+    }
+
     private func cardRow(_ row: SpaceFrame.Row, indent: Bool, list: SpaceCardMarks.List, index: Int,
-                         count: Int) -> some View {
+                         in rows: [SpaceFrame.Row]) -> some View {
+        let count = rows.count
         let editing = renamingCard == row.id
+        let kind = ground(row)
+        let joinsAbove = kind.joins && ground(index > 0 ? rows[index - 1] : nil) == kind
+        let joinsBelow = kind.joins && ground(index + 1 < count ? rows[index + 1] : nil) == kind
         return SpaceSidebarRow(row: row, indent: indent, picked: frame.picked.contains(row.id), glyphs: glyphs,
                                close: { frame.close(row.id) },
                                pause: { row.muted ? frame.setMuted(row.id, false) : frame.pause(row.id) },
@@ -2127,7 +2147,10 @@ struct SpaceFrameSidebar: View {
                                    renamingCard = nil
                                    if let new { frame.renameCard(row.id, to: new) }
                                }) { frame.click(row.id) }
+            .joined(above: joinsAbove, below: joinsBelow)
             .marks(reference: false, layouts: row.pinned ? row.layouts : [],
+                   shape: row.pinned ? row.layouts.first.flatMap { name in
+                       frame.workspaces.first { $0.name == name }?.shape } : nil,
                    open: { frame.showInLayout($0, card: row.id) })
             .id(row.id)
             .contextMenu { menu(for: row) }
@@ -2486,7 +2509,8 @@ struct SpaceSidebarRow: View {
     var symbol: String?
     var host: String?
     var address: String?
-    var stack: [String?] = []
+    /// A layout's row: its icon is a drawing of the layout (`LayoutShapeGlyph`).
+    var shape: LayoutShape?
     var trailing: String?
     var on = false
     var front = false
@@ -2504,6 +2528,12 @@ struct SpaceSidebarRow: View {
     var reference = false
     /// A pinned card's layouts, as a mark with a count; `openLayout` goes to one.
     var layoutNames: [String] = []
+    /// The first of those layouts' shape, drawn small as the mark.
+    var layoutShape: LayoutShape?
+    /// Lit the same as the row above or below it: the corners between them go square and the ground
+    /// runs across the gap, so a run of picked rows reads as one selection, as Finder draws one.
+    var joinsAbove = false
+    var joinsBelow = false
     var openLayout: ((String) -> Void)?
     let tap: () -> Void
     @State private var hover = false
@@ -2521,10 +2551,10 @@ struct SpaceSidebarRow: View {
     /// A folder's +, shown on hover: the add list, into that folder.
     var addMenu: (() -> NSMenu)?
 
-    init(title: String, symbol: String? = nil, stack: [String?] = [], trailing: String? = nil, on: Bool = false,
+    init(title: String, symbol: String? = nil, shape: LayoutShape? = nil, trailing: String? = nil, on: Bool = false,
          dim: Bool = false, disclosure: Bool? = nil, addMenu: (() -> NSMenu)? = nil, editing: Bool = false,
          rename: (() -> Void)? = nil, endRename: ((String?) -> Void)? = nil, tap: @escaping () -> Void) {
-        self.title = title; self.symbol = symbol; self.stack = stack; self.trailing = trailing
+        self.title = title; self.symbol = symbol; self.shape = shape; self.trailing = trailing
         self.on = on; self.front = on; self.dim = dim; self.disclosure = disclosure; self.addMenu = addMenu
         self.editing = editing; self.rename = rename; self.endRename = endRename
         self.tap = tap
@@ -2534,11 +2564,14 @@ struct SpaceSidebarRow: View {
     var muted = false
     var pause: (() -> Void)?
 
-    init(row: SpaceFrame.Row, indent: Bool, picked: Bool, glyphs: Namespace.ID? = nil, close: @escaping () -> Void,
+    /// `inLayout`: a row under the layout on screen. Every one of those is on screen, so the fill that
+    /// says so would say nothing; only the card in front is raised.
+    init(row: SpaceFrame.Row, indent: Bool, picked: Bool, glyphs: Namespace.ID? = nil, inLayout: Bool = false,
+         close: @escaping () -> Void,
          pause: (() -> Void)? = nil, editing: Bool = false, rename: (() -> Void)? = nil,
          endRename: ((String?) -> Void)? = nil, tap: @escaping () -> Void) {
         title = row.title; symbol = row.symbol; host = row.host; address = row.address
-        on = row.showing; front = row.front; pinned = row.pinned
+        on = row.showing && !inLayout; front = row.front; pinned = row.pinned
         self.glyphs = glyphs; cardID = row.id
         playing = row.playing || row.muted
         muted = row.muted
@@ -2552,23 +2585,16 @@ struct SpaceSidebarRow: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            if let disclosure {
-                Image(systemName: "chevron.right").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(disclosure ? 90 : 0)).frame(width: 8)
-            }
-            if !stack.isEmpty {
-                ZStack(alignment: .leading) {
-                    ForEach(Array(stack.prefix(3).enumerated()).reversed(), id: \.offset) { index, host in
-                        SpaceRowGlyph(host: host, symbol: "doc", title: "", size: metrics.glyph - 2)
-                            .padding(1.5).background(Circle().fill(.background))
-                            .offset(x: CGFloat(index) * 7)
-                    }
+            // One box for every icon, so every title in the sidebar starts on the same edge.
+            Group {
+                if let shape {
+                    LayoutShapeGlyph(shape: shape, size: metrics.glyph)
+                } else {
+                    SpaceRowGlyph(host: host, symbol: symbol, title: title, size: metrics.glyph)
+                        .matchedGlyph(cardID, in: glyphs)
                 }
-                .frame(width: metrics.glyph + 16, alignment: .leading)
-            } else {
-                SpaceRowGlyph(host: host, symbol: symbol, title: title, size: metrics.glyph)
-                    .matchedGlyph(cardID, in: glyphs)
             }
+            .frame(width: metrics.glyph, height: metrics.glyph)
             if editing {
                 TextField("", text: $draft)
                     .textFieldStyle(.plain)
@@ -2585,17 +2611,31 @@ struct SpaceSidebarRow: View {
             Spacer(minLength: 2)
             trailingControls
         }
-        .padding(.leading, indent ? 26 : 10).padding(.trailing, 6)
+        .padding(.leading, indent ? Self.leading + metrics.glyph + 9 : Self.leading).padding(.trailing, 6)
         .frame(height: metrics.rowHeight)
         .background {
             if front { SpaceSelectedFill(radius: 8) }
             else {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(picked ? Color.accentColor.opacity(0.12)
-                          : Color.primary.opacity(on ? 0.07 : hover ? 0.05 : 0))
+                SpaceRowGround(kind: picked ? .picked : on ? .on : .none, hover: hover,
+                               above: joinsAbove, below: joinsBelow)
             }
         }
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(picked ? Color.accentColor : .clear, lineWidth: 1.5))
+        // The card in front and picked: its chip, with the picked outline (it never joins).
+        .overlay {
+            if front && picked {
+                RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.accentColor, lineWidth: 1.5)
+            }
+        }
+        // A folder's or a layout's cards hang from a hairline under its icon, rather than each wearing
+        // a pill. Each row draws its own length and the gap above it, so the line runs unbroken.
+        .background(alignment: .topLeading) {
+            if indent {
+                Rectangle().fill(Color.primary.opacity(0.12))
+                    .frame(width: 1, height: metrics.rowHeight + 2)
+                    .offset(x: Self.leading + metrics.glyph / 2 - 0.5, y: -2)
+                    .allowsHitTesting(false)
+            }
+        }
         .contentShape(Rectangle())
         // Middle-click is the ✕: a pinned card that's on screen comes off it and stays pinned.
         .background { if hasCloseSlot { MiddleClickArea(enabled: !editing) { close?() } } }
@@ -2612,33 +2652,55 @@ struct SpaceSidebarRow: View {
         .accessibilityAction(named: "Close") { if hasCloseSlot { close?() } }
     }
 
-    /// The pin and layout marks (§ Cards in layouts).
-    func marks(reference: Bool, layouts: [String], open: ((String) -> Void)?) -> Self {
+    func joined(above: Bool, below: Bool) -> Self {
+        var copy = self
+        copy.joinsAbove = above
+        copy.joinsBelow = below
+        return copy
+    }
+
+    /// Where a row's icon starts, and so where every title's edge is worked out from.
+    static let leading: CGFloat = 10
+
+    /// The pin and layout marks (§ Cards in layouts). `shape` is the first layout's, drawn as the mark.
+    func marks(reference: Bool, layouts: [String], shape: LayoutShape? = nil, open: ((String) -> Void)?) -> Self {
         var copy = self
         copy.reference = reference
         copy.layoutNames = layouts
+        copy.layoutShape = shape
         copy.openLayout = open
         return copy
     }
 
+    /// The layout a pinned card is used in, drawn as that layout's own icon is, small; a count when
+    /// it's more than one.
     private var layoutMark: some View {
-        HStack(spacing: 2) {
-            Image(systemName: "rectangle.split.2x1").font(.system(size: 9.5))
-            if layoutNames.count > 1 { Text("\(layoutNames.count)").font(.system(size: metrics.font - 2)).monospacedDigit() }
+        HStack(spacing: 3) {
+            if let layoutShape {
+                LayoutShapeGlyph(shape: layoutShape, size: (metrics.glyph * 0.75).rounded())
+            } else {
+                Image(systemName: "rectangle.split.2x1").font(.system(size: 9.5))
+            }
+            if layoutNames.count > 1 {
+                Text("\(layoutNames.count)").font(.system(size: metrics.font - 2)).monospacedDigit()
+            }
         }
         .foregroundStyle(.tertiary)
         .frame(minWidth: 18, minHeight: 18)
         .contentShape(Rectangle())
     }
 
-    /// Count (or a folder's + on hover), speaker, ✕ — each in a slot of its own fixed width.
+    private var pinMark: some View {
+        Image(systemName: "pin.fill").font(.system(size: 8.5)).foregroundStyle(.tertiary)
+            .frame(width: 18, height: 18)
+            .help("Pinned: used in more than one place")
+            .accessibilityHidden(true)
+    }
+
+    /// Layout mark, count (or a folder's + on hover), a folder's chevron, speaker, and the slot the ✕
+    /// and the pin share — each in a slot of its own fixed width.
     @ViewBuilder
     private var trailingControls: some View {
-        if reference {
-            Image(systemName: "pin.fill").font(.system(size: 8.5)).foregroundStyle(.tertiary)
-                .frame(width: 14, height: 18)
-                .help("Pinned: used in more than one place")
-        }
         if let openLayout, let first = layoutNames.first {
             if layoutNames.count == 1 {
                 Button { openLayout(first) } label: { layoutMark }
@@ -2666,6 +2728,14 @@ struct SpaceSidebarRow: View {
             }
             .frame(minWidth: 18, minHeight: 18)
         }
+        if let disclosure {
+            // At the end, as a Mail or Finder sidebar section's: the folder's title stays on the edge
+            // every other title starts on.
+            Image(systemName: "chevron.right").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.tertiary)
+                .rotationEffect(.degrees(disclosure ? 90 : 0))
+                .frame(width: 18, height: 18)
+                .accessibilityHidden(true)
+        }
         if playing {
             // Arc's speaker: says the tab is making sound, and stops it.
             Button { pause?() } label: {
@@ -2678,16 +2748,25 @@ struct SpaceSidebarRow: View {
             .accessibilityLabel(muted ? "Muted. Unmute" : "Playing. Pause")
         }
         if hasCloseSlot {
-            Button { close?() } label: {
-                Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
-                    .frame(width: 18, height: 18)
-                    .background(Circle().fill(Color.primary.opacity(hover ? 0.08 : 0)))
+            // A pinned card under a layout shows its pin here until the pointer comes for the ✕, so
+            // the pin never moves sideways and the title never re-truncates. A fade, nothing else.
+            let showsClose = hover || front
+            ZStack {
+                if reference { pinMark.opacity(showsClose ? 0 : 1) }
+                Button { close?() } label: {
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                        .background(Circle().fill(Color.primary.opacity(hover ? 0.08 : 0)))
+                }
+                .buttonStyle(.plain)
+                .opacity(showsClose ? 1 : 0)
+                .allowsHitTesting(showsClose)
+                .help(pinned ? "Close (stays pinned)" : "Close")
+                .accessibilityHidden(true)
             }
-            .buttonStyle(.plain)
-            .opacity(hover || front ? 1 : 0)
-            .allowsHitTesting(hover || front)
-            .help(pinned ? "Close (stays pinned)" : "Close")
-            .accessibilityHidden(true)
+            .animation(Motion.animation(.easeOut(duration: 0.12)), value: showsClose)  // motion: fade-only
+        } else if reference {
+            pinMark
         }
     }
 
@@ -2717,12 +2796,65 @@ extension SpaceSidebarRow {
     }
 }
 
-/// A row's mark: the site's icon once seen, else the card kind's symbol, else an initial.
+/// A row's ground when it isn't the card in front: picked (accent wash and outline), on screen (a
+/// faint fill), hovered, or nothing. Joined to a neighbour lit the same way, its corners on that side go
+/// square and it reaches 1 pt into the 2 pt gap, where the neighbour's reaches the other 1 pt; the
+/// outline loses that edge, so a run is one shape with one outline.
+struct SpaceRowGround: View {
+    enum Kind: Equatable {
+        case none, on, picked, front
+        /// The chip in front is one card, raised: it never joins.
+        var joins: Bool { self == .on || self == .picked }
+    }
+
+    var kind: Kind
+    var hover = false
+    var above = false
+    var below = false
+    static let radius: CGFloat = 8
+    /// Half the rows' spacing (`spacing: 2` in the sidebar's list).
+    static let reach: CGFloat = 1
+
+    private var shape: UnevenRoundedRectangle {
+        let top = above ? 0 : Self.radius, bottom = below ? 0 : Self.radius
+        return UnevenRoundedRectangle(topLeadingRadius: top, bottomLeadingRadius: bottom,
+                                      bottomTrailingRadius: bottom, topTrailingRadius: top, style: .continuous)
+    }
+
+    var body: some View {
+        let fill: Color = switch kind {
+        case .picked: Color.accentColor.opacity(0.12)
+        case .on: Color.primary.opacity(0.07)
+        case .none, .front: Color.primary.opacity(hover ? 0.05 : 0)
+        }
+        shape.fill(fill)
+            .overlay {
+                if kind == .picked {
+                    // Drawn past the joined edge and clipped back, so that edge's stroke falls outside.
+                    Color.clear
+                        .overlay {
+                            shape.strokeBorder(Color.accentColor, lineWidth: 1.5)
+                                .padding(.top, above ? -4 : 0).padding(.bottom, below ? -4 : 0)
+                        }
+                        .clipped()
+                }
+            }
+            .padding(.top, above ? -Self.reach : 0)
+            .padding(.bottom, below ? -Self.reach : 0)
+            .allowsHitTesting(false)
+    }
+}
+
+/// A row's mark: the site's icon once seen, else the card kind's symbol, else its initial on the
+/// site's hue (`LetterBadge`).
 struct SpaceRowGlyph: View {
     var host: String?
     var symbol: String?
     var title: String
     var size: CGFloat
+    /// An icon that arrived after the row was drawn: it fades in over the badge rather than popping.
+    @State private var arrived: NSImage?
+    @Environment(\.colorScheme) private var scheme
 
     init(host: String?, symbol: String?, title: String, size: CGFloat) {
         self.host = host; self.symbol = symbol; self.title = title; self.size = size
@@ -2733,18 +2865,35 @@ struct SpaceRowGlyph: View {
     }
 
     var body: some View {
-        if let host, let icon = FaviconLoader.shared.cached(for: host) {
-            Image(nsImage: icon).resizable().interpolation(.high)
-                .frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
-        } else if host == nil, let symbol {
-            Image(systemName: symbol).font(.system(size: size * 0.78)).foregroundStyle(.secondary).frame(width: size, height: size)
-        } else {
-            Text(String(title.prefix(1)).uppercased())
-                .font(.system(size: size * 0.58, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                .frame(width: size, height: size)
-                .background(RoundedRectangle(cornerRadius: size * 0.25, style: .continuous).fill(Color(nsColor: .systemGray)))
-                .onAppear { if let host { FaviconLoader.shared.warm(hosts: [host]) } }
+        ZStack {
+            if let host, let icon = arrived ?? FaviconLoader.shared.cached(for: host) {
+                favicon(icon).transition(.opacity)
+            } else if host == nil, let symbol {
+                Image(systemName: symbol).font(.system(size: size * 0.78)).foregroundStyle(.secondary)
+                    .frame(width: size, height: size)
+            } else {
+                LetterBadge(title: title, hue: SidebarHue.index(host: host, title: title), size: size)
+                    .transition(.opacity)
+            }
         }
+        .frame(width: size, height: size)
+        // Only a web card whose icon isn't in yet asks; one already cached never starts the task.
+        .task(id: host) {
+            guard let host, arrived == nil, FaviconLoader.shared.cached(for: host) == nil,
+                  let icon = await FaviconLoader.shared.favicon(for: host) else { return }
+            withAnimation(Motion.animation(.easeOut(duration: 0.15))) { arrived = icon }  // motion: fade-only
+        }
+    }
+
+    /// Fitted, not stretched, into the box — a wide icon keeps its shape — with a hairline edge so a
+    /// white icon holds its outline on a light wash.
+    private func favicon(_ icon: NSImage) -> some View {
+        let radius = size * 0.22
+        return Image(nsImage: icon).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(Color.primary.opacity(scheme == .dark ? 0.12 : 0.08), lineWidth: 0.5))
     }
 }
 
