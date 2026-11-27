@@ -643,6 +643,9 @@ final class ProjectSplitViewController: NSSplitViewController {
         if crossing { handOver(pose, from: leaving) }
         canvasPane?.focusBoard()
         refreshTabModel()
+        // The sidebar reads which layout is up off the selected tab, so it follows the switch here,
+        // whatever made it — ⌃⇥ and ⌘1…9 reach this without a tiling changing to tell it.
+        spaceFrame?.refresh()
         onRendererChanged?()
     }
 
