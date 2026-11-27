@@ -195,12 +195,18 @@ final class CanvasBoardView: NSView {
     /// The named workspaces holding any of these cards — the contextual menu's Workspaces submenu.
     var workspacesHolding: (Set<String>) -> [String] = { _ in [] }
 
+    /// Whether the tiling up is only a pose: the canvas wearing the tiles of the layout it is taking
+    /// over from, for the moment before it leaves them (`poseAsTiling`). Nothing is tiled as far as
+    /// anyone reading the board for *what is open* should know. Cleared when the tiling goes.
+    var isPosedAsTiling = false
+
     /// The tiled view that is up, if one is. See `CanvasBoardView+Tiling`.
     var tiling: CanvasTileSession? {
         didSet {
             // Only the crossings, not every set. Dragging the master divider assigns this at the rate
             // the mouse reports, and none of those frames change whether a tiling is up.
             guard (oldValue == nil) != (tiling == nil) else { return }
+            if tiling == nil { isPosedAsTiling = false }
             scrollView?.canvasScroll?.showsScrollers(!isTiled)
             watchTileClicks(isTiled)
             // Every card changes vocabulary at once, and it does it over a third of a second rather

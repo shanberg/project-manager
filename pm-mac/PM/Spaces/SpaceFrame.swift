@@ -162,8 +162,12 @@ final class SpaceFrame {
     func refresh() {
         let document = store.document
         let board = self.board
-        let tiled = Set(board?.tiling?.ids ?? [])
-        let front = board?.focusedTile ?? (tiled.count == 1 ? tiled.first : nil)
+        // A canvas posing in the tiles of the layout it takes over from (`poseAsTiling`) isn't tiled:
+        // read as a tiling with no name, it would unlight Board and light that layout's cards for the
+        // frames before it leaves them.
+        let tiledNow = board?.isTiled == true && board?.isPosedAsTiling != true
+        let tiled = tiledNow ? Set(board?.tiling?.ids ?? []) : []
+        let front = (tiledNow ? board?.focusedTile : nil) ?? (tiled.count == 1 ? tiled.first : nil)
         if let front, recentFronts.first != front {
             recentFronts.removeAll { $0 == front }
             recentFronts.insert(front, at: 0)
@@ -187,7 +191,7 @@ final class SpaceFrame {
                     && CanvasWorkspaces.tiling(named: $0, of: canvas)?.ids.contains(card) == true }
         }
         // The layouts and their cards: the one up as its board has it now, the rest as saved.
-        let live = board?.isTiled == true ? board?.workspaceName : nil
+        let live = tiledNow ? board?.workspaceName : nil
         let saved = CanvasWorkspaces.of(canvas)
         let layoutCards: [(name: String, cards: [String])] = CanvasWorkspaces.ordered(of: canvas)
             .filter { $0 != notesWorkspace }.map { name in
@@ -266,8 +270,7 @@ final class SpaceFrame {
         // layout was up: Board lit, every layout folded, the new one's cards nowhere, then everything
         // snapping to where it was going all along. The tab is where the window is going, so the rows
         // go there with it. A board tiled under no name (a card shown alone) is its own answer.
-        let current: String? = board?.isTiled == true
-            ? board?.workspaceName : selectedTab?.workspaceName
+        let current: String? = tiledNow ? board?.workspaceName : selectedTab?.workspaceName
         notesShowing = !isSpace && (selectedTab?.isNotesTab == true
             || (current != nil && current == notesWorkspace))
         // A web card's tile in a layout's icon wears its site's hue, as its letter badge does.
@@ -298,7 +301,7 @@ final class SpaceFrame {
             autoPinQueued = true
             DispatchQueue.main.async { [weak self] in self?.autoPin(sharing, before: before, now: held) }
         }
-        boardShowing = !(board?.isTiled ?? false) && current == nil && !notesShowing
+        boardShowing = !tiledNow && current == nil && !notesShowing
         // The page the focused tile is on now, not the address the card was saved with.
         let frontURL: URL? = front.flatMap { id in
             if let live = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL { return live }
