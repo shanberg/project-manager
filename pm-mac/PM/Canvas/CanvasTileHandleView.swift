@@ -552,12 +552,71 @@ final class CanvasTileGripView: NSView {
     var shownTileHandles: Set<String> = [] {
         didSet {
             guard shownTileHandles != oldValue else { return }
-            for id in shownTileHandles.union(oldValue) {
-                handleFade(id).set(shownTileHandles.contains(id))
-            }
+            for id in shownTileHandles.union(oldValue) { settleFade(id) }
             needsDisplay = true
         }
     }
+    /// The tile the pointer is heading for, whose grip is offered faintly ahead of the pointer
+    /// arriving. See `CanvasBoardView.anticipateTileGrip`.
+    var anticipatedTileHandle: String? {
+        didSet {
+            guard anticipatedTileHandle != oldValue else { return }
+            for id in [anticipatedTileHandle, oldValue].compactMap({ $0 }) { settleFade(id) }
+            needsDisplay = true
+        }
+    }
+    /// A little under half strength: enough to be seen in the corner of the eye, and plainly not yet
+    /// the grip itself, which comes up the rest of the way once the pointer is in its zone.
+    static let anticipatedLevel = 0.4
+
+    private func settleFade(_ id: String) {
+        let level = shownTileHandles.contains(id) ? 1 : anticipatedTileHandle == id ? Self.anticipatedLevel : 0
+        handleFade(id).set(level: level)
+    }
+
+    /// **Tiles whose page is loading**, whose grip stands out more while it shows.
+    ///
+    /// A page mid-load is the one surface that is changing under the grip — blanking, repainting, its
+    /// colours arriving — and a mark of a third of the label colour that reads well over a still page
+    /// is lost against one in motion. So while it loads, the grip is drawn more solidly and ringed in
+    /// the window's background colour, which separates it from whatever the page paints next.
+    ///
+    /// Only loading, not scrolling: a page you scroll is one you are reading, and the grip has no
+    /// business getting louder then. And only a load worth reporting (`showsLoad`), for the reason
+    /// the header uses it: pages that poll or reconnect every few seconds would otherwise pulse it.
+    private var loadingFades: [String: CanvasFade] = [:]
+    private var loadingRecheck: DispatchWorkItem?
+
+    /// Told whenever a page's state changes (`CanvasBoardView.pageStateChanged`).
+    func refreshLoading() {
+        guard let board, let tiling = board.tiling else {
+            for fade in loadingFades.values { fade.set(false) }
+            return
+        }
+        var any = false
+        for id in tiling.ids {
+            let loading = (board.nodeViews[id] as? CanvasLinkNodeView)?.showsLoad == true
+            any = any || loading
+            if loading || loadingFades[id] != nil { loadingFade(id).set(loading) }
+        }
+        // Each edge of a load is reported, but a missed one would leave a grip loud forever, so while
+        // anything is loading it is looked at again now and then.
+        loadingRecheck?.cancel()
+        guard any else { return }
+        let recheck = DispatchWorkItem { [weak self] in self?.refreshLoading() }
+        loadingRecheck = recheck
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: recheck)
+    }
+
+    private func loadingFade(_ id: String) -> CanvasFade {
+        if let existing = loadingFades[id] { return existing }
+        let fade = CanvasFade(rise: 0.2, fall: 0.3, on: self) { [weak self] in
+            self?.needsDisplay = true
+        }
+        loadingFades[id] = fade
+        return fade
+    }
+
     private var handleFades: [String: CanvasFade] = [:]
     private let catcher = Catcher()
 
@@ -595,6 +654,7 @@ final class CanvasTileGripView: NSView {
         for id in tiling.ids {
             guard let fade = handleFades[id], fade.isVisible, let handle = board.tileHandle(id) else { continue }
             let presence = fade.presence
+            let loading = loadingFades[id]?.presence ?? 0
             // Widens a little as it fades in — from 70% of its length — so it arrives as a mark coming
             // up under the pointer rather than a rectangle switching on.
             var rect = board.viewRect(handle.bar)
@@ -613,10 +673,17 @@ final class CanvasTileGripView: NSView {
             if board.isTilePinned(id) {
                 NSColor.controlAccentColor.withAlphaComponent(0.85 * presence).setFill()
             } else {
-                NSColor.labelColor.withAlphaComponent(0.32 * presence).setFill()
+                NSColor.labelColor.withAlphaComponent((0.32 + 0.38 * loading) * presence).setFill()
             }
             path.fill()
             NSGraphicsContext.restoreGraphicsState()
+            // While the page under it loads: a ring of the window's colour, so the mark keeps its edge
+            // against whatever is being painted. See `loadingFades`.
+            if loading > 0 {
+                NSColor.windowBackgroundColor.withAlphaComponent(0.75 * loading * presence).setStroke()
+                path.lineWidth = 1.5
+                path.stroke()
+            }
         }
     }
 

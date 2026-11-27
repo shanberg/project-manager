@@ -125,7 +125,7 @@ final class OverviewController: NSObject {
         guard let view else { return }
         if Self.reduceMotion {
             view.alphaValue = 0
-            NSAnimationContext.runAnimationGroup { $0.duration = 0.18; view.animator().alphaValue = 1 }
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.18; view.animator().alphaValue = 1 }  // motion: fade-only
             return
         }
         view.fadeInBackdrop()
@@ -226,7 +226,7 @@ final class OverviewController: NSObject {
     private func fadeOut(then done: @escaping () -> Void) {
         guard let panel else { return finish() }
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.18
+            context.duration = 0.18  // motion: fade-only
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {
@@ -543,7 +543,7 @@ final class OverviewView: NSView {
     func fadeInBackdrop() {
         for view in [backdrop, dim, header] {
             view.alphaValue = 0
-            NSAnimationContext.runAnimationGroup { $0.duration = 0.22; view.animator().alphaValue = 1 }
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.22; view.animator().alphaValue = 1 }  // motion: fade-only
         }
     }
 
@@ -551,7 +551,7 @@ final class OverviewView: NSView {
         guard let tile = tiles[key] else { return }
         tile.alphaValue = 0
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            NSAnimationContext.runAnimationGroup { $0.duration = 0.24; tile.animator().alphaValue = 1 }
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.24; tile.animator().alphaValue = 1 }  // motion: fade-only
         }
     }
 
