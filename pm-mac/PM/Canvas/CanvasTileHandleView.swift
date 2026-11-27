@@ -569,9 +569,31 @@ final class CanvasTileGripView: NSView {
     /// the grip itself, which comes up the rest of the way once the pointer is in its zone.
     static let anticipatedLevel = 0.4
 
+    /// **How long a grip stays up after the pointer leaves it**, before it starts to fade.
+    ///
+    /// Gone the moment the pointer left its zone, the grip was hard to catch: the zone is only the top
+    /// of the tile, and a hand that overshoots by a few points, or drifts while deciding, saw the mark
+    /// it was reaching for go out from under it. A short hold forgives that, and makes the grip read as
+    /// a thing that is there rather than a flicker that follows the pointer. Not while a tile is being
+    /// carried, or with the grips put away, where it should go at once.
+    static let linger: TimeInterval = 0.7
+    private var levels: [String: Double] = [:]
+    private var lingering: [String: DispatchWorkItem] = [:]
+
     private func settleFade(_ id: String) {
         let level = shownTileHandles.contains(id) ? 1 : anticipatedTileHandle == id ? Self.anticipatedLevel : 0
-        handleFade(id).set(level: level)
+        let previous = levels[id] ?? 0
+        levels[id] = level
+        lingering.removeValue(forKey: id)?.cancel()
+        let holds = board.map { $0.gesture == nil && !$0.tileGripsHeld } ?? false
+        guard level < previous, holds else { return handleFade(id).set(level: level) }
+        let hold = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            lingering[id] = nil
+            if let wanted = levels[id] { handleFade(id).set(level: wanted) }
+        }
+        lingering[id] = hold
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.linger, execute: hold)
     }
 
     /// **Tiles whose page is loading**, whose grip stands out more while it shows.
@@ -632,7 +654,7 @@ final class CanvasTileGripView: NSView {
         if let existing = handleFades[id] { return existing }
         // Quicker in than out: appearing has to keep up with a pointer, and leaving is allowed to take
         // its time because nothing is waiting on it.
-        let fade = CanvasFade(rise: 0.11, fall: 0.18, on: self) { [weak self] in
+        let fade = CanvasFade(rise: 0.11, fall: 0.3, on: self) { [weak self] in
             self?.needsDisplay = true
         }
         handleFades[id] = fade
