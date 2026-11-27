@@ -183,6 +183,7 @@ Decided 2026-11-13 in `.claude/mocks/folio-layout-cards.html`; built the same da
 - A pinned card's row in Pinned: a layout mark with a count (no count for one). Click: that layout, the card in front; with two or more, a menu of them.
 - Layouts are pinned: rows at the head of Pinned, always.
 - Only the layout on screen is unfolded. A folded layout row shows its drawing.
+- Which layout is up is the board's once it has tiled, and its tab's until then, so the sidebar never shows the in-between (Board lit, every layout folded) while a layout's tab is being built. Its cards unfold with a 0.2 s fade, dropping 4 pt from under its row; folding is instant, and its row's chip lights at once.
 - Click a row under a layout: that layout, that tile in front. Click a row in Pinned or Today: the card alone (`openAlone`).
 - Add to Layout (a row's menu, or a drag onto a layout row or its tiles): an unpinned card moves under that layout, out of Today / Cards. One already in a layout is pinned, and a toast says so: Pinned “<name>”: it’s in 2 layouts, with Undo.
 - Move to Today / Cards (a row's menu, or dragging it out): out of the layout.
