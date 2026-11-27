@@ -208,7 +208,19 @@ final class CanvasBoardView: NSView {
             // near-invisible edge and its two radii on the way in, over a ground that darkens with
             // them. See `tiledness`, which is the number all of that is drawn against.
             tiledFade.set(isTiled)
+            cardsChangedShape()
         }
+    }
+
+    /// Tell every card that the shape it is drawn at has flipped — card to tile, or back.
+    ///
+    /// **At the flip, not on the first frame of the fade after it.** A card showing a picture of its
+    /// page swaps it for the picture of the shape it is now, and it used to wait for `tilednessChanged`
+    /// to ask — which is the display link's next tick, one committed frame after the tiles were laid
+    /// out. A tiling restored without animation (a workspace tab built for the click) put that frame on
+    /// screen: tiles wearing the card-shaped pictures of the board they were built on.
+    func cardsChangedShape() {
+        for view in nodeViews.values { view.shapeChanged() }
     }
 
     // MARK: Between the two modes
@@ -450,7 +462,9 @@ final class CanvasBoardView: NSView {
     /// Whether the workspace is zoomed out to the board so you can pick its cards (⌥B). The tiling is
     /// still up — nothing about the workspace is set aside — and only what is drawn, and what a click
     /// means, changes. See `beginPicking` and `showsTiles`.
-    var isPicking = false
+    var isPicking = false {
+        didSet { if isPicking != oldValue { cardsChangedShape() } }
+    }
     /// The card Space brought close while picking, and where the board was looking before it did, so
     /// that putting it back is exact. See `beginPeek`.
     var peeking: (card: String, zoom: CGFloat, centre: CanvasPoint)?
@@ -834,6 +848,19 @@ final class CanvasBoardView: NSView {
     /// `centre(on:)` asked for a second one on top of it.
     func refreshVisibleCards() { buildNodeViews() }
 
+    /// Set while a pane opened at a workspace is fitting the board it is about to tile, so the fit
+    /// builds nothing.
+    ///
+    /// **The board a workspace pane fits first is a board nobody sees.** It is there only so that leaving
+    /// the tiling has somewhere sensible to go back to (`restoreTiling`'s `restoreVisible`), and the
+    /// tiling is restored in the same pass. But fitting it built every card the fitted board could see —
+    /// forty on a full board, each a view, a picture and in a web card's case a page decision — and a
+    /// workspace keeps every card it has built (`CanvasVisibleCards`), so all of it was then hidden
+    /// under six tiles and kept. That build is most of what the window spent showing nothing between
+    /// two workspaces. Only the document's layout is held: once the tiling is up, its tiles are built as
+    /// usual.
+    var holdsBoardBuilds = false
+
     /// Build and drop card views as the visible region moves — without moving the ones that stay.
     ///
     /// The keep-alive region is the visible rectangle grown by a screenful, so a card is ready before
@@ -846,7 +873,7 @@ final class CanvasBoardView: NSView {
     /// group ran there was nothing left to move and every tiling snapped into place. See
     /// `settleIntoLayout`.
     private func buildNodeViews() {
-        guard window != nil else { return }
+        guard window != nil, !(holdsBoardBuilds && layout.isDocument) else { return }
         FrameMeter.span("build") { buildNodeViewsBody() }
     }
 

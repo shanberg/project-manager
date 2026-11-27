@@ -793,6 +793,9 @@ class CanvasNodeView: NSView {
     /// About to be thrown away because it scrolled out of view. A web card stops loading here.
     func prepareForRemoval() {}
 
+    /// The board flipped between showing cards and showing tiles. See `CanvasBoardView.cardsChangedShape`.
+    func shapeChanged() {}
+
     // MARK: The page budget
 
     /// Whether this card runs something the board's page budget governs. Only web cards do.

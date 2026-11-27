@@ -437,8 +437,15 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         if revealed {
             let configuration = WKSnapshotConfiguration()
             configuration.afterScreenUpdates = false
+            let shape = Shape(of: running, tiled: shapeIsTiled)
             running.takeSnapshot(with: configuration) { [weak self] image, _ in
                 guard let self, let image, web == nil else { return }
+                // **The page has moved on by the time this lands**: it is in the other board's card,
+                // laid out at that card's size, and a picture taken now is of that shape, not this one.
+                // Filed here, a workspace handing its page back to the canvas put a card-shaped picture
+                // under the tile's key, and the next time the workspace opened with its pages paused its
+                // tiles showed it. Only kept when nothing about the shape moved.
+                guard shape.holds(for: running, tiled: shapeIsTiled) else { return }
                 showFrozen(image)
                 placeholder?.isHidden = true
             }
@@ -456,7 +463,9 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         web = nil
         revealed = false
         linkStatus?.hideNow()
-        placeholder?.isHidden = false
+        // What this card last looked like at its shape, until the snapshot above lands — and for good,
+        // when that snapshot turns out to be of the other board's shape.
+        showStoredPicture()
         board.pageStateChanged()
         return handover
     }
@@ -514,9 +523,16 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
         // on a view nobody can see is how a snapshot comes back nil. Take what has already painted.
         configuration.afterScreenUpdates = false
         let showing = revealed
+        let shape = Shape(of: running, tiled: shapeIsTiled)
         running.takeSnapshot(with: configuration) { [weak self] image, _ in
             guard let self, web === running else { self?.freezing = false; return }
-            if let image, showing { showFrozen(image) }
+            // A pause asked for on one side of a crossing and answered on the other is a picture of the
+            // shape the card was, filed as the shape it is. The stored picture stands in instead.
+            if let image, showing, shape.holds(for: running, tiled: shapeIsTiled) {
+                showFrozen(image)
+            } else if showing {
+                showStoredPicture()
+            }
             tearDownPage()
             freezing = false
         }
@@ -528,9 +544,33 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// `CanvasPageVisits` made for the address, and for the same reason: a view is the shortest-lived
     /// thing here. See `CanvasPageSnapshots`.
     private func showFrozen(_ image: NSImage) {
-        CanvasPageSnapshots.keep(image, for: pageKey, tiled: board.isTiled)
+        CanvasPageSnapshots.keep(image, for: pageKey, tiled: shapeIsTiled)
         showPicture(image)
-        pictureIsTiled = board.isTiled
+        pictureIsTiled = shapeIsTiled
+    }
+
+    /// Whether this card is drawn as a tile right now — the shape a picture of it is filed under.
+    ///
+    /// **The screen's answer, not the workspace's.** `isTiled` stays true while a workspace is zoomed
+    /// out to its board to pick cards (`showsTiles`), and every card on that board is card-shaped. A page
+    /// paused there — and the budget pauses them, at the zoom picking shows — was filed as a tile's
+    /// picture, so the workspace's tiles came back next time wearing a picture of a card.
+    private var shapeIsTiled: Bool { board.showsTiles }
+
+    /// The shape a snapshot was asked for at, to check it against when the answer arrives.
+    ///
+    /// `takeSnapshot` answers a turn or more later, and a crossing, a pick or a handover to another
+    /// board can all reshape the page in between.
+    private struct Shape {
+        let size: NSSize
+        let tiled: Bool
+        init(of web: WKWebView, tiled: Bool) {
+            size = web.bounds.size
+            self.tiled = tiled
+        }
+        func holds(for web: WKWebView, tiled now: Bool) -> Bool {
+            tiled == now && web.bounds.size == size
+        }
     }
 
     /// Whether the picture up was taken as a tile — nil when there isn't one — so crossing between the
@@ -540,8 +580,8 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
 
     /// The stored picture for the shape the card is now, or the placeholder when there is none.
     private func showStoredPicture() {
-        pictureIsTiled = board.isTiled
-        if let picture = CanvasPageSnapshots.of(pageKey, tiled: board.isTiled) {
+        pictureIsTiled = shapeIsTiled
+        if let picture = CanvasPageSnapshots.of(pageKey, tiled: shapeIsTiled) {
             showPicture(picture)
             placeholder?.isHidden = true
         } else {
@@ -556,7 +596,13 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
     /// crossing, since it only does anything on the frame the mode actually flips.
     override func refreshTiledness(fading: Bool) {
         super.refreshTiledness(fading: fading)
-        guard !revealed, pictureIsTiled != board.isTiled else { return }
+        shapeChanged()
+    }
+
+    /// Asked at the moment the board flips as well as on each frame of the fade after it — see
+    /// `CanvasBoardView.cardsChangedShape`.
+    override func shapeChanged() {
+        guard !revealed, pictureIsTiled != shapeIsTiled else { return }
         showStoredPicture()
     }
 
@@ -1294,7 +1340,7 @@ final class CanvasLinkNodeView: CanvasNodeView, CanvasPopupOpener {
             resumeURL = web.url ?? resumeURL ?? url
             noteVisit()
             let key = pageKey
-            let tiled = board.isTiled
+            let tiled = shapeIsTiled
             let configuration = WKSnapshotConfiguration()
             configuration.afterScreenUpdates = false
             web.takeSnapshot(with: configuration) { image, _ in
@@ -2078,7 +2124,7 @@ extension CanvasLinkNodeView: WKNavigationDelegate {
         // stored picture is kept, and stands in again the next time the card tries.
         frozen?.removeFromSuperview()
         frozen = nil
-        pictureIsTiled = board.isTiled
+        pictureIsTiled = shapeIsTiled
         placeholder?.isHidden = false
         lastFailure = ns.localizedDescription
         say("Couldn't load", tooltip: lastFailure)
