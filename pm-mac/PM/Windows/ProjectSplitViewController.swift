@@ -129,7 +129,8 @@ final class ProjectSplitViewController: NSSplitViewController {
         // it, and folds it into the scroll edge effect, none of which a view in the pane can do for
         // itself. It's also what frees the pane of the header bar it used to need.
         let bottomBar = NSSplitViewItemAccessoryViewController()
-        let bottomBarHosting = NSHostingController(rootView: SidebarBottomBar())
+        let bottomBarHosting = MeteredHostingController(rootView: AnyView(SidebarBottomBar()))
+        bottomBarHosting.meterName = "bottomBar"
         // `.minSize` so the accessory takes the bar's own height from SwiftUI rather than being sized
         // by AppKit — the same reason the sidebar itself uses it.
         bottomBarHosting.sizingOptions = [.minSize]
@@ -407,6 +408,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         tabModel.renameWorkspace = { [weak self] name in self?.renameWorkspace(named: name) }
         tabModel.duplicateWorkspace = { [weak self] name in self?.duplicateWorkspace(named: name) }
         tabModel.deleteWorkspace = { [weak self] name in self?.deleteWorkspace(named: name) }
+        tabModel.arrangeWorkspace = { [weak self] name, arrangement in self?.arrangeWorkspace(name, arrangement) }
         tabModel.renameTab = { [weak self] id, name in self?.renameTab(id, to: name) }
     }
 
@@ -432,6 +434,14 @@ final class ProjectSplitViewController: NSSplitViewController {
     /// Pop Out from a workspace's chip: its tab up, then every tile out — once the tiles are there,
     /// which for a pane just built for the tab is a turn or more after it is shown. See
     /// `CanvasPaneController.whenInWorkspace`.
+    /// Arrange from a workspace's chip or its sidebar row: its tab up, then its tiles dealt out again —
+    /// once they are there, as `popOutWorkspace` waits.
+    func arrangeWorkspace(_ name: String, _ arrangement: CanvasTiling.Arrangement) {
+        openTab(.board(.workspace(name)))
+        guard let pane = canvasPane else { return }
+        pane.whenInWorkspace(name) { [weak pane] in pane?.board.setArrangement(arrangement) }
+    }
+
     func popOutWorkspace(_ name: String) {
         openTab(.board(.workspace(name)))
         guard let pane = canvasPane else { return }
@@ -1407,6 +1417,28 @@ final class SidebarPeek: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             guard let self, !isPointerInside else { return }
             onExit()
+        }
+    }
+}
+
+// MARK: Bench
+
+extension ProjectSplitViewController {
+    /// Fold the sidebar away or bring it back without animating, for `CrossingBench.runJourney`'s
+    /// `sidebarOff` — a measurement, not a gesture, so it must not leave an animation running into
+    /// the first step.
+    /// Swap the sidebar host's `.minSize` sizing off and back, for `CrossingBench`'s sidebar journey.
+    func setSidebarSizingForBench(minSize: Bool) {
+        sidebarHosting.sizingOptions = minSize ? [.minSize] : []
+    }
+
+    func setSidebarCollapsedForBench(_ collapsed: Bool) {
+        guard let item = splitViewItems.first, item.isCollapsed != collapsed else { return }
+        // motion: none — a measurement switching state between steps, not an animation anyone sees.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            item.isCollapsed = collapsed
         }
     }
 }

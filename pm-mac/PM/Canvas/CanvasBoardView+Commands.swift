@@ -522,7 +522,8 @@ extension CanvasBoardView {
             if let chip = tabChip(at: where_) {
                 if tabGroup(for: chip.card).count == 1 { showTab(chip.card) }
                 menuTile = chip.card
-                buildCardMenu(menu, id: chip.card, includingTiling: false, includingDelete: false)
+                buildCardMenu(menu, id: chip.card, includingTiling: false, includingDelete: false,
+                              includingShare: false)
                 menu.insertItem(.sectionHeader(title: "Card"), at: 0)
                 addTabSection(menu, id: chip.card)
                 return menu
@@ -577,10 +578,19 @@ extension CanvasBoardView {
     /// `addTileSection`. The first header goes in afterwards because `buildCardMenu` is shared with the
     /// untiled board, where there is only one kind of object and a header would be labelling the whole
     /// menu.
+    ///
+    /// The order every menu here follows: this card, then where it is (the tile), then Share, then the
+    /// two that take something away — Close, and after a line of its own, Delete.
     private func buildTileMenu(_ menu: NSMenu, id: String) {
-        buildCardMenu(menu, id: menuLead(id), includingTiling: false, includingDelete: false)
+        buildCardMenu(menu, id: menuLead(id), includingTiling: false, includingDelete: false,
+                      includingShare: false)
         menu.insertItem(.sectionHeader(title: "Card"), at: 0)
         addTileSection(menu, id: id)
+        addShareMenu(menu)
+        menu.addItem(.separator())
+        add(menu, tiling?.hasTabs(id) == true ? "Close Tab" : "Close Tile", #selector(removeMenuTile(_:)))
+        menu.addItem(.separator())
+        addDeleteCard(menu)
     }
 
     /// The menu for cards named from somewhere that is not the board: a row in a lens (docs/items.md
@@ -710,13 +720,13 @@ extension CanvasBoardView {
     /// `includingDelete` is false where a tile or tab section follows, which ends with Delete itself so
     /// that removing is always the last thing in the menu.
     private func buildCardMenu(_ menu: NSMenu, id: String?, includingTiling: Bool = true,
-                               includingDelete: Bool = true) {
+                               includingDelete: Bool = true, includingShare: Bool = true) {
         if let id, let node = document.node(id: id) {
             addOwnCommands(menu, id: id, node: node)
         } else if id != nil {
             return
         }
-        addCommonCommands(menu, includingTiling: includingTiling)
+        addCommonCommands(menu, includingTiling: includingTiling, includingShare: includingShare)
         if includingDelete {
             menu.addItem(.separator())
             addDeleteCard(menu)
@@ -832,7 +842,7 @@ extension CanvasBoardView {
             addPageMenu(menu, id: id)
             if let card = nodeViews[id] as? CanvasLinkNodeView {
                 addSiteMenu(menu, card: card)
-                addCardOptionsMenu(menu, card: card)
+                addSessionMenu(menu, card: card)
             }
         case .text where nodeViews[id] is CanvasViewNodeView:
             // A view has no text to edit — its text is the one line Obsidian shows — so its menu is its
@@ -877,6 +887,18 @@ extension CanvasBoardView {
             page.addItem(.separator())
             add(page, "Show Web Inspector", #selector(showLinkInspector))
         }
+        // What the page may do while it is up: play, make sound, keep running. These were a
+        // "Card Options" submenu of their own, a grab bag one level further down. See `CanvasCardMedia`.
+        let cards = selectedLinkCards
+        if !cards.isEmpty {
+            page.addItem(.separator())
+            add(page, CanvasCardMedia.autoplayTitle(cards.count), #selector(toggleAutoplay)).state =
+                cards.allSatisfy(\.autoplays) ? .on : .off
+            add(page, CanvasCardMedia.muteTitle(cards.count), #selector(toggleMuted)).state =
+                cards.allSatisfy(\.isMuted) ? .on : .off
+            add(page, CanvasCardMedia.keepRunningTitle(cards.count), #selector(toggleKeepRunning)).state =
+                cards.allSatisfy(\.keepsPageRunning) ? .on : .off
+        }
         menu.addItem(withTitle: "Page", action: nil, keyEquivalent: "").submenu = page
     }
 
@@ -912,21 +934,6 @@ extension CanvasBoardView {
         menu.addItem(withTitle: site.title, action: nil, keyEquivalent: "").submenu = site
     }
 
-    /// What is stored on this card: what its page may play, whether it keeps running, and which
-    /// browser session it is on. See `CanvasCardMedia`.
-    private func addCardOptionsMenu(_ menu: NSMenu, card: CanvasLinkNodeView) {
-        let options = NSMenu(title: "Card Options")
-        let count = selectedLinkCards.count
-        add(options, CanvasCardMedia.autoplayTitle(count), #selector(toggleAutoplay)).state =
-            selectedLinkCards.allSatisfy(\.autoplays) ? .on : .off
-        add(options, CanvasCardMedia.muteTitle(count), #selector(toggleMuted)).state =
-            selectedLinkCards.allSatisfy(\.isMuted) ? .on : .off
-        add(options, CanvasCardMedia.keepRunningTitle(count), #selector(toggleKeepRunning)).state =
-            selectedLinkCards.allSatisfy(\.keepsPageRunning) ? .on : .off
-        addSessionMenu(options, card: card)
-        menu.addItem(withTitle: "Card Options", action: nil, keyEquivalent: "").submenu = options
-    }
-
     /// Share ▸, the system's, for the selected cards that have an address or a file.
     private func addShareMenu(_ menu: NSMenu) {
         let items: [Any] = selection.compactMap { id -> URL? in
@@ -944,7 +951,7 @@ extension CanvasBoardView {
 
     /// What every card answers to, whatever it is, in the template's order: Edit, Share, then the
     /// arrangement. Delete follows from the caller, last.
-    private func addCommonCommands(_ menu: NSMenu, includingTiling: Bool) {
+    private func addCommonCommands(_ menu: NSMenu, includingTiling: Bool, includingShare: Bool = true) {
         // Every edit is out while tiled (Tidy Up and Size included), so the block and its separator go.
         if !isTiled {
             menu.addItem(.separator())
@@ -960,10 +967,11 @@ extension CanvasBoardView {
                 menu.addItem(withTitle: "Size", action: nil, keyEquivalent: "").submenu = size
             }
             // Any one card out into a window of its own; a tile has its own item (`addTileSection`).
-            if windowableCard != nil { add(menu, "Move to Window", #selector(moveMenuCardToWindow)) }
+            if windowableCard != nil { add(menu, "Move to New Window", #selector(moveMenuCardToWindow)) }
         }
-        addShareMenu(menu)
+        // Where it is before Share: the smaller scope first, and Share is about leaving the app.
         if includingTiling { addTiling(menu) }
+        if includingShare { addShareMenu(menu) }
     }
 
     /// The project cards in the selection — what every project command acts on.
@@ -987,7 +995,7 @@ extension CanvasBoardView {
     private func addShowsMenu(_ menu: NSMenu) {
         let cards = selectedProjectCards
         guard !cards.isEmpty else { return }
-        let shows = NSMenu(title: "Shows")
+        let shows = NSMenu(title: "Show")
         for preset in CanvasCardShows.menuCases {
             let entry = add(shows, preset.title, #selector(setShowsPreset(_:)))
             entry.representedObject = preset.rawValue
@@ -999,7 +1007,7 @@ extension CanvasBoardView {
             entry.state = cards.allSatisfy { $0.shows == preset } ? .on : .off
         }
 
-        let item = menu.addItem(withTitle: "Shows", action: nil, keyEquivalent: "")
+        let item = menu.addItem(withTitle: "Show", action: nil, keyEquivalent: "")
         item.submenu = shows
     }
 
@@ -1162,18 +1170,23 @@ extension CanvasBoardView {
         guard !cards.isEmpty else { return }
         // Only some views have a *when*: Waiting and Projects are about now, and a search is about words.
         // Coming up laid out on the calendar looks as far as it draws, so its horizon isn't a setting there.
+        // **One Show ▸, as every other kind of card has** — when, which projects and how, as sections
+        // of it. These were three submenus side by side (Period, Projects, View As), each a word of
+        // its own for the same question: what does this card show.
+        let show = NSMenu(title: "Show")
         let kinds = Set(cards.map(\.spec.kind))
         if kinds.count == 1, let kind = kinds.first, !CanvasViewSpec.spans(for: kind, pinned: []).isEmpty {
-            // One kind that is laid out in time: when and how in one menu, a row of layouts per period.
-            addSpanMenu(menu, cards, kind: kind)
-            addProjectsMenu(menu, cards)
+            // One kind that is laid out in time: when and how in one list, a row of layouts per period.
+            addSpanMenu(show, cards, kind: kind)
+            addProjectsMenu(show, cards)
         } else {
             if cards.allSatisfy({ $0.spec.kind.hasPeriod && !($0.spec.kind == .comingUp && $0.spec.shownLayout != .list) }) {
-                addPeriodMenu(menu, cards)
+                addPeriodMenu(show, cards)
             }
-            addProjectsMenu(menu, cards)
-            addLayoutMenu(menu, cards)
+            addProjectsMenu(show, cards)
+            addLayoutMenu(show, cards)
         }
+        menu.addItem(withTitle: "Show", action: nil, keyEquivalent: "").submenu = show
         // Every view reads as text (docs/views.md D10): the same answer as a document, for the standup or
         // the client's update. Several cards are one document, in the order they were chosen.
         add(menu, cards.count > 1 ? "Copy \(cards.count) Views as Text" : "Copy as Text", #selector(copyViewsAsText(_:)))
@@ -1184,7 +1197,7 @@ extension CanvasBoardView {
     /// sets both, so Layout never rewrites Period behind the menu. See `CanvasViewSpec.spans`.
     private func addSpanMenu(_ menu: NSMenu, _ cards: [CanvasViewNodeView], kind: CanvasViewKind) {
         let pinned = cards.map(\.spec.period).filter { if case .day = $0 { return true }; return false }
-        let periods = NSMenu(title: "Period")
+        let periods = menu
         for (period, layouts) in CanvasViewSpec.spans(for: kind, pinned: pinned) {
             periods.addItem(.sectionHeader(title: kind.title(of: period)))
             periods.addItem(MenuPictures.palette(kind.title(of: period), layouts.map { layout in
@@ -1204,7 +1217,6 @@ extension CanvasBoardView {
                 item.representedObject = [period.value, CanvasViewSpec.Layout.list.rawValue]
             }
         }
-        menu.addItem(withTitle: "Period", action: nil, keyEquivalent: "").submenu = periods
     }
 
     /// A since-the-last-meeting period per project whose calendars are linked (D2, Calendars step 4) —
@@ -1255,8 +1267,15 @@ extension CanvasBoardView {
         pasteboard.setString(texts.joined(separator: "\n"), forType: .string)
     }
 
+    /// A heading in Show ▸, under a line when something is above it.
+    private func addShowSection(_ menu: NSMenu, _ title: String) {
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        menu.addItem(.sectionHeader(title: title))
+    }
+
     private func addPeriodMenu(_ menu: NSMenu, _ cards: [CanvasViewNodeView]) {
-        let periods = NSMenu(title: "Period")
+        addShowSection(menu, "Period")
+        let periods = menu
         // Cards of one kind get that kind's words — Leftovers reads a period as a cut-off, Coming up as a
         // horizon. A mix gets the plain ones, which have to mean every kind at once.
         let kinds = Set(cards.map(\.spec.kind))
@@ -1278,11 +1297,11 @@ extension CanvasBoardView {
                 item.representedObject = period.value
             }
         }
-        menu.addItem(withTitle: "Period", action: nil, keyEquivalent: "").submenu = periods
     }
 
     private func addProjectsMenu(_ menu: NSMenu, _ cards: [CanvasViewNodeView]) {
-        let projects = NSMenu(title: "Projects")
+        addShowSection(menu, "Projects")
+        let projects = menu
         for (title, value) in [(CanvasViewSpec.Projects.everything.title, "everything"),
                                (CanvasViewSpec.Projects.board.title, "board")] {
             let item = add(projects, title, #selector(setViewProjects(_:)))
@@ -1290,7 +1309,6 @@ extension CanvasBoardView {
             let wanted: CanvasViewSpec.Projects = value == "board" ? .board : .everything
             item.state = cards.allSatisfy { $0.spec.projects == wanted } ? .on : .off
         }
-        menu.addItem(withTitle: "Projects", action: nil, keyEquivalent: "").submenu = projects
     }
 
     /// How time is laid out (D9): the layouts every selected card offers, and the rail only where every
@@ -1299,13 +1317,13 @@ extension CanvasBoardView {
         var layouts = CanvasViewSpec.Layout.allCases.filter { layout in cards.allSatisfy { $0.spec.kind.layouts.contains(layout) } }
         if cards.contains(where: { $0.spec.period.isSpan }) { layouts.removeAll { $0 == .rail } }
         guard layouts.count > 1 else { return }
-        let submenu = NSMenu(title: "View As")
+        addShowSection(menu, "Layout")
+        let submenu = menu
         for layout in layouts {
             let item = add(submenu, layout.title, #selector(setViewLayout(_:)))
             item.representedObject = layout.rawValue
             item.state = cards.allSatisfy { $0.spec.shownLayout == layout } ? .on : .off
         }
-        menu.addItem(withTitle: "View As", action: nil, keyEquivalent: "").submenu = submenu
     }
 
     /// Lay the selected views out one way, growing each to what the layout needs — seven columns don't
@@ -1384,7 +1402,7 @@ extension CanvasBoardView {
         let cards = selectedFolderCards
         guard !cards.isEmpty else { return }
         let options = cards.map { CanvasFolderOptions.of($0.node) }
-        let view = NSMenu(title: "Show As")
+        let view = NSMenu(title: "Show")
         for layout in CanvasFolderView.allCases {
             let entry = add(view, layout.title, #selector(setFolderView(_:)))
             entry.representedObject = layout.rawValue
@@ -1418,7 +1436,7 @@ extension CanvasBoardView {
             entry.keyEquivalent = "j"
             entry.keyEquivalentModifierMask = [.command]
         }
-        menu.addItem(withTitle: "Show As", action: nil, keyEquivalent: "").submenu = view
+        menu.addItem(withTitle: "Show", action: nil, keyEquivalent: "").submenu = view
     }
 
     /// The link cards in the selection — what every command in the link block above acts on.
@@ -1447,7 +1465,8 @@ extension CanvasBoardView {
     /// right for nearly every card ever made, and this is the escape hatch for the case it cannot
     /// express — the second account. See `CanvasCardSession`.
     private func addSessionMenu(_ menu: NSMenu, card: CanvasLinkNodeView) {
-        let sessions = NSMenu(title: "Session")
+        // "Browser Profile", not "Session": a session in this app is a sitting on a project's work.
+        let sessions = NSMenu(title: "Browser Profile")
         let shared = add(sessions, "Shared", #selector(useSharedSession))
         shared.state = card.profile == nil ? .on : .off
         sessions.addItem(.separator())
@@ -1461,9 +1480,9 @@ extension CanvasBoardView {
         let private_ = add(sessions, CanvasWebSession.ephemeralName, #selector(usePrivateSession))
         private_.state = card.profile == CanvasWebSession.ephemeralName ? .on : .off
         sessions.addItem(.separator())
-        add(sessions, "New Session\u{2026}", #selector(useNewSession))
+        add(sessions, "New Profile\u{2026}", #selector(useNewSession))
 
-        let item = menu.addItem(withTitle: "Session", action: nil, keyEquivalent: "")
+        let item = menu.addItem(withTitle: "Browser Profile", action: nil, keyEquivalent: "")
         item.submenu = sessions
     }
 
@@ -1492,30 +1511,7 @@ extension CanvasBoardView {
         menu.addItem(.separator())
         add(menu, divider.isVertical ? "Even Out Columns" : "Even Out These Tiles",
             #selector(evenOutTiles(_:)))
-
-        menu.addItem(.separator())
-        addArrange(menu)
-    }
-
-    /// Arrange's commands. An arrangement deals the tiles out into columns and is then forgotten
-    /// (docs/canvas-workspaces.md §7k), so the tick is read off the tiles: it is on while they are still
-    /// as that arrangement deals them. See `isArranged(as:)`.
-    private func addArrange(_ menu: NSMenu) {
-        let arrange = NSMenu()
-        arrange.addItem(MenuPictures.palette("Arrange", CanvasTiling.Arrangement.allCases.map { option in
-            let item = NSMenuItem(title: option.title, action: option == .grid ? #selector(arrangeAsGrid(_:))
-                                                                               : #selector(arrangeAsMasterStack(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.image = MenuPictures.arrangement(option)
-            MenuPictures.forceImageVisible(item)
-            return item
-        }))
-        if isTiled {
-            arrange.addItem(.separator())
-            add(arrange, "Size Columns to Content", #selector(sizeColumnsToContent(_:)))
-        }
-        menu.addItem(withTitle: "Arrange", action: nil, keyEquivalent: "").submenu = arrange
+        // Arrange is the layout's, not this boundary's: its tab chip, its sidebar row, Canvas ▸ Layout.
     }
 
     /// What a right-click on a *tile* can say about the tile, as opposed to about the card in it.
@@ -1530,23 +1526,18 @@ extension CanvasBoardView {
     /// and "Delete Card" sitting a line above "Remove from Workspace" without one is a menu inviting the
     /// mistake. `buildCardMenu` gets the matching header inserted above it by the caller.
     ///
-    /// **Remove, not close**, and it is the last item for the same reason Delete is last everywhere
-    /// else: it is the one that takes something away. A tile is a view of a card, so "close" would be
-    /// the ambiguous word — half of what a person means by closing something is destroying it, and
-    /// this destroys nothing. See `removeFromTiling`.
-    ///
-    /// `wholeTile` is the strip's menu, which is about the tile and all its tabs rather than the card
-    /// showing: what goes into it is already above, under Tabs, and Remove takes every tab.
-    private func addTileSection(_ menu: NSMenu, id: String, wholeTile: Bool = false) {
+    /// **Close, not Remove** (2026-11-27). The tile's ✕, ⌘W and the tab's × already said Close, and
+    /// the menus said Remove from Layout, Remove Tile from Layout and Out of the Layout for the same act.
+    /// The worry that Close reads as destroying is answered by where Delete sits: after a line of its own,
+    /// last, never beside Close. See `removeFromTiling`. The caller adds both, after Share.
+    private func addTileSection(_ menu: NSMenu, id: String) {
         guard let tiling else { return }
         menu.addItem(.sectionHeader(title: "Tile"))
         // **First, because it is the one you reach for**: fill the room with this tile for a moment and
         // put the workspace back afterwards. The header's tile capsule offers the same item, and the
         // handlebar's double-click is the gesture — see `toggleMaximizeTile`.
         //
-        // Absent in a workspace of one tile, which already fills the room. A menu can simply not carry
-        // an item; that is the whole reason these verbs are in a menu rather than in a row of buttons
-        // that would have to twitch or sit dimmed.
+        // Absent in a workspace of one tile, which already fills the room.
         if tiling.ids.count > 1 {
             let item = add(menu, maximizeTileTitle, #selector(maximizeMenuTile(_:)))
             item.keyEquivalent = "\r"
@@ -1555,34 +1546,16 @@ extension CanvasBoardView {
             // A workspace of one tile already fills the room; this puts a maximized card back.
             add(menu, maximizeTileTitle, #selector(maximizeTile(_:)))
         }
-        addArrange(menu)
+        // **No Tile Options ▸ any more.** It was a grab bag one level down, and three of its seven items
+        // were also in the Tab section or the strip's menu. What it held is here, on the tab's menu
+        // (Pull Out of Tabs), on the strip's (Tabs on Top or Side), and in Add Card ▸ (Pick Cards on Canvas).
+        if tiling.canPromote(id) { add(menu, "Make Main Tile", #selector(promoteMenuTile(_:))) }
+        // The deliberate half of locking: a drag can change a lock but never make one. See `togglePinTile`.
+        if pinnableTile != nil { add(menu, pinTileTitle, #selector(togglePinTileSize(_:))) }
         // Out into a window of its own, every tab of it. See `CanvasSatelliteWindow`.
-        add(menu, tiling.hasTabs(id) ? "Move Tabs to Window" : "Move to Window",
+        add(menu, tiling.hasTabs(id) ? "Move Tabs to New Window" : "Move to New Window",
             #selector(moveMenuTileToWindow(_:)))
-
-        // Everything else a tile can be told, one level down so the menu stays short. The workspace's
-        // name is on its tab, so renaming it is the tab's and Canvas ▸ Workspace's, not a tile's.
-        let options = NSMenu(title: "Tile Options")
-        if tiling.canPromote(id) { add(options, "Make Master Tile", #selector(promoteMenuTile(_:))) }
-        // The deliberate half of pinning: a drag can change a pin but never make one. See `togglePinTile`.
-        if pinnableTile != nil { add(options, pinTileTitle, #selector(togglePinTileSize(_:))) }
-        // A tile of several cards can let the one showing go into a tile of its own. See `pullTabOut`.
-        if tiling.hasTabs(id), !wholeTile { add(options, "Pull Out of Tabs", #selector(pullMenuTabOut(_:))) }
-        if tiling.hasTabs(id) { options.addItem(tabsPalette()) }
-        if !options.items.isEmpty { options.addItem(.separator()) }
-        // Here as well as on the canvas's own menu, whose gaps are four points wide.
-        if !wholeTile { addExistingCards(options); addReplaceWith(options) }
-        add(options, pickCardsTitle, #selector(pickCardsOnBoard(_:)))
-        menu.addItem(withTitle: "Tile Options", action: nil, keyEquivalent: "").submenu = options
-
-        menu.addItem(.separator())
-        if wholeTile {
-            add(menu, "Remove Tile from Layout", #selector(removeMenuTileWithTabs(_:)))
-        } else {
-            // The card's Delete, held back by `buildTileMenu` so that both removals end the menu.
-            addDeleteCard(menu)
-            add(menu, "Remove from Layout", #selector(removeMenuTile(_:)))
-        }
+        addReplaceWith(menu)
     }
 
     /// A tab's own verbs, under the card's: out into a tile of its own, and closed — alone, or leaving it
@@ -1592,20 +1565,22 @@ extension CanvasBoardView {
         guard let tiling else { return }
         let group = tabGroup(for: id)
         let noun = group.count == 1 ? "Tab" : "\(group.count) Tabs"
-        menu.addItem(.sectionHeader(title: group.count == 1 ? "Tab" : "\(group.count) Tabs"))
+        menu.addItem(.sectionHeader(title: noun))
         if group.count == 1 { add(menu, "Pull Out of Tabs", #selector(pullMenuTabOut(_:))) }
-        add(menu, "Move \(noun) to Window", #selector(moveMenuTabToWindow(_:)))
+        add(menu, "Move \(noun) to New Window", #selector(moveMenuTabToWindow(_:)))
         addMoveToBoard(menu, noun: noun)
-        if group.count == 1 {
-            menu.addItem(tabsPalette())
-            addReplaceWith(menu)
-            if tiling.tabs(of: id).count > 1 {
-                add(menu, "Close Other Tabs", #selector(closeOtherMenuTabs(_:)))
-            }
-        }
+        if group.count == 1 { addReplaceWith(menu) }
+        addShareMenu(menu)
         menu.addItem(.separator())
-        if group.count == 1 { addDeleteCard(menu) }
         add(menu, "Close \(noun)", #selector(closeMenuTabs(_:)))
+        if group.count == 1, tiling.tabs(of: id).count > 1 {
+            add(menu, "Close Other Tabs", #selector(closeOtherMenuTabs(_:)))
+        }
+        // Delete after a line of its own, last, as everywhere: Close keeps the card, Delete doesn't.
+        if group.count == 1 {
+            menu.addItem(.separator())
+            addDeleteCard(menu)
+        }
     }
 
     /// Move to Project ▸ and Move to Space ▸: the right-clicked tabs off this board and onto another's
@@ -1665,9 +1640,15 @@ extension CanvasBoardView {
     /// No "Tabs" header of its own any more: the add list brings its own headings now
     /// (`CanvasAddCommand.Group`), and a heading over a run of headings labels nothing. What these
     /// make is a tab because of where the menu was opened, which the "Tile" section below says again.
+    ///
+    /// Then where the tabs sit, and closing the whole tile. The tile's other verbs are on its card's
+    /// right-click; repeating them here made this the second copy of the same menu.
     private func buildTabStripMenu(_ menu: NSMenu, tile: String) {
         fillNewTabMenu(menu)
-        addTileSection(menu, id: tile, wholeTile: true)
+        menu.addItem(.separator())
+        if tiling?.hasTabs(tile) == true { menu.addItem(tabsPalette()) }
+        add(menu, tiling?.hasTabs(tile) == true ? "Close Tile and Its Tabs" : "Close Tile",
+            #selector(removeMenuTileWithTabs(_:)))
     }
 
     /// Every `CanvasAddCommand` that makes a tile, as a tab of `menuTile`, and Add Card from Canvas into
@@ -1819,7 +1800,8 @@ extension CanvasBoardView {
 
 
     private func pinTitle(_ divider: CanvasTileDivider, _ index: Int, side: String) -> String {
-        "\(tiling?.isPinned(divider.run, at: index) == true ? "Unpin" : "Pin") \(side)"
+        // Lock, not Pin: Pin is what keeps a card in the sidebar.
+        "\(tiling?.isPinned(divider.run, at: index) == true ? "Unlock" : "Lock") \(side)"
     }
 
     @objc func pinTileBeforeDivider(_ sender: Any?) {
@@ -1925,7 +1907,9 @@ extension CanvasBoardView {
         guard isTiled else { return }
         let list = NSMenu()
         fillExistingCardsMenu(list)
-        guard !list.items.isEmpty else { return }
+        // The same want by where the cards sit (⌥B), last in the list it is the other way into.
+        if !list.items.isEmpty { list.addItem(.separator()) }
+        add(list, pickCardsTitle, #selector(pickCardsOnBoard(_:)))
         menu.addItem(withTitle: CanvasExistingCards.title, action: nil, keyEquivalent: "").submenu = list
     }
 
@@ -3053,9 +3037,9 @@ extension CanvasBoardView: NSUserInterfaceValidations {
 
     /// What the pin command is called: which way it goes, and which dimension it holds.
     var pinTileTitle: String {
-        guard let id = pinnableTile else { return "Pin Tile Width" }
+        guard let id = pinnableTile else { return "Lock Tile Width" }
         let dimension = tileRunIsVertical(id) ? "Height" : "Width"
-        return isTilePinned(id) ? "Unpin \(dimension)" : "Pin \(dimension)"
+        return isTilePinned(id) ? "Unlock \(dimension)" : "Lock \(dimension)"
     }
 
     /// The card ⌘+ would act on: the one you are stepped into, if its kind has an answer.
@@ -3272,7 +3256,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
             if let entry = item as? NSMenuItem {
                 switch entry.action {
                 case #selector(deleteWorkspace(_:)):
-                    entry.title = workspaceName.map { "Delete “\($0)”" } ?? "Delete Layout"
+                    entry.title = workspaceName.map { "Delete “\($0)”\u{2026}" } ?? "Delete Layout\u{2026}"
                 case #selector(duplicateWorkspace(_:)):
                     entry.title = workspaceName.map { "Duplicate “\($0)”\u{2026}" }
                         ?? "Duplicate Layout\u{2026}"

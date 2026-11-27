@@ -24,7 +24,7 @@ enum CanvasTiling {
         var title: String {
             switch self {
             case .grid: return "Grid"
-            case .masterStack: return "Master and Stack"
+            case .masterStack: return "Main and Stack"
             }
         }
     }

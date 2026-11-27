@@ -1100,7 +1100,7 @@ final class CanvasSatelliteDock: NSObject {
             return button
         }
         let board = workspace.board
-        let gather = Self.button("rectangle.grid.2x2", "Gather \(label.stringValue)") { board?.gatherWorkspace() }
+        let gather = Self.button("rectangle.grid.2x2", "Gather Windows") { board?.gatherWorkspace() }
         let row = NSStackView(views: [label] + buttons + [Self.spacer(), gather])
         row.spacing = 2
         row.setCustomSpacing(8, after: label)

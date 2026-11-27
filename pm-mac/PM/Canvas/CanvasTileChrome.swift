@@ -203,7 +203,15 @@ extension CanvasBoardView {
     /// Nil when nothing is tiled or this card isn't in the tiling, which is the caller's cue to use the
     /// card's own one radius.
     func tileCorners(_ id: String) -> CanvasTiling.Corners? {
-        guard let tiling, let frame = tiling.layout.frames[id] else { return nil }
+        guard let tiling else { return nil }
+        let layout: CanvasLayout
+        if let memo = tileLayoutMemo, memo.session == tiling {
+            layout = memo.layout
+        } else {
+            layout = tiling.layout
+            tileLayoutMemo = (tiling, layout)
+        }
+        guard let frame = layout.frames[id] else { return nil }
         return CanvasTiling.corners(of: frame, in: CanvasTiling.space(of: tiling.area))
     }
 

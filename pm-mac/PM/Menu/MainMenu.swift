@@ -469,9 +469,9 @@ enum MainMenu {
         let maximize = menu.addItem(withTitle: "Maximize Tile", action: #selector(CanvasBoardView.maximizeTile(_:)),
                                     keyEquivalent: "\r")
         maximize.keyEquivalentModifierMask = [.command, .option]
-        menu.addItem(withTitle: "Make Master Tile", action: #selector(CanvasBoardView.promoteTile(_:)),
+        menu.addItem(withTitle: "Make Main Tile", action: #selector(CanvasBoardView.promoteTile(_:)),
                      keyEquivalent: "")
-        menu.addItem(withTitle: "Pin Tile Width", action: #selector(CanvasBoardView.togglePinTileSize(_:)),
+        menu.addItem(withTitle: "Lock Tile Width", action: #selector(CanvasBoardView.togglePinTileSize(_:)),
                      keyEquivalent: "")
         // Remove's other half; the board's list, filled as it opens — see `CanvasExistingCardsMenu`.
         let existing = NSMenu(title: CanvasExistingCards.title)
@@ -482,18 +482,18 @@ enum MainMenu {
                      keyEquivalent: "")
         // The workspace, not a tile: every tile out into a window of its own, and back. See
         // `CanvasBoardView.popOutWorkspace`.
-        menu.addItem(withTitle: "Pop Out Workspace", action: #selector(CanvasBoardView.popOutWorkspace(_:)),
+        menu.addItem(withTitle: "Move Tiles to Windows", action: #selector(CanvasBoardView.popOutWorkspace(_:)),
                      keyEquivalent: "")
-        menu.addItem(withTitle: "Gather Workspace", action: #selector(CanvasBoardView.gatherWorkspace(_:)),
+        menu.addItem(withTitle: "Gather Windows", action: #selector(CanvasBoardView.gatherWorkspace(_:)),
                      keyEquivalent: "")
         // Rename with no Name beside it: a workspace is made named (docs/canvas-workspaces.md §7i).
         menu.addItem(withTitle: "Rename Layout\u{2026}", action: #selector(CanvasBoardView.renameWorkspace(_:)),
                      keyEquivalent: "")
         menu.addItem(withTitle: "Duplicate Layout\u{2026}",
                      action: #selector(CanvasBoardView.duplicateWorkspace(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "Remove from Layout", action: #selector(CanvasBoardView.removeTile(_:)),
+        menu.addItem(withTitle: "Close Tile", action: #selector(CanvasBoardView.removeTile(_:)),
                      keyEquivalent: "")
-        menu.addItem(withTitle: "Delete Layout", action: #selector(CanvasBoardView.deleteWorkspace(_:)),
+        menu.addItem(withTitle: "Delete Layout\u{2026}", action: #selector(CanvasBoardView.deleteWorkspace(_:)),
                      keyEquivalent: "")
     }
 
