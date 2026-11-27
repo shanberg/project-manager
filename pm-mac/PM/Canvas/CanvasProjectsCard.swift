@@ -202,6 +202,11 @@ struct CanvasProjectsCard: View {
             Button { onOpenProject(project.folder) } label: {
                 Label("Go to \(project.name)", systemImage: "arrow.turn.down.right")
             }
+            // The way back into a project gone quiet: its stale work, one tree at a time
+            // (docs/stale-tasks.md).
+            Button { StaleReviewWindowController.shared.show(projectFolder: project.folder) } label: {
+                Label("Catch Up on \(project.name)…", systemImage: "checklist")
+            }
             Button { TaskPasteboard.copy(markdown: "[[\(project.folder)]]") } label: {
                 Label("Copy Link", systemImage: "link")
             }

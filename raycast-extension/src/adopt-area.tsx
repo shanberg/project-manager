@@ -94,7 +94,7 @@ export default function Command() {
     <List isLoading={isLoading || busy} searchBarPlaceholder="Search folders…">
       <List.EmptyView
         title="Nothing to Take On"
-        description="Every folder in your areas root is already an area. A folder there with no notes in it is one PM could adopt."
+        description="Every folder in your areas root is already an area. A folder there with no notes in it is one Folio could adopt."
         icon={Icon.CircleEllipsis}
       />
       {folders.map((folder) => (

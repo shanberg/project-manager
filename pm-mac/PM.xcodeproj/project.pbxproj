@@ -77,6 +77,7 @@
 		23FD0FF54F6B01B004848183 /* CanvasLinkPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A42DCEE46B90072369341C2 /* CanvasLinkPreview.swift */; };
 		2414C8CD0D4FAF28DDCCCF33 /* CanvasTileCarry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90243B130F92792DBE0DE091 /* CanvasTileCarry.swift */; };
 		24303FA69FF5DF1DBF4D2730 /* AttentionKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492EF47D503135DF9A6D100B /* AttentionKeeper.swift */; };
+		24C2FA9FFEDFBD0FC53239DA /* StaleReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90327E212297D216087DBD1E /* StaleReview.swift */; };
 		24F8436279997AFB022835C8 /* ProjectContentPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ECFDF5D89C4016A603F2DEF /* ProjectContentPane.swift */; };
 		25199D8009632DD05AF2DB7D /* CanvasFileWatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FF6ECAEF432775C80253903 /* CanvasFileWatchTests.swift */; };
 		2685E0C4D2015049B6C1297F /* CanvasLinkStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB7FA3D22A87310BDDE926E5 /* CanvasLinkStatus.swift */; };
@@ -804,6 +805,7 @@
 		8F5AF9B9F2692316AA0D48C8 /* HangWatchdog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HangWatchdog.swift; sourceTree = "<group>"; };
 		8FF6ECAEF432775C80253903 /* CanvasFileWatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFileWatchTests.swift; sourceTree = "<group>"; };
 		90243B130F92792DBE0DE091 /* CanvasTileCarry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTileCarry.swift; sourceTree = "<group>"; };
+		90327E212297D216087DBD1E /* StaleReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaleReview.swift; sourceTree = "<group>"; };
 		90A29BE9C624BCA20C640DDA /* CanvasItemListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasItemListView.swift; sourceTree = "<group>"; };
 		90BB9DDD079FFA1FD9822C54 /* CoalescerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoalescerTests.swift; sourceTree = "<group>"; };
 		91DAF694D06EA74A49555934 /* SessionPicks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPicks.swift; sourceTree = "<group>"; };
@@ -1203,6 +1205,7 @@
 			children = (
 				3E0EE114EBE0F9568379C8A6 /* CompletingTextField.swift */,
 				96A8A6EA7A3C620EA8E64574 /* OutsideClick.swift */,
+				90327E212297D216087DBD1E /* StaleReview.swift */,
 				00F2EDB988BDEA63F99FFDEC /* TaskDeleteConfirmation.swift */,
 				C5C091CF8691F406FDF304F2 /* TaskEditors.swift */,
 				1827632D51602B8F2EAA6994 /* TaskLineLayout.swift */,
@@ -2008,6 +2011,7 @@
 				0951ED1A45B7EF4530A3FDE7 /* SpaceModel.swift in Sources */,
 				41E0C9332A3B58A1D0FF62EA /* SpaceSettings.swift in Sources */,
 				1E880DAB37B7B34881DD922E /* Spaces.swift in Sources */,
+				24C2FA9FFEDFBD0FC53239DA /* StaleReview.swift in Sources */,
 				ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */,
 				D5374E7501A1917BD1D28D87 /* StoreRegistry.swift in Sources */,
 				3073C7288DEEA01B332ABB56 /* SwitcherController.swift in Sources */,

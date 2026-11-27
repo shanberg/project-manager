@@ -33,7 +33,7 @@ struct TimeSettingsView: View {
                 Toggle("Show how long each sitting ran", isOn: $showsSittingDuration)
             } footer: {
                 Text("A sitting's time is the attention that was on the project while it was the "
-                     + "current sitting, not the gap to the next heading. A sitting PM wasn't watching "
+                     + "current sitting, not the gap to the next heading. A sitting Folio wasn't watching "
                      + "says nothing rather than zero.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -224,7 +224,7 @@ func runAdopt(args: [String]) {
             let candidates = try getAdoptableFolders(basePath: paths.areasPath)
             guard !candidates.isEmpty else {
                 print("Nothing to take on in \(paths.areasPath).")
-                print("(a folder there with no notes in it is one PM could adopt)")
+                print("(a folder there with no notes in it is one Folio could adopt)")
                 return
             }
             print("Folders in \(paths.areasPath) that could become areas:")

@@ -81,7 +81,7 @@ export default function FirstRunSetup({ prefs, onComplete }: Props) {
       await showToast({
         style: Toast.Style.Success,
         title: "Configuration saved",
-        message: "You can change paths later in Configure Project Manager.",
+        message: "You can change paths later in Configure Folio.",
       });
       onComplete();
     } catch (err) {
@@ -96,7 +96,7 @@ export default function FirstRunSetup({ prefs, onComplete }: Props) {
 
   return (
     <Form
-      navigationTitle="Set up Project Manager"
+      navigationTitle="Set up Folio"
       actions={
         <ActionPanel>
           <Action.SubmitForm
