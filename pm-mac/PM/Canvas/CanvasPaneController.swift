@@ -446,6 +446,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         watchTheWindow()
         view.window?.layoutIfNeeded()
         measureTitlebar()
+        hasAppeared = true
         paneResized()
         fitWhenThereIsAWindowToFitTo()
         if let opening = openingNotice {
@@ -473,25 +474,53 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// tiling laid out for a window of no width is not a tiling anyone wants back.
     private func fitWhenThereIsAWindowToFitTo() {
         guard !hasFitted else { return }
+        // **A pane opened at a layout is laid out in the pass that shows it, when it can be.** It used
+        // to wait a turn every time, with the board kept out of sight meanwhile (it would otherwise have
+        // shown the untiled board on its way to the layout), so every switch to a layout tab not built
+        // yet committed at least one frame of nothing between the tab you left and the one you went to.
+        // `viewDidAppear` has just laid the window out, so the pane nearly always has its size by now.
+        // When it hasn't, the turn and `paneResized` are still the fallback, as they always were.
+        let opensAtWorkspace = if case .workspace = focus { true } else { false }
+        if opensAtWorkspace, hasAppeared, settle() { return }
         // **A pane opened at a layout doesn't show the board on its way there.** Its layout is applied
         // a turn or more after it's on screen (below), and until then it was the untiled board — every
         // card, fitted — so going from a card to a layout seemed to pass through the board. The board
         // is kept out of sight until the layout is up; a crossing from the canvas still animates, since
         // it starts in the same pass that shows it.
-        if case .workspace = focus { scroll.alphaValue = 0 }
+        if opensAtWorkspace { scroll.alphaValue = 0 }
         DispatchQueue.main.async { [weak self] in
-            guard let self, !hasFitted, fitOrKeepTiles() else { return }
-            restoreViewState()
-            applyFocus()
-            scroll.alphaValue = 1
-            // **Last, which is what `isSettled` has always claimed.** The latch used to be set first,
-            // and a tiling restored or focused between there and here would announce itself to a tab
-            // that then read the half-built board as the answer — retargeting a notes tab to the whole
-            // board a beat before the card it wanted was tiled. Nothing can interleave inside this
-            // block, so the only thing moving it costs is the window of wrongness it closes.
-            hasFitted = true
-            view.window?.makeFirstResponder(scroll.board)
+            guard let self, !hasFitted else { return }
+            settle()
         }
+    }
+
+    /// Fit, restore and apply the focus — once there is a window to do it in. False while there isn't.
+    @discardableResult
+    private func settle() -> Bool {
+        // **A layout's pane fits the board without building it.** See `CanvasBoardView.holdsBoardBuilds`:
+        // the fit is only where leaving the layout goes back to, and the tiles are what is shown.
+        let opensAtWorkspace = if case .workspace = focus { true } else { false }
+        let board: CanvasBoardView = scroll.board
+        board.holdsBoardBuilds = opensAtWorkspace
+        guard fitOrKeepTiles() else {
+            board.holdsBoardBuilds = false
+            return false
+        }
+        restoreViewState()
+        applyFocus()
+        board.holdsBoardBuilds = false
+        // A layout that could not be restored — deleted in another window — leaves the board showing
+        // itself, and that board is the one the hold kept from being built.
+        if opensAtWorkspace, !board.isTiled { board.refreshNodeViews() }
+        scroll.alphaValue = 1
+        // **Last, which is what `isSettled` has always claimed.** The latch used to be set first,
+        // and a tiling restored or focused between there and here would announce itself to a tab
+        // that then read the half-built board as the answer — retargeting a notes tab to the whole
+        // board a beat before the card it wanted was tiled. Nothing can interleave inside this
+        // block, so the only thing moving it costs is the window of wrongness it closes.
+        hasFitted = true
+        view.window?.makeFirstResponder(board)
+        return true
     }
 
     /// The first fit, unless the board was tiled before it came round.
@@ -518,6 +547,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     var isSettled: Bool { hasFitted }
 
     private var hasFitted = false
+    /// Set in `viewDidAppear` once the window is laid out and the titlebar measured — the earliest a
+    /// layout can be laid out in the pass that shows it. A frame change before then is too early.
+    private var hasAppeared = false
 
     /// Whether this board is tiled to the project's own card and nothing else.
     ///
