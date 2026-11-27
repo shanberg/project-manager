@@ -491,8 +491,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .flatMap(CrossingBench.Journey.init(rawValue:)), journey != .crossing {
                 // `?journey=picking|peek|maximize` measures the workspace's own journeys instead of the
                 // crossing in and out of the canvas — see `CrossingBench.Journey`.
+                // `?sidebar=off` folds the sidebar away for the run, as the other half of an A/B.
                 CrossingBench.runJourney(journey, iterations: intParam(url, "runs") ?? 20,
-                                         tiles: intParam(url, "tiles") ?? 8)
+                                         tiles: intParam(url, "tiles") ?? 8,
+                                         sidebarOff: stringParam(url, "sidebar") == "off")
             } else {
                 CrossingBench.run(iterations: intParam(url, "runs") ?? 20,
                                   tiles: intParam(url, "tiles") ?? 8)

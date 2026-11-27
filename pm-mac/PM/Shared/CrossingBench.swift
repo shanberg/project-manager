@@ -41,8 +41,12 @@ enum CrossingBench {
     /// **Every journey flies the board**, which is why every one of them is worth a number: the picker
     /// zooms out to fit, a peek zooms onto one card, entering a workspace closes on the tiles, and all
     /// of them go through `CanvasScrollView.fly`, where the magnification is what a crossing costs.
-    private static func walk(_ index: Int, of total: Int, _ journey: Journey) {
-        guard index < total else { return Log.write("BENCH done") }
+    private static func walk(_ index: Int, of total: Int, _ journey: Journey,
+                             then finished: (() -> Void)? = nil) {
+        guard index < total else {
+            Log.write("BENCH done")
+            return finished?() ?? ()
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
             MainActor.assumeIsolated {
                 guard !screenIsLocked else {
@@ -51,12 +55,16 @@ enum CrossingBench {
                 // A crossing swaps panes and wants whatever is in front now; the rest act on the tiled
                 // board in place. See `tiledBoard`.
                 let found = journey == .crossing ? frontBoard() : tiledBoard()
-                guard let board = found else { return Log.write("BENCH stopped: no board") }
+                guard let board = found else {
+                    Log.write("BENCH stopped: no board")
+                    return finished?() ?? ()
+                }
                 guard !isHidden(board) else {
-                    return Log.write("BENCH stopped: the window went behind something mid-run")
+                    Log.write("BENCH stopped: the window went behind something mid-run")
+                    return finished?() ?? ()
                 }
                 perform(journey, on: board, at: index)
-                walk(index + 1, of: total, journey)
+                walk(index + 1, of: total, journey, then: finished)
             }
         }
     }
@@ -116,7 +124,9 @@ enum CrossingBench {
             window.setFrame(frame, display: true)
             return
         }
-        FrameMeter.measure(label("resize sweep"), on: board, for: 1.4)
+        // The whole sweep is the movement: sixty `setFrame`s over a second, plus a frame of slack.
+        FrameMeter.measure(label(sidebarOff ? "resize sweep, no sidebar" : "resize sweep"),
+                           on: board, for: 1.4, movement: 1.05)
         sweep(window)
     }
 
@@ -213,7 +223,12 @@ enum CrossingBench {
     }
 
     /// Repeat one of the workspace's own journeys, rather than crossing in and out of the canvas.
-    static func runJourney(_ journey: Journey, iterations: Int, tiles: Int) {
+    ///
+    /// `sidebarOff` folds the window's sidebar away for the run and brings it back after — the other
+    /// half of an A/B for what the sidebar costs a resize, which spans alone could not settle: the
+    /// hosting controller's layout is entered from the window's own pass, with no frame of ours on
+    /// the stack (windows-5 trace, 2026-11-27).
+    static func runJourney(_ journey: Journey, iterations: Int, tiles: Int, sidebarOff: Bool = false) {
         guard FrameMeter.isEnabled else { return declineWithoutTheMeter() }
         guard !screenIsLocked else { return Log.write("BENCH declined: the screen is locked") }
         guard let board = frontBoard() else { return Log.write("BENCH declined: no board in front") }
@@ -226,8 +241,15 @@ enum CrossingBench {
             return Log.write("BENCH declined: this window will not keep a workspace")
         }
         Log.write("BENCH \(iterations) \(journey.rawValue) journeys of \(plan.ids.count) tiles, "
-            + "\(interval)s apart")
-        walk(0, of: iterations, journey)
+            + "\(interval)s apart\(sidebarOff ? ", sidebar folded" : "")")
+        let split = board.window.flatMap { splitController(in: $0.contentViewController) }
+        let wasCollapsed = split?.isSidebarCollapsed ?? true
+        Self.sidebarOff = sidebarOff
+        if sidebarOff { split?.setSidebarCollapsedForBench(true) }
+        walk(0, of: iterations, journey) {
+            Self.sidebarOff = false
+            if sidebarOff { split?.setSidebarCollapsedForBench(wasCollapsed) }
+        }
     }
 
 
@@ -290,6 +312,19 @@ enum CrossingBench {
             if let board = boards.first(where: { $0.isTiled && Self.isShowing($0) }) { return board }
         }
         return frontBoard()
+    }
+
+    /// Whether the run under way has folded the sidebar away, for the measurement's label.
+    private static var sidebarOff = false
+
+    /// The window's split view controller, wherever it sits under the window's content controller.
+    private static func splitController(in controller: NSViewController?) -> ProjectSplitViewController? {
+        guard let controller else { return nil }
+        if let split = controller as? ProjectSplitViewController { return split }
+        for child in controller.children {
+            if let found = splitController(in: child) { return found }
+        }
+        return nil
     }
 
     /// Whether a board is in a pane that is actually up, rather than mounted and hidden.
