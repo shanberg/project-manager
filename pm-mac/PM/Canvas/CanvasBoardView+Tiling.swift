@@ -313,6 +313,7 @@ extension CanvasBoardView {
         posed.restoreZoom = Double(scrollView?.magnification ?? 1)
         posed.restoreVisible = canvasRect(visibleRect)
         tiling = posed
+        isPosedAsTiling = true
         // Held rather than set: `tiling` starts the crossing fading *towards* tiles, and this board is
         // to be found already there. See `CanvasFade.hold`.
         holdTiledness(1)
