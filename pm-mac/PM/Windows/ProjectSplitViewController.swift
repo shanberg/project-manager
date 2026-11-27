@@ -1415,6 +1415,11 @@ extension ProjectSplitViewController {
     /// Fold the sidebar away or bring it back without animating, for `CrossingBench.runJourney`'s
     /// `sidebarOff` — a measurement, not a gesture, so it must not leave an animation running into
     /// the first step.
+    /// Swap the sidebar host's `.minSize` sizing off and back, for `CrossingBench`'s sidebar journey.
+    func setSidebarSizingForBench(minSize: Bool) {
+        sidebarHosting.sizingOptions = minSize ? [.minSize] : []
+    }
+
     func setSidebarCollapsedForBench(_ collapsed: Bool) {
         guard let item = splitViewItems.first, item.isCollapsed != collapsed else { return }
         NSAnimationContext.runAnimationGroup { context in

@@ -87,7 +87,37 @@ enum CrossingBench {
             board.tiling?.ids.first.map { board.toggleMaximizeTile($0) }
         case .windows:
             windowStep(on: board, at: index)
+        case .sidebar:
+            sidebarStep(on: board, at: index)
         }
+    }
+
+    // MARK: Sidebar
+
+    /// The sidebar's variants, one per pair of sweeps — **temporary instrumentation** (2026-11-27), to
+    /// say which of the sidebar's two suspected height dependencies a resize is paying for: the fill
+    /// under the rows (`PMBenchSidebarNoFill`), or the hosting controller's `.minSize` sizing, which
+    /// may ask SwiftUI for a fitting size on every frame. Folded is the floor either fix is aiming at.
+    private enum SidebarVariant: String, CaseIterable { case base, noFill = "no fill", noSizing = "no sizing", folded }
+
+    private static func sidebarStep(on board: CanvasBoardView, at index: Int) {
+        guard let window = board.window, !window.styleMask.contains(.fullScreen) else { return }
+        let variant = SidebarVariant.allCases[(index / 2) % SidebarVariant.allCases.count]
+        apply(variant, in: window)
+        // A moment for the change to land — the fold re-tiles the board — before the clock starts.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            MainActor.assumeIsolated {
+                FrameMeter.measure("resize sweep, sidebar \(variant.rawValue)", on: board, for: 1.4, movement: 1.05)
+                sweep(window)
+            }
+        }
+    }
+
+    private static func apply(_ variant: SidebarVariant, in window: NSWindow?) {
+        let split = window.flatMap { splitController(in: $0.contentViewController) }
+        UserDefaults.standard.set(variant == .noFill, forKey: "PMBenchSidebarNoFill")
+        split?.setSidebarSizingForBench(minSize: variant != .noSizing)
+        split?.setSidebarCollapsedForBench(variant == .folded)
     }
 
     // MARK: Windows
@@ -220,6 +250,8 @@ enum CrossingBench {
         /// Window management over a tiled workspace: resize sweeps, full screen in and out, and a
         /// move to the other display and back where there is one. What web tiles are felt in.
         case windows
+        /// Resize sweeps only, in pairs, over the sidebar's variants — see `SidebarVariant`.
+        case sidebar
     }
 
     /// Repeat one of the workspace's own journeys, rather than crossing in and out of the canvas.
@@ -236,7 +268,7 @@ enum CrossingBench {
             return Log.write("BENCH declined: the window is not on screen — bring it to the front")
         }
         // The window journey is about web tiles, so it takes the board's web cards first.
-        guard let plan = prepare(board: board, tiles: tiles, webFirst: journey == .windows) else { return }
+        guard let plan = prepare(board: board, tiles: tiles, webFirst: journey == .windows || journey == .sidebar) else { return }
         guard board.onTileAsWorkspace(plan) else {
             return Log.write("BENCH declined: this window will not keep a workspace")
         }
@@ -248,6 +280,10 @@ enum CrossingBench {
         if sidebarOff { split?.setSidebarCollapsedForBench(true) }
         walk(0, of: iterations, journey) {
             Self.sidebarOff = false
+            if journey == .sidebar {
+                apply(.base, in: board.window)
+                split?.setSidebarCollapsedForBench(wasCollapsed)
+            }
             if sidebarOff { split?.setSidebarCollapsedForBench(wasCollapsed) }
         }
     }
