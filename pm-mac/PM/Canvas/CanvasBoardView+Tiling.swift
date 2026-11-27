@@ -1702,9 +1702,11 @@ extension CanvasBoardView {
         // flight lands at the zoom the tiles were measured for, which is the answer this would be
         // looking for anyway.
         guard scrollView?.canvasScroll?.isFlying != true else { return }
-        session.area = tileableRect
-        tiling = session
-        setLayout(session.layout, animated: false)
+        FrameMeter.span("retile") {
+            session.area = tileableRect
+            tiling = session
+            setLayout(session.layout, animated: false)
+        }
     }
 
     // MARK: Frames
