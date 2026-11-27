@@ -1,10 +1,11 @@
-# Build and test the Swift CLI/library (pm-swift) on macOS for every push and pull request
-# that touches it. Package.swift needs swift-tools 5.9 and macOS 13+; the macos-15 runner's
+# Build and test the Swift CLI/library (pm-swift) on macOS for pushes to main and pull
+# requests that touch it. Package.swift needs swift-tools 5.9 and macOS 13+; the macos-15 runner's
 # default Xcode 16.x toolchain (Swift 6) covers that.
 name: pm-swift
 
 on:
   push:
+    branches: [main]
     paths:
       - "pm-swift/**"
       - ".github/workflows/pm-swift.yml"
