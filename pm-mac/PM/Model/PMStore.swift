@@ -379,6 +379,25 @@ final class PMStore {
     /// app's bookkeeping that follows the notes (`ProjectLinksSync`). Unset wherever there is no app.
     static var onNotesRead: ((_ notesPath: String, _ projectPath: String) -> Void)?
 
+    /// Told the files a write of this store's has just changed, before the re-read it asks for — so the
+    /// file watch doesn't take the app's own write for somebody else's (`ConfigWatcher.adoptOwnWrite`).
+    static var onOwnWrite: ((_ paths: [String]) -> Void)?
+
+    /// The files this store's project is read from: the notes, and the pick log beside them.
+    var watchedPaths: [String] {
+        [notesPath, projectPath.map { PickLog.logPath(projectPath: $0) }].compactMap { $0 }
+    }
+
+    /// Set a published property only when the value is new.
+    ///
+    /// `@Observable` doesn't compare: every assignment invalidates every view that read the property,
+    /// equal or not. A reload re-publishes the whole project, and most reloads change one task or
+    /// none — so without this, every tick repainted every surface showing the project, and woke the
+    /// app delegate's pass (menubar, notifications, window titles) for nothing.
+    private func publish<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<PMStore, Value>, _ value: Value) {
+        if self[keyPath: keyPath] != value { self[keyPath: keyPath] = value }
+    }
+
     func reload(then: (@MainActor () -> Void)? = nil) {
         let key = boundKey
         guard let key, let name = PMFiles.projectName(fromKey: key) else {
@@ -458,24 +477,24 @@ final class PMStore {
                     // A different project's board is a different question, and the old answer must not
                     // be read as this one's while the new one is being looked for.
                     if projectChanged { self.hasResolvedCanvasPath = false }
-                    self.projectKey = key
-                    self.projectName = name
-                    self.notesPath = path
-                    self.projectPath = projectPath
-                    self.notes = output.notes
-                    self.icon = icon
-                    self.color = color
-                    self.texture = texture
-                    self.textureStyle = textureStyle
-                    self.todos = output.todos
-                    self.picks = output.picks
+                    self.publish(\.projectKey, key)
+                    self.publish(\.projectName, name)
+                    self.publish(\.notesPath, path)
+                    self.publish(\.projectPath, projectPath)
+                    self.publish(\.notes, output.notes)
+                    self.publish(\.icon, icon)
+                    self.publish(\.color, color)
+                    self.publish(\.texture, texture)
+                    self.publish(\.textureStyle, textureStyle)
+                    self.publish(\.todos, output.todos)
+                    self.publish(\.picks, output.picks)
                     let stale = TaskStaleness.staleLines(in: output.todos)
                     if stale != self.staleLines { self.staleLines = stale }
                     self.resolveWaits()
-                    self.lastEditedAt = lastEdited
-                    self.focusedKey = output.focusedKey
-                    self.errorMessage = nil
-                    self.hasLoaded = true
+                    self.publish(\.lastEditedAt, lastEdited)
+                    self.publish(\.focusedKey, output.focusedKey)
+                    self.publish(\.errorMessage, nil)
+                    self.publish(\.hasLoaded, true)
                     self.refreshCanvasPath(projectPath: projectPath)
                     PMStore.onNotesRead?(path, projectPath)
                     let newHero = self.makeHeroSnapshot(output.todos)
@@ -697,7 +716,13 @@ final class PMStore {
                                     name: picks.isEmpty ? nil : stepName)
                 Task { @MainActor in self?.recordUndo(step) }
             }
-            Task { @MainActor in self?.reload(then: then) }
+            // Only a write that happened is adopted: one that changed nothing left no date to adopt.
+            let written = changed || !picks.isEmpty
+                ? handle.map { [$0.notesPath, PickLog.logPath(projectPath: $0.projectPath)] } ?? [] : []
+            Task { @MainActor in
+                if !written.isEmpty { PMStore.onOwnWrite?(written) }
+                self?.reload(then: then)
+            }
         }
     }
 
@@ -774,7 +799,9 @@ final class PMStore {
                     Task { @MainActor in self?.noteWriteFailure(message) }
                 }
             }
+            let written = [step.document?.notesPath, projectPath.map { PickLog.logPath(projectPath: $0) }].compactMap { $0 }
             Task { @MainActor in
+                PMStore.onOwnWrite?(written)
                 guard let self else { return }
                 if !self[keyPath: source].isEmpty { self[keyPath: source].removeLast() }
                 if banked != nil || !appended.isEmpty {

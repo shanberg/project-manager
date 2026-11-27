@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import SwiftUI
 
 /// What the window actually managed to put on screen while something was moving.
 ///
@@ -78,6 +79,12 @@ final class FrameMeter {
     ///
     /// Free when nothing is being measured — one static read and a branch — so these can sit on paths
     /// that run for every card on every frame.
+    /// A span measured by its caller, for work with a start and an end in two different callbacks —
+    /// a view controller's `viewWillLayout` and `viewDidLayout`.
+    static func charge(_ name: String, startedAt start: CFTimeInterval) {
+        current?.record(name, at: start, CACurrentMediaTime() - start)
+    }
+
     static func span<T>(_ name: String, _ body: () -> T) -> T {
         guard let meter = current else { return body() }
         let start = CACurrentMediaTime()
@@ -211,5 +218,41 @@ final class FrameMeter {
         let sorted = values.sorted()
         let rank = Int((fraction * Double(sorted.count - 1)).rounded())
         return sorted[min(max(0, rank), sorted.count - 1)]
+    }
+}
+
+/// A hosting view whose layout is charged to a named span while a measurement runs.
+///
+/// Profiled 2026-11-27, two thirds of a window resize was SwiftUI re-laying out a hosted graph every
+/// frame, under `NSHostingView.layout` with no Folio frame below it — so the profile could say how
+/// much and not whose. Hosts on the resize path are made from this so a `SPAN` line names them.
+final class MeteredHostingView<Content: View>: NSHostingView<Content> {
+    var meterName = "host"
+
+    convenience init(rootView: Content, meterName: String) {
+        self.init(rootView: rootView)
+        self.meterName = meterName
+    }
+
+    override func layout() {
+        FrameMeter.span("host:\(meterName)") { super.layout() }
+    }
+}
+
+/// The hosting controller form of `MeteredHostingView`: its layout pass is timed from
+/// `viewWillLayout` to `viewDidLayout`, which bracket the hosted graph's own layout.
+final class MeteredHostingController: NSHostingController<AnyView> {
+    var meterName = "host"
+    private var layoutStart: CFTimeInterval?
+
+    override func viewWillLayout() {
+        layoutStart = CACurrentMediaTime()
+        super.viewWillLayout()
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        if let layoutStart { FrameMeter.charge("host:\(meterName)", startedAt: layoutStart) }
+        layoutStart = nil
     }
 }

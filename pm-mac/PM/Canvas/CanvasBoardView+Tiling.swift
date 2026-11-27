@@ -1733,9 +1733,11 @@ extension CanvasBoardView {
         // off the window's edge until the next resize. The landing asks again — see
         // `retileIfTheWindowChangedInFlight`.
         guard scrollView?.canvasScroll?.isFlying != true else { return }
-        session.area = tileableRect
-        tiling = session
-        setLayout(session.layout, animated: false)
+        FrameMeter.span("retile") {
+            session.area = tileableRect
+            tiling = session
+            setLayout(session.layout, animated: false)
+        }
     }
 
     /// A flight has just landed: lay the tiles out again if the window they fill changed while it ran.

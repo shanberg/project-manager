@@ -363,12 +363,13 @@ final class CanvasTileControls {
     /// a window drag (`WindowDragBlocker`), holding the SwiftUI capsule with room round it for the shadow.
     final class Host: WindowDragBlocker {
         static let margin: CGFloat = 10
-        private let hosting: NSHostingView<CanvasTileControlsView>
+        private let hosting: MeteredHostingView<CanvasTileControlsView>
         private weak var controls: CanvasTileControls?
 
         init(controls: CanvasTileControls) {
             self.controls = controls
-            hosting = NSHostingView(rootView: CanvasTileControlsView(controls: controls, model: controls.model))
+            hosting = MeteredHostingView(rootView: CanvasTileControlsView(controls: controls, model: controls.model),
+                                         meterName: "tileControls")
             super.init(frame: .zero)
             // Sized by `measure`, not by the hosting view's own constraints, which report a provisional
             // size before SwiftUI has laid out and then change it.

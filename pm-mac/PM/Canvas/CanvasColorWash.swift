@@ -149,8 +149,17 @@ final class CanvasColorWash: NSView {
         guard rows > 0 else { return }
         let key = "\(rgb)|\(dark)|\(rows)"
         if cached?.key != key {
-            guard let image = Self.ramp(rgb: rgb, peak: Self.peak(dark: dark), rows: rows) else { return }
-            cached = (key, image)
+            // Shared across every wash: each pane, tile ground and satellite has its own view, and a
+            // view made fresh started without one. Profiled 2026-11-27, `ramp` was ~700 samples of a
+            // 50-second window bench — rebuilt again and again for the same three numbers.
+            if let shared = Self.ramps[key] {
+                cached = (key, shared)
+            } else {
+                guard let image = Self.ramp(rgb: rgb, peak: Self.peak(dark: dark), rows: rows) else { return }
+                if Self.ramps.count > 32 { Self.ramps.removeAll() }
+                Self.ramps[key] = image
+                cached = (key, image)
+            }
         }
         guard let image = cached?.image else { return }
         // A tile of `tileWidth` pixels, repeated across: the dither is noise, and noise tiled sideways
@@ -169,6 +178,10 @@ final class CanvasColorWash: NSView {
     }
 
     static let tileWidth = 128
+
+    /// Ramps already made, by colour, appearance and height in pixels. A handful at most: one per
+    /// project colour on screen, in each appearance, at each backing scale.
+    private static var ramps: [String: CGImage] = [:]
 
     /// How strong the wash is `t` of the way down, 0 at the top to 1 at the bottom: smootherstep's
     /// complement, which leaves the top and the bottom with no slope to see.

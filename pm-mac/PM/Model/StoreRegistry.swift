@@ -57,8 +57,6 @@ final class StoreRegistry {
     /// untouched, and would otherwise not show until something else changed. A log that doesn't exist
     /// yet costs a failed `stat` per poll and starts counting the moment it is written.
     var watchedNotesPaths: [String] {
-        liveStores.flatMap { store in
-            [store.notesPath, store.projectPath.map { PickLog.logPath(projectPath: $0) }].compactMap { $0 }
-        }
+        liveStores.flatMap(\.watchedPaths)
     }
 }

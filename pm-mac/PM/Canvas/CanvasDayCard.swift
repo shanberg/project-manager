@@ -135,14 +135,19 @@ final class CanvasDayModel {
         let drawsEvents = spec.shownLayout != .list
         let eventRange = drawsEvents ? ((try? spec.calendarSpan())?.map(\.range) ?? (try? spec.period.range())) : nil
         events.load(projects: projects, interval: eventRange.map { DateInterval(start: $0.start, end: $0.end) })
+        // A row just acted on has to see its own write, so it never takes a shared answer from before it.
+        let fresh = !settled.isEmpty
         queue.async { [weak self] in
             let result = Result { () throws -> (DoneRange, SittingList, [AttentionAway]) in
                 // A week or a month laid out asks about the whole of it, not only the period's days.
                 let range = try spec.calendarSpan()?.range ?? spec.period.range()
                 // An empty board asks about no projects, and the answer to that is nothing, not everything.
                 if projects?.isEmpty == true { return (range, SittingList(), []) }
-                let aways = (try? attentionAways(in: range, projects: projects)) ?? []
-                return (range, try sessionList(in: range, projects: projects, time: wantsTime), aways)
+                return try CanvasDayScan.answer(range: range, projects: projects, time: wantsTime,
+                                                fresh: fresh) {
+                    let aways = (try? attentionAways(in: range, projects: projects)) ?? []
+                    return (try sessionList(in: range, projects: projects, time: wantsTime), aways)
+                }
             }
             Task { @MainActor in
                 guard let self, mine == self.generation else { return }
@@ -167,6 +172,43 @@ final class CanvasDayModel {
                 self.onChange?()
             }
         }
+    }
+}
+
+/// One scan shared by every Day card asking the same question.
+///
+/// A board commonly holds several Day cards over the same day — and the boards in other tabs and
+/// windows keep theirs alive — each on its own 20-second poll. Every one of them walked the attention
+/// log and every agent transcript for an identical answer. Profiled 2026-11-27 with ten up: about a
+/// fifth of a core, continuously, plus a main-thread hitch each time the answers landed together.
+///
+/// So an answer is kept for a little under one poll, keyed by what was asked, and a card arriving
+/// while it's fresh takes it. `fresh` skips it, for the scan after a write the card itself made.
+enum CanvasDayScan {
+    typealias Answer = (SittingList, [AttentionAway])
+
+    /// Shorter than `CanvasDayModel.interval`, so each card's own poll still sees a new look.
+    static let lifetime: TimeInterval = 15
+
+    private static let lock = NSLock()
+    private static var kept: [String: (at: Date, answer: Answer)] = [:]
+
+    static func answer(range: DoneRange, projects: [String]?, time: Bool, fresh: Bool,
+                       now: Date = Date(), compute: () throws -> Answer) throws -> (DoneRange, SittingList, [AttentionAway]) {
+        let key = [String(range.start.timeIntervalSince1970), String(range.end.timeIntervalSince1970),
+                   projects?.sorted().joined(separator: "\u{1F}") ?? "*", time ? "t" : "-"].joined(separator: "|")
+        if !fresh {
+            lock.lock()
+            let hit = kept[key].flatMap { now.timeIntervalSince($0.at) < lifetime ? $0.answer : nil }
+            lock.unlock()
+            if let hit { return (range, hit.0, hit.1) }
+        }
+        let answer = try compute()
+        lock.lock()
+        kept = kept.filter { now.timeIntervalSince($0.value.at) < lifetime }
+        kept[key] = (now, answer)
+        lock.unlock()
+        return (range, answer.0, answer.1)
     }
 }
 

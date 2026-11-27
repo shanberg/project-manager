@@ -11,7 +11,7 @@ import Foundation
 ///     nothing at all on cloud-synced folders (iCloud/Google Drive). The poll only stats metadata —
 ///     no content reads — so it's cheap, and it reloads only when an mtime actually changes.
 final class ConfigWatcher {
-    private let onChange: () -> Void
+    private let onChange: (Change) -> Void
     private let debounce: TimeInterval
     private let pollInterval: TimeInterval
     private let queue = DispatchQueue(label: "com.stuarthanberg.pm.watcher")
@@ -29,10 +29,18 @@ final class ConfigWatcher {
     /// The PARA root directories. Polled for their own mtime, which changes when a folder is created,
     /// renamed, archived or deleted inside them — none of which touches a file this otherwise watches.
     private var currentRootPaths: [String] = []
-    /// Last-seen combined mtime signature of the watched files; a change triggers `onChange`.
-    private var lastSignature: String = ""
+    /// Last-seen modification time of each watched file that exists; a difference triggers `onChange`.
+    private var lastSignature: [String: TimeInterval] = [:]
 
-    init(debounce: TimeInterval = 0.3, pollInterval: TimeInterval = 2.0, onChange: @escaping () -> Void) {
+    /// What moved since the last look. `notesOnly` holds the changed paths when every one of them is a
+    /// project's notes file or pick log, which is all a project's store needs to re-read; it is nil
+    /// when the config files or a PARA root moved, which can re-point the focus or a whole folder scan.
+    struct Change: Equatable {
+        var notesOnly: Set<String>?
+    }
+
+    init(debounce: TimeInterval = 0.3, pollInterval: TimeInterval = 2.0,
+         onChange: @escaping (Change) -> Void) {
         self.onChange = onChange
         self.debounce = debounce
         self.pollInterval = pollInterval
@@ -136,6 +144,27 @@ final class ConfigWatcher {
         queue.async { [weak self] in self?.poll() }
     }
 
+    /// The app has just written these files itself and is re-reading them on its own.
+    ///
+    /// Without this, every task ticked in a window came back 0.3s later as an "outside" change: the
+    /// vnode watch saw the app's own write, and the reload it triggered re-read *every* open project
+    /// and forced a folder scan, on top of the reload the write had already asked for. Adopting the
+    /// file's new date here means the watch only answers for changes somebody else made.
+    ///
+    /// Per path, so an outside edit to any *other* watched file in the same moment still fires. One to
+    /// the same file in the same moment is not lost either: the store's own re-read follows the write
+    /// and reads whatever the file holds by then.
+    func adoptOwnWrite(paths: [String]) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            // Only files the signature covers: adopting one it doesn't would leave a key the next
+            // signature never has, and read as a change on every look.
+            for path in paths where self.currentNotesPaths.contains(path) {
+                self.lastSignature[path] = Self.modified(path)
+            }
+        }
+    }
+
     private func watchDir(_ path: String) {
         dirFD = open(path, O_EVTONLY)
         guard dirFD >= 0 else { return }
@@ -165,15 +194,22 @@ final class ConfigWatcher {
     private func poll() {
         let signature = currentSignature()
         guard signature != lastSignature else { return }
+        let change = describe(from: lastSignature, to: signature)
         lastSignature = signature
-        DispatchQueue.main.async { [weak self] in self?.onChange() }
+        DispatchQueue.main.async { [weak self] in self?.onChange(change) }
+    }
+
+    /// Which kind of change moved `before` to `after` — see `Change`.
+    private func describe(from before: [String: TimeInterval], to after: [String: TimeInterval]) -> Change {
+        let moved = Set(before.keys).union(after.keys).filter { before[$0] != after[$0] }
+        let notes = Set(currentNotesPaths)
+        return Change(notesOnly: moved.isSubset(of: notes) ? moved : nil)
     }
 
     /// Combined modification-time signature of the notes file and the config JSON that external tools
     /// (Raycast) write. Missing files contribute nothing. Metadata only — no content is read.
-    private func currentSignature() -> String {
-        var parts: [String] = []
-        let fm = FileManager.default
+    private func currentSignature() -> [String: TimeInterval] {
+        var parts: [String: TimeInterval] = [:]
         var paths = [
             PMFiles.configDir.appendingPathComponent("focused.json").path,
             PMFiles.configDir.appendingPathComponent("panel-settings.json").path,
@@ -181,11 +217,15 @@ final class ConfigWatcher {
         paths.append(contentsOf: currentNotesPaths.sorted())
         paths.append(contentsOf: currentRootPaths)
         for path in paths {
-            if let date = (try? fm.attributesOfItem(atPath: path)[.modificationDate]) as? Date {
-                parts.append("\(path):\(date.timeIntervalSince1970)")
-            }
+            if let date = Self.modified(path) { parts[path] = date }
         }
-        return parts.joined(separator: "|")
+        return parts
+    }
+
+    /// A file's modification time, or nil when it isn't there. Metadata only.
+    private static func modified(_ path: String) -> TimeInterval? {
+        ((try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date)?
+            .timeIntervalSince1970
     }
 
     private func fire() {
@@ -199,8 +239,9 @@ final class ConfigWatcher {
             // reload; otherwise our own bookkeeping writes cause a spurious reload storm.
             let signature = self.currentSignature()
             guard signature != self.lastSignature else { return }
+            let change = self.describe(from: self.lastSignature, to: signature)
             self.lastSignature = signature
-            DispatchQueue.main.async { self.onChange() }
+            DispatchQueue.main.async { self.onChange(change) }
         }
         pendingWork = work
         queue.asyncAfter(deadline: .now() + debounce, execute: work)
