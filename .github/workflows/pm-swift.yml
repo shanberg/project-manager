@@ -1,0 +1,49 @@
+# Build and test the Swift CLI/library (pm-swift) on macOS for every push and pull request
+# that touches it. Package.swift needs swift-tools 5.9 and macOS 13+; the macos-15 runner's
+# default Xcode 16.x toolchain (Swift 6) covers that.
+name: pm-swift
+
+on:
+  push:
+    paths:
+      - "pm-swift/**"
+      - ".github/workflows/pm-swift.yml"
+  pull_request:
+    paths:
+      - "pm-swift/**"
+      - ".github/workflows/pm-swift.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: pm-swift-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: pm-swift
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: pm-swift/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('pm-swift/Package.swift', 'pm-swift/Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
