@@ -283,9 +283,18 @@ enum CrossingBench {
     private static func tiledBoard() -> CanvasBoardView? {
         let windows = ([WindowManager.shared.frontmost?.window].compactMap { $0 } + NSApp.windows)
         for window in windows {
-            if let board = window.contentView.map(everyBoard)?.first(where: \.isTiled) { return board }
+            // On screen, too: a window keeps every tab's pane mounted, and a tiled board in a hidden
+            // pane has a display link that never ticks — 24 of 24 measurements abandoned at 0 frames
+            // (2026-11-27) on a "2 tiles" board nobody could see while the bench's own sat in front.
+            let boards = window.contentView.map(everyBoard) ?? []
+            if let board = boards.first(where: { $0.isTiled && Self.isShowing($0) }) { return board }
         }
         return frontBoard()
+    }
+
+    /// Whether a board is in a pane that is actually up, rather than mounted and hidden.
+    private static func isShowing(_ board: CanvasBoardView) -> Bool {
+        !board.isHiddenOrHasHiddenAncestor && !board.visibleRect.isEmpty
     }
 
     private static func everyBoard(_ view: NSView) -> [CanvasBoardView] {
@@ -312,14 +321,9 @@ enum CrossingBench {
     /// internal for the benefit of a bench. A dev-only tool should not be why a boundary moves.
     private static func frontBoard() -> CanvasBoardView? {
         let window = WindowManager.shared.frontmost?.window ?? NSApp.mainWindow ?? NSApp.keyWindow
-        return window?.contentView.flatMap(descend)
-    }
-
-    private static func descend(_ view: NSView) -> CanvasBoardView? {
-        if let board = view as? CanvasBoardView { return board }
-        for sub in view.subviews {
-            if let found = descend(sub) { return found }
-        }
-        return nil
+        // The one on screen first, for the reason `tiledBoard` gives — the crossing bench measured
+        // nothing at all the same day, which this is the likeliest cause of.
+        let boards = window?.contentView.map(everyBoard) ?? []
+        return boards.first(where: isShowing) ?? boards.first
     }
 }

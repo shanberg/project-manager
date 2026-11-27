@@ -273,6 +273,8 @@ targets:
       - path: PM/Canvas/CanvasUndoRoute.swift
       - path: PM/Presentation/SessionNoteMerge.swift
       - path: PM/Shared/Coalescer.swift
+      # The defaults caches behind CanvasWorkspaces and CanvasPageTitles.
+      - path: PM/Shared/DefaultsCache.swift
       - path: PM/Shared/FrameMeter.swift
       - path: PM/Shared/ObservationRelay.swift
       - path: PM/Model/PMActions.generated.swift
