@@ -66,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AttentionKeeper.shared.focusedTask = { [weak self] in self?.store.focusedTodo?.text }
         AttentionKeeper.shared.start()
         CalendarEvents.supplyAwayEvidence()
+        // Every Day card asks what agents were doing on its own poll; one walk of the transcripts every
+        // few seconds answers all of them (`AgentMomentsMemo`).
+        AgentMomentsMemo.lifetime = 10
         BrowserWatch.shared.start()
 
         // Local notifications for stale focused tasks and due dates (asks permission on first launch).
