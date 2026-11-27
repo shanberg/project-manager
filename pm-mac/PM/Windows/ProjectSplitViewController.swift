@@ -1425,6 +1425,7 @@ extension ProjectSplitViewController {
 
     func setSidebarCollapsedForBench(_ collapsed: Bool) {
         guard let item = splitViewItems.first, item.isCollapsed != collapsed else { return }
+        // motion: none — a measurement switching state between steps, not an animation anyone sees.
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0
             context.allowsImplicitAnimation = false
