@@ -1,10 +1,11 @@
 import Foundation
 import PmLib
 
-/// Archived Cards: Today cards that left a space's board — archived, cleared, or closed from a row —
-/// kept so they can come back after a relaunch. docs/spaces.md § Archived cards.
+/// Archived Cards: cards that left a board — a space's Today archived or cleared, or any unpinned card
+/// closed, in a space or a project — kept so they can come back after a relaunch. docs/spaces.md
+/// § Archived cards.
 ///
-/// - Kept in `~/.config/pm/spaces/archive.json`, every space's together.
+/// - Kept in `~/.config/pm/spaces/archive.json`, every board's together, by `key(spaceID:canvas:)`.
 /// - An entry is the whole card (the board's JSON for its node), so a note, file or view card comes
 ///   back as it was, not just its address.
 /// - At most `capacity` per space; older than `maxAge` go.
@@ -32,6 +33,8 @@ final class SpaceArchive {
 
     struct Entry: Codable, Equatable, Identifiable, Sendable {
         var id: String
+        /// The board it left (`SpaceArchive.key`): a space's id, or a project board's `canvas:` path.
+        /// Named for the spaces it was first kept for, which is what the file says.
         var spaceID: String
         /// The card as the board's file has it.
         var node: JSONValue
@@ -73,13 +76,21 @@ final class SpaceArchive {
 
     func entries(in spaceID: String) -> [Entry] { entries.filter { $0.spaceID == spaceID } }
 
-    /// Cards about to come off `spaceID`'s board. `titles` by card id, as the sidebar shows them.
-    func record(_ nodes: [CanvasNode], titles: [String: String], spaceID: String, reason: Reason) {
+    /// The key a board's entries are kept under: a space's own id (what the file has always said), or
+    /// `canvas:` and the board file's path for a project's.
+    static func key(spaceID: String?, canvas: URL) -> String {
+        spaceID ?? "canvas:" + canvas.standardizedFileURL.path
+    }
+
+    /// Cards about to come off the board keyed `spaceID`. `titles` by card id, as the sidebar shows
+    /// them. Returns each card's new entry, by card id.
+    @discardableResult
+    func record(_ nodes: [CanvasNode], titles: [String: String], spaceID: String, reason: Reason) -> [String: String] {
         let now = Date()
         let items = Dictionary(
             CanvasItems.sections(of: CanvasDocument(nodes: nodes)).flatMap(\.items).map { ($0.id, $0) },
             uniquingKeysWith: { a, _ in a })
-        let made: [Entry] = nodes.compactMap { node in
+        let made: [(card: String, entry: Entry)] = nodes.compactMap { node in
             guard !node.isGroup, let json = Self.json(of: node) else { return nil }
             var address: String?, host: String?, symbol: String?
             switch items[node.id]?.kind {
@@ -94,11 +105,13 @@ final class SpaceArchive {
             }
             let named = titles[node.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let title = named.isEmpty ? (items[node.id]?.title ?? host ?? "Untitled") : named
-            return Entry(id: UUID().uuidString.lowercased(), spaceID: spaceID, node: json, title: title,
-                         address: address, host: host, symbol: symbol, archivedAt: now, reason: reason)
+            return (node.id, Entry(id: UUID().uuidString.lowercased(), spaceID: spaceID, node: json, title: title,
+                                   address: address, host: host, symbol: symbol, archivedAt: now, reason: reason))
         }
-        guard !made.isEmpty else { return }
-        apply { $0.insert(contentsOf: made.reversed(), at: 0) }
+        guard !made.isEmpty else { return [:] }
+        let entries = made.map(\.entry)
+        apply { $0.insert(contentsOf: entries.reversed(), at: 0) }
+        return Dictionary(made.map { ($0.card, $0.entry.id) }, uniquingKeysWith: { a, _ in a })
     }
 
     func remove(_ ids: Set<String>) {

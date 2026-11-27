@@ -62,6 +62,8 @@ export interface Todo {
   sessionISODate?: string | null;
   /** The latest session this task was picked up into, when an older task has been (docs/sessions.md). */
   picked?: { into: string; at: string } | null;
+  /** When this task's tree was last kept in a catch-up review (docs/stale-tasks.md), ISO 8601. */
+  kept?: string | null;
 }
 
 export interface NotesShowOutput {

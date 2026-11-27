@@ -730,6 +730,31 @@ extension CanvasBoardView {
         undo.setActionName(name)
     }
 
+    /// A close's Undo from its toast: `before` back, if the arrangement up is still the one the close
+    /// left (`after`). False otherwise, and nothing changes. Not an undo step of its own: the cards
+    /// coming back are.
+    func putBack(_ before: CanvasTileSession, ifStill after: CanvasTileSession?) -> Bool {
+        guard let now = tiling, let after, Self.sameArrangement(now, after) else { return false }
+        var restored = before
+        restored.area = now.area
+        restored.restoreVisible = now.restoreVisible
+        restored.restoreZoom = now.restoreZoom
+        tiling = restored
+        let back = Set(restored.ids).subtracting(now.cards)
+        if !back.isEmpty { selection = back }
+        setLayout(restored.layout, animated: false)
+        onTilingChanged?()
+        announceTiling()
+        return true
+    }
+
+    /// Close cards from a tab's ✕ or the strip's Close: as a browser's tab under a frame, which
+    /// `closesCards` answers; out of the layout on a board without one.
+    func closeCards(_ ids: [String]) {
+        if let closesCards { return closesCards(ids) }
+        closeInTiling(ids)
+    }
+
     /// Whether two sessions are the same arrangement, whatever window they were measured for.
     static func sameArrangement(_ a: CanvasTileSession, _ b: CanvasTileSession) -> Bool {
         var a = a

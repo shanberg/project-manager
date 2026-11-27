@@ -1,4 +1,5 @@
 import Foundation
+import PmLib
 
 /// The workspaces you named and kept, per board.
 ///
@@ -118,6 +119,23 @@ enum CanvasWorkspaces {
     /// `WorkspaceNamePrompt.confirmReplacing`.
     static func exists(_ name: String, of url: URL) -> Bool {
         of(url)[name] != nil
+    }
+
+    /// Cards out of a saved workspace that isn't up (one that is goes through its board, which keeps
+    /// it saved). The workspace goes when none of its cards are left. Returns whether it is left.
+    @discardableResult
+    static func removing(_ ids: Set<String>, from name: String, for url: URL) -> Bool {
+        guard let saved = tiling(named: name, of: url) else { return false }
+        guard !Set(saved.ids).isDisjoint(with: ids) else { return true }
+        let room = CanvasRect(x: 0, y: 0, width: 1600, height: 1000)
+        guard let session = CanvasTileSession(restoring: saved, keeping: { !ids.contains($0) }, area: room,
+                                              restoreVisible: room, restoreZoom: 1),
+              !session.cards.isEmpty else {
+            remove(name, for: url)
+            return false
+        }
+        save(session.memory, as: name, for: url)
+        return true
     }
 
     static func remove(_ name: String, for url: URL) {

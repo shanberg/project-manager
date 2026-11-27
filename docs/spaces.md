@@ -21,11 +21,11 @@ Rebuilt 2026-11-04 on workspaces (`Spaces`, `SpaceModel`). The first build, a br
 - Comes back at launch with the other windows (Settings' Restore).
 - Web cards in a space use the shared sign-ins, or a card's own Session; there's no per-space store.
 - Spaces from the first build: their tabs became web cards in a row on the new board, once (`Spaces.carryOverTabs`).
-- Links from other apps (Folio as the default browser) go to a space whenever one exists: the space whose window is furthest forward, else the one last in front (`Spaces.lastUsed`), else the first. The card on that address if the space has one, else a new card in Today, shown. With no spaces, the front window's board as before.
+- Links from other apps (Folio as the default browser) go to a space whenever one exists: the space whose window is furthest forward, else the one last in front (`Spaces.lastUsed`), else the first. The card on that address if the space has one, else a new card in Today, shown. With no spaces, the front window: under its frame, as a space's (the card on that address, else a new one in Cards, shown); a window without one, its board as before (2026-11-13).
 
 ## The frame
 
-Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces the same day (`SpaceFrame`, `SpaceCardMarks`); not yet for projects.
+Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces the same day (`SpaceFrame`, `SpaceCardMarks`); for projects 2026-11-05 (below).
 
 - Built: the sidebar in place of the project list in a space's window (the tab row hidden); favourites, Board, workspaces among Pinned, pinned and Today cards, frames as folders (click to fold); click, ⌥-click, ⌘-click + ⌘↩ ("Tile N as a Workspace"); Pin, Favourite, Open in a Tile Beside, Close on a row's menu; the address field (⌘T) making a web card; ⌘W on the card in front.
 - Polished 2026-11-04 against renders of a real window: Arc's row and favourite styles (the card in front a raised chip), a rule between pinned and Today, workspace rows led by their tiles' icons, the space's colour and name at the foot, the window washed in the space's colour.
@@ -40,7 +40,7 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
 - Beside the sidebar, the gutter at the tiles' leading edge is the sidebar's edge (`SidebarEdgeHandle`): a column-resize cursor, and dragging it resizes the sidebar within its min and max. With the sidebar folded it's window ground again. It replaces the divider: the split's divider in a space has no width and nothing to grab.
 - A click on a tile in a layout clicks through to its content as well as focusing it — every board, not only spaces. It always meant to (`tileClicked` listens, never consumes), but stepping in raised the page's frame rate with one frame of "hidden", in the frame the press arrived, and WebKit dropped the press. The pulse now waits for the button to come up (`CanvasPageView.pulseWhenReleased`).
 - The sidebar is a plain split pane in a space (no glass plate), painting the content's `CanvasColorWash` in the space's colour, so the two are one ground; the split's divider line is clear (`ProjectSplitView.hidesDivider`). The custom split view must be set up as the controller's own is (`arrangesAllSubviews = false`, vertical) or every window crashes at launch.
-- The tile grip opens the tile's controls on every board's layouts, project or space (2026-11-05); Pin and Favourite only in a space; ✕ is Out of the Layout everywhere, which ⌘Z or ⇧⌘T undoes; search is Settings' engine everywhere. Was: in a space, (`CanvasTileControls`; mock `.claude/mocks/folio-tile-grip.html`): rest on the grip 0.3s, or click it; a click on the grip never closes it. A capsule unfolds from the middle of its top edge (SwiftUI scale and fade on a spring), 4pt under the grip; it ignores the titlebar safe area (a hosting view there pushed it 28pt down); the grip stays above it and still drags the tile. Back, Forward, Reload, the site (click: the address field in place, with suggestions; Return goes, Esc puts it back); Pin, Favourite, Maximize (with two or more tiles), Out of the Layout (as ⌘W, so ⇧⌘T brings it back), More (the tile's right-click menu). A tile that isn't a web page has the second half. Closes 0.45s after the pointer leaves grip and capsule (not while editing), when the tile leaves the layout, and on a window resize.
+- The tile grip opens the tile's controls on every board's layouts, project or space (2026-11-05); Pin and Favourite under any frame, a space's or a project's; ✕ is Close, as ⌘W (§ Closing), and Out of the Layout on a board without a frame; search is Settings' engine everywhere. Was: in a space, (`CanvasTileControls`; mock `.claude/mocks/folio-tile-grip.html`): rest on the grip 0.3s, or click it; a click on the grip never closes it. A capsule unfolds from the middle of its top edge (SwiftUI scale and fade on a spring), 4pt under the grip; it ignores the titlebar safe area (a hosting view there pushed it 28pt down); the grip stays above it and still drags the tile. Back, Forward, Reload, the site (click: the address field in place, with suggestions; Return goes, Esc puts it back); Pin, Favourite, Maximize (with two or more tiles), Out of the Layout (as ⌘W, so ⇧⌘T brings it back), More (the tile's right-click menu). A tile that isn't a web page has the second half. Closes 0.45s after the pointer leaves grip and capsule (not while editing), when the tile leaves the layout, and on a window resize.
 - The grip stays shown while its capsule is open, through a click on it (a press starts a tile drag in case; only dragging 4pt closes the capsule and hides the grip with the others).
 - A lone tile has a grip too, on any board, for its controls; a press on it drags nothing.
 - Not built: Keep as Workspace for an unnamed tiling.
@@ -62,7 +62,7 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
   - Up Next leads the project list wherever it's shown.
   - Filters (Active / Archived / All, by due / by domain): chips over the list.
   - Favourites: as a space's, icon tiles under the name.
-  - Cards not pinned: a Cards section, every unpinned card on the board, frames as folders. Nothing archives; no Today, no Clear.
+  - Cards not pinned: a Cards section, every unpinned card on the board, frames as folders. No auto-archive, no Today, no Clear; a closed card goes to Archived Cards (§ Closing).
   - Notes: a row above Board.
   - The foot: the focused task (tick to complete) and the session's time, in place of a space's name.
   - Everything keyed to a space's frame applies to a project's too: no header or tab row (so no title pill, board capsule, Away or browser chips), ⌘T / ⌘L the sidebar's address, ⌘1…⌘9 and ⌃⇥ the sidebar's cards, ⌘W the card in front (in Notes: back to the board), ⇧⌘C the page's address, ⌘S the sidebar, Pin and Favourite in the tile capsule.
@@ -97,7 +97,7 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
 - The project frame's list popover carries the window sidebar's bottom bar (New Project, kind, Show / Group By / Sort By / Up Next).
 - Tiles keep grid / master-and-stack, sizes, maximize, pop-out. A tile's strip shows only in a split.
 - ⌘T: a new card in Today, shown in the tile you're in (File ▸ New Tab is enabled in a space though it has no project).
-- ⌘W: the focused tile out of the layout; the card stays on the board and in the sidebar, ⌘Z puts it back. With no tile focused, the window closes. A row's Close in the sidebar still takes the card off the board. A pinned card's ✕ (shown only while it's on screen), middle-click and Close take it off the screen and stop its sound; it stays pinned (Arc's; `closePinned`). Unpin is only the menu's first item.
+- ⌘W: the card in front closed, as § Closing. With no tile focused, the window closes. Unpin is only a pinned card's menu's first item.
 - ⌘L: the sidebar's address field on the page in front, which Return sends there (the header's field is hidden in a space).
 - ⌘1…⌘8: the sidebar's rows in order as you see them (favourites, layouts, pinned, today; a folded folder's cards skipped), ⌘9 the last; the menu items are titled after them. ⌃⇥ goes along the same rows.
 - An unnamed tiling of several tiles offers Keep as Workspace.
@@ -129,24 +129,69 @@ Built 2026-11-05.
 - The sidebar's address field shows the focused tile's page as it is now (host and path, not the card's saved address), following focus between tiles and the page's navigation.
 - Suggestions (header and sidebar): the board's web cards, the card's back list, history (most visited, then newest), pages with a remembered name.
 - History: `~/.config/pm/history.json`, one row per address (title, last visit, count), newest 10,000 kept (`CanvasHistory`). Recorded on a card's finished load and on title changes (sites that move without loading). Not from a Private card; http and https only.
-- History menu: Reopen Closed Card (⇧⌘T), Show All History (⌘Y), Archived Cards… (the front space window's; off when no space window is in front), the last 15 pages, Clear History… (all, or today).
+- History menu: Reopen Closed Card (⇧⌘T), Show All History (⌘Y), Archived Cards… (the front window's, a space's or a project's; off when the front window has no frame), the last 15 pages, Clear History… (all, or today).
 - History window: search, pages by day, Open / Copy Address / Remove from History; double-click opens. Opening a page goes where links from other apps go.
-- ⇧⌘T: the last card closed in a space (⌘W or a row's Close) or taken out of a project's layout, this run only, 50 kept. Still on the board (⌘W): shown again; gone: a new card on the address it was at.
+- ⇧⌘T: the last card closed (§ Closing) or taken out of a layout, this run only, 50 kept. Still on the board (a pinned card, Keep, ⌘Z): shown again. Gone: put back as it was, any kind of card, with its lines, and out of Archived Cards; a web card at the page it had got to. A board without a frame: a new card on the address. A project's closed window is opened first (`Closed.projectKey`, `whenFramed`).
 - File ▸ Print… (⌘P) and Export as PDF…: the page you're in, else the focused tile's, else the one selected web card. Paged to the paper's width.
 - Clear: on the rule above Today while the pointer is in the sidebar; every Today card off the board (⌘Z brings them back). Pinned and favourites stay.
 - Archive (the rule's or the space name's menu, per space, `Space.archiveAfter`): Never, 12 hours, a day, a week, 30 days. A Today card not on screen (and not playing) for that long goes, checked at most once a minute. When a card was last on screen: `PMSpaceCardSeen`, by space and card; a card first seen counts from then.
-- Archived cards (2026-11-07, `SpaceArchive`): every Today card that leaves the board by Archive, Clear, or a row's Close is kept, reason with it. Survives relaunch.
+- Archived cards (2026-11-07, `SpaceArchive`): every Today card that leaves the board by Archive or Clear, and every card closed off a space's or project's board (2026-11-13), is kept, reason with it. Survives relaunch.
+  - Kept per board: a space by its id, a project by `canvas:` and its board's path (`SpaceArchive.key`).
   - `~/.config/pm/spaces/archive.json`, every space's together. The whole card (its node as the board's file has it), title, address and host for a web card, when, reason (auto / cleared / closed). Written on its own queue, in order.
   - Newest 500 per space; older than 90 days dropped.
   - Archived Cards window (`SpaceArchive.present(spaceID:)`): one per space, brought forward if open. Search (title, address), by day newest first; favicon or the card's symbol, title, reason · address, time. Restore (↩, double-click, or the menu), Copy Address, Remove from Archive; Clear Archive… (asks). Empty: No archived cards.
-  - Restore: the card back as it was, unpinned, at the top of Today, right of everything on the board; one undo step (Restore Card) on that board; the entry goes. Shown when the space's window is open. A card still on the board (⌘Z) is left as it is.
+  - Restore: the card back as it was, unpinned, at the top of Today, right of everything on the board; one undo step (Restore Card) on that board; the entry goes. Shown when the board's window is open. A card still on the board (⌘Z) is left as it is.
 - Downloads: Window ▸ Downloads (⌥⌘L) and an arrow at the sidebar's foot (a ring while one runs, a dot when one has finished). Progress while running; click opens, the magnifier shows in Finder, a row drags out as the file. Newest 30 kept (`PMRecentDownloads`). Clear forgets finished rows; files stay.
-- A row's menu: Copy Address, Duplicate (the page it's at, with its back list), Mute / Unmute (the card's own Mute), Move to Space ▸ (off this board, onto the other's as Today, unpinned), or drag the row onto the space's dock mark.
+- A row's menu: Copy Address, Duplicate (the page it's at, with its back list), Mute / Unmute (the card's own Mute), Move to Space ▸ (off this board, a space's or a project's, onto the space's as Today, unpinned; out of its layouts first), or drag the row onto the space's dock mark.
 - ⇧-click a link, in a space or (since 2026-11-05) a project: a preview over the window, Arc's Peek (`CanvasLinkPreview`). Same sign-ins, blocking and scripts as the card. Open as Card (⌘↩) makes it a Today card in front; Esc, ✕ or a click outside drops it. Links inside stay in the preview.
-- The hovered link's status says what ⌘ (a new tab in a space, a new card elsewhere) and ⇧ (a preview) do.
+- The hovered link's status says what ⌘ (a new tab under a frame, a space's or a project's; a new card on a board without one) and ⇧ (a preview) do.
 - Mini player at the sidebar's foot: a card making sound that isn't on screen, or one it paused until that card is shown. Click goes to the card; play/pause; picture in picture (the page's largest video); ✕ pauses and hides it.
 - Page menu: Show Reader (⇧⌘R) — the page's article (`<article>`, `<main>`, or the block with the most paragraph text) over the page in plain type; again, Esc or Close Reader takes it away (`CanvasReader`). Mute Page. More Page Commands ▸ Copy Address.
-- ⇧⌘C in a space: the page's address on the pasteboard, as Arc's (in project windows it stays Canvas in New Window).
+- ⇧⌘C under a frame, a space's or a project's: the page's address on the pasteboard, as Arc's. Windows without a frame keep Canvas in New Window.
+
+## Closing
+
+Decided 2026-11-13: a tile is a tab. Spaces and projects alike (`SpaceFrame.close`, `SpaceClosing`).
+
+- Close: ⌘W, a row's ✕ or Close, middle-click, the grip's ✕, a tab's ✕, a tab strip's Close Tab and Close Other Tabs, a picked row's Close N Cards.
+- A pinned card or favourite: off the screen, stopped, still pinned (Arc's; `closePinned`). Its ✕ shows only while it's on screen.
+- A project's notes card: as a pinned card. ⌘W in Notes goes to the board.
+- Any other card: off the board, a space's or a project's. Into Archived Cards (reason Closed) and ⇧⌘T. One ⌘Z puts the card and the layout back.
+- Never asks and never trashes a file: a document card's file stays in the project's docs. The board's Delete still asks.
+- What comes forward, as a browser closing a tab (`SpaceClosing.plan`):
+  - a tab in a tile of several: the tab of that tile in front most lately;
+  - a tile among others: the tile goes and the layout closes up, as Arc's split;
+  - the only tile of an unnamed tiling: the card in front before it, into its slot; a named layout's slot is never filled from outside it (§ Cards in layouts);
+  - nothing remembered: the neighbouring tab or tile, else the board.
+- Toast at the window's foot after an unpinned close (`CanvasToast`): Closed “<name>” (or Closed N Cards), Undo, Keep in Space / Keep in Project.
+  - Undo: the cards back as they were, and the layout if nothing has changed it since (else the first card shown). Out of Archived Cards and ⇧⌘T.
+  - Keep: the cards back in the sidebar where they were, not on the screen. Out of Archived Cards and ⇧⌘T.
+  - Stays while the pointer is on it; goes 5s after it leaves, on a button, or when another toast or HUD line comes. Fades in and out.
+- Remove from Layout and Remove Tile from Layout (a tile's menu, View): out of the layout only, the card stays on the board.
+- Windows without a frame (a file that's neither, `PMProjectFrameOff`): ✕ and ⌘W only take the tile out of the layout, as before.
+
+## Cards in layouts
+
+Decided 2026-11-13 in `.claude/mocks/folio-layout-cards.html`; built the same day (`SpaceLayoutCards`, `SpaceFrame.autoPin`, `removeFromLayout`). Spaces and projects alike.
+
+- An unpinned card lives in one place: Today / Cards, or one layout.
+- A layout's own cards are rows under the layout's row, and nowhere else. Arc's split.
+- A card used in a second layout is pinned. A pinned card can be in any number of layouts.
+- Under each layout using it, a pinned card is a row with a pin mark at its end. Its own row is in Pinned.
+- A pinned card's row in Pinned: a layout mark with a count (no count for one). Click: that layout, the card in front; with two or more, a menu of them.
+- Layouts are pinned: rows at the head of Pinned, always.
+- Only the layout on screen is unfolded. A folded layout row shows its tiles' icons.
+- Click a row under a layout: that layout, that tile in front. Click a row in Pinned or Today: the card alone (`openAlone`).
+- Add to Layout (a row's menu, or a drag onto a layout row or its tiles): an unpinned card moves under that layout, out of Today / Cards. One already in a layout is pinned, and a toast says so: Pinned “<name>”: it’s in 2 layouts, with Undo.
+- Move to Today / Cards (a row's menu, or dragging it out): out of the layout.
+- Close a layout's own card: as § Closing; Keep puts it back under its layout. Close a pinned card under a layout: Remove from “<layout>”, it leaves that layout only.
+- A layout whose last card goes goes too (`dropEmptiedWorkspace`, no question); ⌘Z brings it back, and so do the close toast's Undo and Keep. Closing the last card of the layout on screen shows the card in front before it, alone.
+- Unpin a card two or more layouts use: dimmed, “Unpin (used in Dashboard, Reading)”. Used by one: it then lives under that layout. By none: Today / Cards.
+- A project's notes card: as a pinned card, never under a layout as its own. The Notes layout isn't a layout row.
+- The layout on screen is read as its board has it; the others as saved. A card in front in the layout on screen is the front row under it; its Pinned row is only on screen.
+- Cards under a layout aren't in ⌘1…9, ⌃⇥ or ⇧-click runs: the layout's row is. They never auto-archive.
+- The auto-pin's Undo: the card out of the layouts it had just joined, and unpinned. The first look at a board after launch pins shared cards quietly.
+- Existing boards, once: a card in two or more layouts is pinned; an unpinned card in one layout leaves Today / Cards for it.
 
 ## Adding cards from the sidebar
 
@@ -216,6 +261,7 @@ Built 2026-11-06.
 - `>` with New Project, New Space, Settings or Take Notes for This Meeting selected: no session preview under the rows, and no project name in the hint (`PMCommand.actsOnFocusedProject`).
 - `@`: spaces after the projects. Empty field: recent projects, then spaces, 7 rows in all. Typed: projects that match, then spaces whose name starts with it, then spaces with a word that does (`SpaceOrder.matching`).
 - `@` with nothing matching: New Project… and New Space “<typed>”.
+- A project row with a page carried in from a browser (2026-11-13): under the project's frame, the card on that address or a new one in Cards, shown in the tile you're in; without a frame, into a workspace as before.
 - A space row: goes to it. With a page carried in from a browser: the page goes into that space as a link from another app does.
 - Not while the bar picks a project for something (Services ▸ Send to Project): no spaces, no New Space.
 
