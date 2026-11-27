@@ -82,6 +82,7 @@ enum LayoutBench {
     static func startIfAsked() {
         guard let folder, let canvas else { return }
         do {
+            // read: the bench's own scratch folder (PM_LAYOUT_BENCH), local, only when a bench run asks.
             scenario = try JSONDecoder().decode(Scenario.self, from: Data(contentsOf: folder.appending(path: "scenario.json")))
             probe = try String(contentsOf: folder.appending(path: "probe.js"), encoding: .utf8)
         } catch {
@@ -286,6 +287,7 @@ enum LayoutBench {
     /// earlier run's `tiles.json` copied in as `folio-tiles.json`, else equal columns.
     private static func bareFrames(_ layout: Scenario.Layout, in bounds: NSRect) -> [(site: String, frame: NSRect)] {
         let sites = layout.columns.flatMap { $0 }
+        // read: the bench's own scratch folder (PM_LAYOUT_BENCH), local, only when a bench run asks.
         if let folder, let data = try? Data(contentsOf: folder.appending(path: "folio-tiles.json")),
            let all = try? JSONSerialization.jsonObject(with: data) as? [String: [[String: Any]]],
            let rects = all[layout.name], rects.count == sites.count {
