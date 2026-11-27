@@ -25,9 +25,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// Everything the header shows and everything its controls do. Exposed so an owner can put its own
     /// commands in the options menu — a project window adds the switch back to its task list.
     let header = CanvasHeaderModel()
-    private var pill: NSHostingView<CanvasTitlePill>!
-    private var capsule: NSHostingView<CanvasHeaderTrailingChrome>!
-    private var tabBar: NSHostingView<CanvasTabBar>!
+    private var pill: MeteredHostingView<CanvasTitlePill>!
+    private var capsule: MeteredHostingView<CanvasHeaderTrailingChrome>!
+    private var tabBar: MeteredHostingView<CanvasTabBar>!
 
     /// A space's window: no header at all — the sidebar holds what it said (docs/spaces.md § The frame).
     /// Tiles start just under the window's drag band, which is all the room the window's buttons need.
@@ -1166,12 +1166,12 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     }
 
     private func buildContent() {
-        pill = NSHostingView(rootView: CanvasTitlePill(model: header))
-        capsule = NSHostingView(rootView: CanvasHeaderTrailingChrome(model: header))
+        pill = MeteredHostingView(rootView: CanvasTitlePill(model: header), meterName: "pill")
+        capsule = MeteredHostingView(rootView: CanvasHeaderTrailingChrome(model: header), meterName: "capsule")
         // The hosting view is the size SwiftUI says it is, so each view's frame is the pill or the
         // capsule and not a rectangle of window around it. Set one at a time because the two are
         // different generic types and an array of them is an array of `NSView`.
-        tabBar = NSHostingView(rootView: CanvasTabBar(model: header, tabs: tabModel))
+        tabBar = MeteredHostingView(rootView: CanvasTabBar(model: header, tabs: tabModel), meterName: "tabBar")
         pill.sizingOptions = [.intrinsicContentSize]
         capsule.sizingOptions = [.intrinsicContentSize]
         tabBar.sizingOptions = [.intrinsicContentSize]
