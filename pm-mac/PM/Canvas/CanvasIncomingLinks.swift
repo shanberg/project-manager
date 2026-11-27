@@ -18,29 +18,32 @@ enum CanvasIncomingLinks {
     }
 
     static func open(_ url: URL) {
-        // With a space anywhere, links go to the space in front or the one used last: that's the
-        // browser. Boards in project windows get links by ⌘-click and the quick bar.
-        if let space = Spaces.shared.forIncomingLinks {
-            return Spaces.shared.openIncoming(url, in: space)
-        }
         // A satellite in front is where you are working: the link is a tab in it, as a ⌘-click on one
-        // of its pages is. Its project window may well be put away behind it.
+        // of its pages is — ahead of the spaces, which would otherwise take every link while any space
+        // exists. Its project window may well be put away behind it.
         if let satellite = NSApp.orderedWindows.lazy.compactMap({ $0.windowController }).first
             as? CanvasSatelliteWindow,
            let board = satellite.board, let shown = satellite.shownCard?.node.id,
-           board.tiling?.position(of: shown) != nil,
            let normalized = CanvasAddress.normalized(url.absoluteString) {
             satellite.window?.makeKeyAndOrderFront(nil)
             var added: String?
-            board.addingTab(to: shown) {
+            let add = {
                 let at = board.centreOfVisibleBoard
                 added = board.addCard(CanvasNode(content: .link(url: normalized),
                                                  frame: CanvasRect(x: at.x - 200, y: at.y - 200,
                                                                    width: 400, height: 400)),
                                       actionName: "Add Web Card")
             }
+            // In the satellite's tile too, so Bring Back and Gather keep it; a satellite off the free
+            // canvas has no tile, and the card goes on the canvas.
+            if board.tiling?.position(of: shown) != nil { board.addingTab(to: shown, add) } else { add() }
             if let added { board.lendNewTab(added, to: satellite, showing: true) }
             return
+        }
+        // With a space anywhere, links go to the space in front or the one used last: that's the
+        // browser. Boards in project windows get links by ⌘-click and the quick bar.
+        if let space = Spaces.shared.forIncomingLinks {
+            return Spaces.shared.openIncoming(url, in: space)
         }
         let front = NSApp.orderedWindows.lazy
             .compactMap { $0.windowController as? ProjectWindowController }.first

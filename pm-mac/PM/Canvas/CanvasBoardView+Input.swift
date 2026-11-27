@@ -558,7 +558,11 @@ extension CanvasBoardView {
                 overlay.needsDisplay = true
                 previewDrop(of: id, nil, pulling: pulling)
                 let frame = satelliteFrame(for: base[id])
-                if pulling { moveToWindow(tabDragGroup.count > 1 ? tabDragGroup : [id], showing: id, frame: frame) }
+                // Over one of this board's satellites, into it as tabs; anywhere else, a window there.
+                if let into = satellite(atScreenPoint: Self.pointerOnScreen()) {
+                    moveToSatellite(pulling ? (tabDragGroup.count > 1 ? tabDragGroup : [id]) : tileCards(of: id),
+                                    showing: id, into: into)
+                } else if pulling { moveToWindow(tabDragGroup.count > 1 ? tabDragGroup : [id], showing: id, frame: frame) }
                 else { moveTileToWindow(id, frame: frame) }
                 tabDragGroup = []
                 break

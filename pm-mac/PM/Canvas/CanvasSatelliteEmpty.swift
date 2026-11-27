@@ -66,6 +66,17 @@ final class CanvasSatelliteEmpty: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// The card's name and icon as they are now — a page goes on navigating while it is out. From the
+    /// satellite, as its header changes (`CanvasSatelliteWindow.refreshPlaceholders`).
+    func update(title name: String, image: NSImage?) {
+        guard name != title.stringValue || icon.image == nil else { return }
+        title.stringValue = name
+        icon.image = image?.withSymbolConfiguration(.init(pointSize: 22, weight: .regular)) ?? image
+        setAccessibilityLabel("\(name), in a window")
+    }
+
+    var shownTitle: String { title.stringValue }
+
     @objc private func showWindow() { card.lentTo?.reveal(card) }
     @objc private func bringBack() { card.lentTo?.giveBack(card) }
 }
