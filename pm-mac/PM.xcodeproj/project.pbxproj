@@ -176,6 +176,7 @@
 		5373F6519FFB9872B7CCB3C5 /* CanvasCardShows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CBB6451CDE795A64E27CF99 /* CanvasCardShows.swift */; };
 		53E5D7C9A6AF1EE23FD1BD85 /* CanvasSessionPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD939225280D2EE38C200188 /* CanvasSessionPill.swift */; };
 		54340DB057B2B613E3E9DE83 /* RowSelectionBand.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC91C59007ABC53958980A0C /* RowSelectionBand.swift */; };
+		554899B71063176A362CEB1D /* DefaultsCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E2E5B76CDF50A79465939D1 /* DefaultsCache.swift */; };
 		558C1EA2742C73C2A639DB02 /* AttentionKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492EF47D503135DF9A6D100B /* AttentionKeeper.swift */; };
 		559F6E1B49BEC7F380B1DF70 /* CanvasPaneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09B2306FD03B435C83C0588A /* CanvasPaneController.swift */; };
 		55E328A5AED79386BFBFC19D /* ProjectEventsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAABD83B68718F243C8107B0 /* ProjectEventsSheet.swift */; };
@@ -244,6 +245,7 @@
 		70EF5BB844BE88425BF2BF8D /* CanvasCardShows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CBB6451CDE795A64E27CF99 /* CanvasCardShows.swift */; };
 		7113B28775B3012A2A6AF462 /* SearchField.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF1B5393B4FF9F362814CC03 /* SearchField.swift */; };
 		717B2F38C2DB89B572DDBB63 /* SessionNoteTakeover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BD74807560D1658286E39F5 /* SessionNoteTakeover.swift */; };
+		71AAE2DE89C903C1D7FC1DC0 /* DefaultsCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E2E5B76CDF50A79465939D1 /* DefaultsCache.swift */; };
 		71C9733C5EE3F93A2890A308 /* EmojiCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D875EB76F3DC60050396219 /* EmojiCatalog.swift */; };
 		71EA9563EC92CF157FB6000A /* CanvasClipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F4F209935D6534AE56C3E4 /* CanvasClipView.swift */; };
 		720FAFCBA7806DAABCA1A88C /* CloudFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 692EB157E8AA88A38F0B792E /* CloudFile.swift */; };
@@ -271,7 +273,6 @@
 		7CDD01411F07212F022089E9 /* CanvasWebPopupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8678BD777CB24842940F9B5 /* CanvasWebPopupTests.swift */; };
 		7D93D1BEE2A4E35FA7022FE4 /* CanvasPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40E903B65EC4480FCB04261 /* CanvasPresentation.swift */; };
 		7DFFA93D85613A90F2C59D5A /* CanvasSatelliteEmpty.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2419CDD3967BC590FB2D9827 /* CanvasSatelliteEmpty.swift */; };
-		A1F00D5A7E11C0FFEE000001 /* CanvasSatelliteFlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F00D5A7E11C0FFEE000002 /* CanvasSatelliteFlight.swift */; };
 		7E2E84A17C773BBA1ABF9876 /* CanvasFolderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F247C5CEADEE5BE195B86A3 /* CanvasFolderCard.swift */; };
 		7E8570775F4E22323D06D740 /* CanvasPageVisits.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF98EC9D2FC7D99B6A853347 /* CanvasPageVisits.swift */; };
 		7EB325A32AC77C001203D2BD /* FaviconLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 655EF57D49F1C9DD87AFC18D /* FaviconLoader.swift */; };
@@ -318,6 +319,7 @@
 		903C55EFCE6CD11640437EE2 /* CanvasBlockPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B693908982BE1960D0F08898 /* CanvasBlockPolicy.swift */; };
 		906A460C7C2655E1B3AD6957 /* PMFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3025790996749621C9EBB543 /* PMFiles.swift */; };
 		90B2B52FD8D3D38A5D1C7EA4 /* CanvasCardActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C23801938E500AE2503482A2 /* CanvasCardActionsTests.swift */; };
+		9198983380B3F3533BB4DEA5 /* SpaceSidebarGlyphsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4C2D23FA708FDADB95BC8B1 /* SpaceSidebarGlyphsTests.swift */; };
 		92006127F2FED5B39114B8C2 /* TaskEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5C091CF8691F406FDF304F2 /* TaskEditors.swift */; };
 		92B1E44CD1967D8145458F2E /* SessionNoteMerge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EAFC44C3D28DC13A1B873AA /* SessionNoteMerge.swift */; };
 		92B75BB5451F9E82995A8BE2 /* CanvasExistingCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = E120FABAEACCF9ABAA32E14C /* CanvasExistingCards.swift */; };
@@ -394,6 +396,7 @@
 		B363AC7D60FC4BA918072F95 /* CanvasFolderIconGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A80C9496ACAD636457E300B /* CanvasFolderIconGrid.swift */; };
 		B3BD3F6454F82DBF9A89CE34 /* WaitingModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D33D166BDD787AB3EB4A7141 /* WaitingModel.swift */; };
 		B4BAE447817BDB64CF93BA05 /* TokenTextLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 752EE233AC836B99051CA1A4 /* TokenTextLabel.swift */; };
+		B5397581C66295995B171108 /* CanvasSatelliteFlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC049195B389D6F4FB1B298F /* CanvasSatelliteFlight.swift */; };
 		B70CAD446EBE1A0CF7F186E1 /* CanvasUndoRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2076051C361CE8919637AA2 /* CanvasUndoRouteTests.swift */; };
 		B7E723016700033A0D293827 /* CanvasCardSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F948EEFBB8F60C1F23B327A1 /* CanvasCardSessionTests.swift */; };
 		B830ECE5BF1ED895722CF6D4 /* DisplayTicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83B7F290C0DA5A1B7C427DB /* DisplayTicker.swift */; };
@@ -487,6 +490,7 @@
 		DAD5BB3C882CBE7EF3066A21 /* CanvasSoftEdge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C8253F2276A9484CE883B2 /* CanvasSoftEdge.swift */; };
 		DAF071EEEA64B7FE8722D6DB /* GlassBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5715734872D251CCEA72D7D2 /* GlassBackground.swift */; };
 		DB61E29DC611562202E5F7BA /* SessionPicks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DAF694D06EA74A49555934 /* SessionPicks.swift */; };
+		DBA0F471F57AE7DB304972B6 /* SpaceSidebarGlyphs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50F9298BACF4EFD9F5BBE951 /* SpaceSidebarGlyphs.swift */; };
 		DBDEC51E4170141989A5D443 /* TokenText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99C570936D1A1391DEB446C1 /* TokenText.swift */; };
 		DBE605FABB5E4A886ACFD75C /* CanvasCardSizeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12EFB8F239120BDEA8FAA346 /* CanvasCardSizeTests.swift */; };
 		DC1B98EADE02EE480B84CDD4 /* KeyCombo.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B986DAB75A00965DBEFC63 /* KeyCombo.swift */; };
@@ -564,6 +568,7 @@
 		FEC04C4FA7311BF1BF89B670 /* ImmersivePresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4667E73DFF145A0BFD7B98F4 /* ImmersivePresenter.swift */; };
 		FEF39C67E5728EC1979CE50A /* CanvasWebDialogs.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7B7013A93C4B219C107C6E /* CanvasWebDialogs.swift */; };
 		FF58487E92C6B650E24FFD65 /* QuickBarModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E74CA79CC5C0C4EB37ED23A6 /* QuickBarModel.swift */; };
+		FFE720FC5CBE55C18004CF59 /* SpaceSidebarGlyphs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50F9298BACF4EFD9F5BBE951 /* SpaceSidebarGlyphs.swift */; };
 		FFFF35C939C48FAD5F990202 /* CanvasPageKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A15C7B3D1E2B03104B2865 /* CanvasPageKeys.swift */; };
 /* End PBXBuildFile section */
 
@@ -620,6 +625,7 @@
 		1A80C9496ACAD636457E300B /* CanvasFolderIconGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFolderIconGrid.swift; sourceTree = "<group>"; };
 		1BA91AF42671A0BAA13697EE /* SpaceDockCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceDockCard.swift; sourceTree = "<group>"; };
 		1DBEF0C051683508E6C2D9F1 /* CanvasDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasDocumentStore.swift; sourceTree = "<group>"; };
+		1E2E5B76CDF50A79465939D1 /* DefaultsCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultsCache.swift; sourceTree = "<group>"; };
 		1F0F632CE9606E7BB260271F /* TokenLayoutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenLayoutManager.swift; sourceTree = "<group>"; };
 		1F247C5CEADEE5BE195B86A3 /* CanvasFolderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFolderCard.swift; sourceTree = "<group>"; };
 		20AA79016760E53C63826A34 /* LinkTitleLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkTitleLoader.swift; sourceTree = "<group>"; };
@@ -629,7 +635,6 @@
 		224761B4E9D7F458BCB98A42 /* CanvasCompanionPlacementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCompanionPlacementTests.swift; sourceTree = "<group>"; };
 		224912707F104CD2739DBD7B /* TaskDropResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDropResolver.swift; sourceTree = "<group>"; };
 		2419CDD3967BC590FB2D9827 /* CanvasSatelliteEmpty.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSatelliteEmpty.swift; sourceTree = "<group>"; };
-		A1F00D5A7E11C0FFEE000002 /* CanvasSatelliteFlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSatelliteFlight.swift; sourceTree = "<group>"; };
 		247D713E81E2FEE83B569154 /* NoteEditorMeasureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorMeasureTests.swift; sourceTree = "<group>"; };
 		255D306E8C06804C6D670431 /* CanvasCardEditing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasCardEditing.swift; sourceTree = "<group>"; };
 		26660B6F22EE1F010BE34485 /* ReadableWidth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadableWidth.swift; sourceTree = "<group>"; };
@@ -700,6 +705,7 @@
 		4F916817DD66FC48D6897516 /* CanvasBoardFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBoardFileTests.swift; sourceTree = "<group>"; };
 		500B5EC5B4576F53C05C426A /* ProjectTexturePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTexturePicker.swift; sourceTree = "<group>"; };
 		50AC718D11E77175EF2AE2E0 /* ProjectLinksSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectLinksSync.swift; sourceTree = "<group>"; };
+		50F9298BACF4EFD9F5BBE951 /* SpaceSidebarGlyphs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceSidebarGlyphs.swift; sourceTree = "<group>"; };
 		52756F9FACB74D3716EE5B9B /* TaskFieldCompletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskFieldCompletionTests.swift; sourceTree = "<group>"; };
 		52F033A07EBB7B9C5F100737 /* NoteEditorCompletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorCompletionTests.swift; sourceTree = "<group>"; };
 		5364DCBFBD2787BA5E6F4772 /* NoteEditorCaretTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorCaretTests.swift; sourceTree = "<group>"; };
@@ -838,6 +844,7 @@
 		A47DED434745E9CA5BD2AA89 /* CanvasScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasScrollView.swift; sourceTree = "<group>"; };
 		A4A821DBCA362198C62286E9 /* CanvasItemGridView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasItemGridView.swift; sourceTree = "<group>"; };
 		A4B275418C553B37A92C4BF2 /* CanvasSatelliteCompanion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSatelliteCompanion.swift; sourceTree = "<group>"; };
+		A4C2D23FA708FDADB95BC8B1 /* SpaceSidebarGlyphsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceSidebarGlyphsTests.swift; sourceTree = "<group>"; };
 		A683751482352094B3CF8AC6 /* SidebarClickTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarClickTests.swift; sourceTree = "<group>"; };
 		A6993C2BE3C546CA7EDFC0B3 /* CanvasFolderBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFolderBrowser.swift; sourceTree = "<group>"; };
 		A6B61A6C245FCE56ACBFE8E9 /* ProjectsSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsSettings.swift; sourceTree = "<group>"; };
@@ -944,6 +951,7 @@
 		D8B986DAB75A00965DBEFC63 /* KeyCombo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyCombo.swift; sourceTree = "<group>"; };
 		D9ED723C9E78C2DD03097E89 /* PMStoreObservationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PMStoreObservationTests.swift; sourceTree = "<group>"; };
 		DA3E547586240CD1C0A4D522 /* WindowSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowSnapshotTests.swift; sourceTree = "<group>"; };
+		DC049195B389D6F4FB1B298F /* CanvasSatelliteFlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSatelliteFlight.swift; sourceTree = "<group>"; };
 		DD939225280D2EE38C200188 /* CanvasSessionPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSessionPill.swift; sourceTree = "<group>"; };
 		DFB82CA4DF65554503BE228D /* CanvasClipViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasClipViewTests.swift; sourceTree = "<group>"; };
 		E03DF803366E7200465FC1A2 /* CanvasSessionPillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasSessionPillTests.swift; sourceTree = "<group>"; };
@@ -1147,6 +1155,7 @@
 				43B1FB7602D9B9AFC9A92410 /* SpaceModel.swift */,
 				CBFB1C86D071A28E5AA18AD4 /* Spaces.swift */,
 				26CCD9F4DE85780DF4369CB2 /* SpaceSettings.swift */,
+				50F9298BACF4EFD9F5BBE951 /* SpaceSidebarGlyphs.swift */,
 				83C040A2290C645914C9A466 /* WindowDragView.swift */,
 			);
 			path = Spaces;
@@ -1361,7 +1370,7 @@
 				A4B275418C553B37A92C4BF2 /* CanvasSatelliteCompanion.swift */,
 				F95B90238BD9B7D9BAF5C63E /* CanvasSatelliteDock.swift */,
 				2419CDD3967BC590FB2D9827 /* CanvasSatelliteEmpty.swift */,
-				A1F00D5A7E11C0FFEE000002 /* CanvasSatelliteFlight.swift */,
+				DC049195B389D6F4FB1B298F /* CanvasSatelliteFlight.swift */,
 				701357B24BFB6658DCAE3FF2 /* CanvasSatelliteGather.swift */,
 				B68EE4E6E6D9FBBEC670654E /* CanvasSatelliteKeeper.swift */,
 				321B78B7507258D40700C437 /* CanvasSatelliteWindow.swift */,
@@ -1429,6 +1438,7 @@
 				692EB157E8AA88A38F0B792E /* CloudFile.swift */,
 				F2FB242910C49B7F5CC4C13E /* Coalescer.swift */,
 				B5EA2C568B8EE5A4722910B4 /* CrossingBench.swift */,
+				1E2E5B76CDF50A79465939D1 /* DefaultsCache.swift */,
 				CBDFED4C5CC568ED9A02844D /* DisplayModes.swift */,
 				C83B7F290C0DA5A1B7C427DB /* DisplayTicker.swift */,
 				EBBE74620B47E8414B209A08 /* FolioType.swift */,
@@ -1603,6 +1613,7 @@
 				05437D4834F11F7F9314BA70 /* SpaceClosingTests.swift */,
 				43E40B7A425C60A322FB5BBA /* SpaceModelTests.swift */,
 				D33DF155DB315F92FFEE5F26 /* SpaceRowDragTests.swift */,
+				A4C2D23FA708FDADB95BC8B1 /* SpaceSidebarGlyphsTests.swift */,
 				7C83138169424E7CE3A881B7 /* Stubs.swift */,
 				719E3778E5DF3402C026B97E /* SwitcherModelTests.swift */,
 				CD9C0FB324B53991D5DEEEB1 /* TabBarGrowthTests.swift */,
@@ -1852,7 +1863,7 @@
 				0734B097ABE17040B76D373B /* CanvasSatelliteCompanion.swift in Sources */,
 				66853CC9968D77D7D8BABA14 /* CanvasSatelliteDock.swift in Sources */,
 				7DFFA93D85613A90F2C59D5A /* CanvasSatelliteEmpty.swift in Sources */,
-				A1F00D5A7E11C0FFEE000001 /* CanvasSatelliteFlight.swift in Sources */,
+				B5397581C66295995B171108 /* CanvasSatelliteFlight.swift in Sources */,
 				4D880EBA99D35FAC0D1D3BF6 /* CanvasSatelliteGather.swift in Sources */,
 				85D4EE097F34E6F428A1083B /* CanvasSatelliteKeeper.swift in Sources */,
 				6D846210E97AB3EEC5C71A26 /* CanvasSatelliteWindow.swift in Sources */,
@@ -1901,6 +1912,7 @@
 				0D1260A2F525759E89387912 /* ConfigStore.swift in Sources */,
 				21A2D053BE2F53A149D70B69 /* ConfigWatcher.swift in Sources */,
 				3986E63E25D78EFD62284A3A /* CrossingBench.swift in Sources */,
+				71AAE2DE89C903C1D7FC1DC0 /* DefaultsCache.swift in Sources */,
 				F27469EEBD6E0327BF8AD908 /* DisplayModes.swift in Sources */,
 				779A498CA7A5CDFF63FB0D9E /* DisplayTicker.swift in Sources */,
 				9D4F5221AAC372A3A070AC67 /* DockDue.swift in Sources */,
@@ -2014,6 +2026,7 @@
 				2A32707C2FA6ED1B9CBBEA8A /* SpaceFrame.swift in Sources */,
 				0951ED1A45B7EF4530A3FDE7 /* SpaceModel.swift in Sources */,
 				41E0C9332A3B58A1D0FF62EA /* SpaceSettings.swift in Sources */,
+				FFE720FC5CBE55C18004CF59 /* SpaceSidebarGlyphs.swift in Sources */,
 				1E880DAB37B7B34881DD922E /* Spaces.swift in Sources */,
 				24C2FA9FFEDFBD0FC53239DA /* StaleReview.swift in Sources */,
 				ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */,
@@ -2208,6 +2221,7 @@
 				6E0FA6C7A403BCCE60010D5E /* CoalescerTests.swift in Sources */,
 				67BDD8E4260221E88623D785 /* CompletingTextField.swift in Sources */,
 				AA6F0772159E8F8907603FA4 /* CompletionController.swift in Sources */,
+				554899B71063176A362CEB1D /* DefaultsCache.swift in Sources */,
 				B830ECE5BF1ED895722CF6D4 /* DisplayTicker.swift in Sources */,
 				D81D1FBB59B39C83CCBE05D9 /* DockDue.swift in Sources */,
 				1B12473ED38CAFBE92F5FCFE /* DockDueTests.swift in Sources */,
@@ -2288,6 +2302,8 @@
 				3A87569A4ACE823EC2BC8684 /* SpaceModel.swift in Sources */,
 				E1B80B889011F8364B6B46DB /* SpaceModelTests.swift in Sources */,
 				0C8C6E6240C113A93B44DEA6 /* SpaceRowDragTests.swift in Sources */,
+				DBA0F471F57AE7DB304972B6 /* SpaceSidebarGlyphs.swift in Sources */,
+				9198983380B3F3533BB4DEA5 /* SpaceSidebarGlyphsTests.swift in Sources */,
 				B87455105F9CD0C596F96FF1 /* StoreRegistry.swift in Sources */,
 				F8344E6C5969C1BA5B9F084C /* Stubs.swift in Sources */,
 				D91EEBE5002BDDC59517E12A /* SwitcherModel.swift in Sources */,
