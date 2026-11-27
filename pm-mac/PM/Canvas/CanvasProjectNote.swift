@@ -60,6 +60,8 @@ struct CanvasProjectNote: View {
     /// What a cap left out, brought back by its line. See `proseTail` and `pileCap`.
     @State private var showsWholeNote = false
     @State private var showsWholePile = false
+    /// Whether the pile's stale trees are drawn, under the line that folds them away. See `staleLine`.
+    @State private var showsStale = false
     /// Which position a freshly opened add editor seeds to, set by the menu's Add commands before the
     /// editor opens.
     @State private var addPosition: TaskInsertPosition = .after
@@ -225,8 +227,17 @@ struct CanvasProjectNote: View {
             return shownSessions.flatMap { sitting($0.index, $0.session) }
         case .pile(let withLatest):
             let latest = withLatest ? shownSessions.first.map { sitting($0.index, $0.session) } ?? [] : []
-            return latest + pileRows(withLatest: withLatest).map(\.todo)
+            return latest + unfoldedPileRows(withLatest: withLatest).map(\.todo)
         }
+    }
+
+    /// The pile's rows less the stale trees folded under `staleLine`, while they are folded — so the
+    /// keyboard doesn't walk onto rows that aren't drawn. See `pileLines`.
+    private func unfoldedPileRows(withLatest: Bool) -> [PileEntry] {
+        let rows = pileRows(withLatest: withLatest)
+        guard !showsStale, display.find.isEmpty, !store.staleLines.isEmpty else { return rows }
+        let stale = store.staleLines
+        return rows.filter { !stale.contains(TaskStaleness.key($0.row.todo)) }
     }
 
     /// The tasks whose own line is drawn somewhere on the card — where an origin chip can scroll to.
@@ -240,7 +251,7 @@ struct CanvasProjectNote: View {
                 }
             })
         case .pile(let withLatest):
-            var keys = Set(pileRows(withLatest: withLatest).map { PMStore.key(for: $0.todo) })
+            var keys = Set(unfoldedPileRows(withLatest: withLatest).map { PMStore.key(for: $0.todo) })
             if withLatest, let first = shownSessions.first {
                 for case .task(let identified) in blocks(for: first.session, at: first.index) {
                     keys.insert(PMStore.key(for: identified.todo))
@@ -1007,8 +1018,18 @@ struct CanvasProjectNote: View {
     /// card is nothing but the pile, and a caption over the only thing on the card says nothing.
     private func pileLines(withLatest: Bool) -> [CardLine] {
         var rows = pileRows(withLatest: withLatest)
+        // **Stale trees fold to one line at the foot** (docs/stale-tasks.md): coming back to a project
+        // after a month shouldn't mean every task from every sitting at full weight. A tree is stale
+        // whole or not at all, so the split never cuts one. Not while a find is narrowing the card —
+        // that is looking for something, and the fold would hide where it is.
+        var stale: [PileEntry] = []
+        if display.find.isEmpty, !store.staleLines.isEmpty {
+            let lines = store.staleLines
+            stale = rows.filter { lines.contains(TaskStaleness.key($0.row.todo)) }
+            if !stale.isEmpty { rows.removeAll { lines.contains(TaskStaleness.key($0.row.todo)) } }
+        }
         var lines: [CardLine] = []
-        if !rows.isEmpty, withLatest {
+        if !rows.isEmpty || !stale.isEmpty, withLatest {
             lines.append(.caption("Still open", at: nil, extraTop: shownSessions.isEmpty ? 0 : 8))
         }
         // Capped by task, not by line: a tree's root carries the origin chip, and the lines under it
@@ -1023,7 +1044,32 @@ struct CanvasProjectNote: View {
         }
         lines += rows.map { .pile($0) }
         if hidden > 0 { lines.append(.more(.pile, hidden: hidden, at: nil)) }
+        if !stale.isEmpty {
+            lines.append(.stale(trees: stale.filter { $0.row.showsOrigin }.count))
+            if showsStale { lines += stale.map { .pile($0) } }
+        }
         return lines
+    }
+
+    /// The line the stale trees fold under: how many, a way to see them, and a way through them.
+    ///
+    /// Quiet, in the caption's tone, as the cap's "N more" is — it's the pile's foot, not a warning.
+    /// Catch Up is the review (`StaleReviewWindowController`), which takes them one at a time.
+    private func staleLine(trees: Int) -> some View {
+        let noun = trees == 1 ? "task" : "tasks"
+        return HStack(spacing: 10) {
+            quietAction(showsStale ? "Hide \(trees) untouched for 3+ weeks" : "\(trees) older \(noun), untouched for 3+ weeks",
+                        symbol: showsStale ? "chevron.up" : "chevron.down") {
+                showsStale.toggle()
+            }
+            quietAction("Catch Up…", symbol: "checklist") {
+                StaleReviewWindowController.shared.show(for: store)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, margin)
+        .padding(.top, 6)
+        .padding(.bottom, 3)
     }
 
     /// The line that brings back what a cap left out: the note's earlier lines, or the rest of the pile.
@@ -1095,6 +1141,8 @@ struct CanvasProjectNote: View {
                     .padding(.horizontal, max(margin - 6, 2)))
         case .more(let kind, let hidden, _):
             moreLine(kind, hidden: hidden)
+        case .stale(let trees):
+            staleLine(trees: trees)
         }
     }
 
@@ -1734,6 +1782,8 @@ private enum CardLine: Identifiable {
     case focused(Todo)
     /// What a cap left out, and the way to bring it back.
     case more(More, hidden: Int, at: Int?)
+    /// The line the pile's stale trees fold under, and how many trees it holds.
+    case stale(trees: Int)
 
     enum More { case prose, pile }
 
@@ -1751,6 +1801,7 @@ private enum CardLine: Identifiable {
         case .pile(let entry): return "pile/\(entry.id)"
         case .focused: return "focused"
         case .more(let kind, _, _): return "more/\(kind)"
+        case .stale: return "stale"
         }
     }
 
@@ -1761,7 +1812,7 @@ private enum CardLine: Identifiable {
              .noteEntry(let index), .picked(_, let index):
             return index
         case .caption(_, let index, _), .more(_, _, let index): return index
-        case .pile, .focused: return nil
+        case .pile, .focused, .stale: return nil
         }
     }
 

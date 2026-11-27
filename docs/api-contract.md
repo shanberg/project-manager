@@ -61,7 +61,7 @@ Only tiers 1 and 2 are published to every adapter.
 
 ```
 task.add          task.complete    task.drop        task.reopen      task.focus
-task.pick         task.release
+task.pick         task.release   task.keep
 task.diveIn       task.setDue      task.setText     task.wrap
 task.unwrap       task.move        task.delete
 session.start     session.note     session.rename   session.delete   session.prune
@@ -104,6 +104,13 @@ Where a card *sits*, how big it is and what is tiled stay the app's — they are
 - A preview names the card and writes no file.
 - A `docs` that can't be written gets a text card, as before.
 - `journal.undo` restores the canvas and leaves the document.
+
+`task.keep` (1.25.0) — stale tasks, see [stale-tasks.md](stale-tasks.md):
+
+- Takes `task` or `tasks`. Records a `kept` of each task's tree in the pick log (`.pm-picked.ndjson`). The notes aren't written and no sitting is started.
+- Reads carry `kept` on every line of a kept tree: when it was last kept, ISO 8601 in UTC.
+- `journal.undo` reverses it with a `released` naming the keep; undoing that keeps it again.
+- What counts as stale isn't a field: it's `TaskStaleness` in PmLib, over `sessionISODate`, `picked` and `kept`, which every read already carries.
 
 `time.aways`, `time.count`, `session.start` (1.24.0) — untracked activity, see [away-time.md](away-time.md#agent-evidence):
 

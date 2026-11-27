@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.24.0"
+public let apiContractVersion = "1.25.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -121,6 +121,10 @@ public enum ApiRegistry {
                                ApiField("session", .string, "The ISO date of the session it was picked up into. Default: its latest pick."),
                                ApiField("sessionOrdinal", .integer, "Which session of that date. Default 0.", minimum: 0),
                                ApiField("sessionDigest", .string, "Digest of that session's label, to catch a session that has since changed.")],
+                      oneOf: [["task", "tasks"]]),
+        ApiActionSpec(name: "task.keep", tier: .mutation,
+                      summary: "Keep a task that has gone stale, or several: say it's still meant without working on it now. Its whole tree counts as touched again; the notes aren't changed and nothing is picked up.",
+                      fields: [project, optionalTask, tasks, revision],
                       oneOf: [["task", "tasks"]]),
         ApiActionSpec(name: "task.diveIn", tier: .mutation,
                       summary: "Move focus to the first open leaf under the focused task.",
