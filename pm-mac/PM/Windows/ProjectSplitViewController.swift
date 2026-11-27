@@ -1412,9 +1412,6 @@ final class SidebarPeek: NSView {
 // MARK: Bench
 
 extension ProjectSplitViewController {
-    /// Whether the sidebar is folded away, for `CrossingBench` to put it back as it found it.
-    var isSidebarCollapsed: Bool { splitViewItems.first?.isCollapsed ?? true }
-
     /// Fold the sidebar away or bring it back without animating, for `CrossingBench.runJourney`'s
     /// `sidebarOff` — a measurement, not a gesture, so it must not leave an animation running into
     /// the first step.
