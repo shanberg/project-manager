@@ -210,6 +210,26 @@ enum CanvasTiling {
     /// The floor on a tiled region, for a window too narrow or too short to honour the margins.
     static let minimumArea: Double = 80
 
+    // MARK: Holding still
+
+    /// Where a tiled board has to go back to, when what it is showing moved without the board moving
+    /// it — or nil when the move stands.
+    ///
+    /// `held` is the region the board last stood on, `now` the one it is on, both in canvas points.
+    /// **A move that kept the size is a scroll**, and a tiled board never scrolls: something under it
+    /// asked its clip to (a descendant's `scrollRectToVisible`, a frame shrinking under the clip, a
+    /// stray gesture), and the tiles, laid out for the region it stood on, slid partly out of the
+    /// window. A region that changed size is a resize or a zoom, which lay the tiles out again
+    /// (`CanvasBoardView.retileForWindowSize`), so it stands. Half a point of slack, as
+    /// `needsRetile`'s: a centre landed through a rounding is not a move.
+    static func strayMove(from held: CanvasRect?, to now: CanvasRect) -> CanvasPoint? {
+        guard let held else { return nil }
+        let slack = 0.5
+        guard abs(held.width - now.width) <= slack, abs(held.height - now.height) <= slack,
+              abs(held.minX - now.minX) > slack || abs(held.minY - now.minY) > slack else { return nil }
+        return CanvasPoint(x: held.midX, y: held.midY)
+    }
+
     // MARK: Peeking
 
     /// How much of the window is left round a card being peeked at, in window points — enough that it
