@@ -46,6 +46,14 @@ final class CanvasFileNodeView: CanvasNodeView {
     /// in, and reads the match count back out — see `CanvasPaneController.search`.
     let projectDisplay = CanvasProjectCardDisplay()
 
+    /// A project card, whose title row holds New Task and New Session — for a satellite, which takes
+    /// that row over and the verbs with it.
+    var offersProjectVerbs: Bool { projectStore?.projectName != nil }
+
+    override func titleIsElsewhere(_ elsewhere: Bool) {
+        if projectDisplay.showsTitle == elsewhere { projectDisplay.showsTitle = !elsewhere }
+    }
+
     /// What this card is set to draw of its project, as the document says.
     var shows: CanvasCardShows { CanvasCardShows.of(node) }
     /// Watches the project's undo stack, which is how this card knows an edit happened to it — from
