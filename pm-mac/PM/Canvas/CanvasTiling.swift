@@ -168,6 +168,19 @@ enum CanvasTiling {
         var top: Double = 0
     }
 
+    /// Whether tiles laid out in `area` no longer fill `window` — the region `CanvasBoardView.tileableRect`
+    /// measures now — so they have to be laid out again.
+    ///
+    /// **Every edge, not just the size.** A sidebar opening keeps the window's size and moves the
+    /// tiles' leading edge, and a tiling that only compared widths would miss half of what a resize can
+    /// do. Half a point of slack, because both sides are the far ends of a division and a flight landing
+    /// at the centre it was aimed at still lands through a rounding.
+    static func needsRetile(laidOutIn area: CanvasRect, toFill window: CanvasRect) -> Bool {
+        let slack = 0.5
+        return abs(area.minX - window.minX) > slack || abs(area.minY - window.minY) > slack
+            || abs(area.maxX - window.maxX) > slack || abs(area.maxY - window.maxY) > slack
+    }
+
     /// The region tiles are laid out in, out of everything the window can show.
     static func area(of visible: CanvasRect, margins: Margins) -> CanvasRect {
         CanvasRect(x: visible.minX + margins.leading,
