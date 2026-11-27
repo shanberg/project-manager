@@ -170,7 +170,8 @@ page properly" is Open in Browser and always has been.
 
 **Links from other apps open in Folio, if you choose it.**
 - `http` and `https` are declared in `CFBundleURLTypes` with `LSHandlerRank: Alternate` (project.yml). Folio shows up in Open With and in System Settings' default-browser list, and never becomes the default on its own.
-- An incoming link with a satellite in front becomes a tab in that satellite, and shows. It goes into the satellite's tile in the workspace too, so Bring Back and Gather keep it.
+- An incoming link with a satellite in front becomes a tab in that satellite, and shows. It goes into the satellite's tile in the workspace too, so Bring Back and Gather keep it. A satellite off the free canvas has no tile: the card goes on the canvas.
+- The satellite is asked before the spaces (2026-11-13). Before, any space existing took every incoming link, and a satellite in front never got one.
 - Otherwise it lands on the front project window's board, or on the focused project's window if none is open. That window switches to its canvas tab and from List or Grid to the board ([CanvasIncomingLinks](../pm-mac/PM/Canvas/CanvasIncomingLinks.swift)).
 - Before the fix (2026-10-24), from a satellite: the satellite isn't a project window, so the link went to the project window behind it, which was in List view, and the card wasn't visible.
 - A board that already has a card on that address reveals that card instead of adding a second one.

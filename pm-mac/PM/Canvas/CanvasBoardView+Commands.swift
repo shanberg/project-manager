@@ -826,7 +826,6 @@ extension CanvasBoardView {
             if selectedLinkCards.count == 1, let card = nodeViews[id] as? CanvasLinkNodeView,
                card.liveURL != nil {
                 add(menu, "Open Page as New Card", #selector(openMenuPageAsNewCard))
-                if !isTiled, card.lentTo == nil { add(menu, "Move to Window", #selector(moveMenuCardToWindow)) }
             }
             add(menu, many("Copy Address", "Copy %d Addresses"), #selector(copyAddress))
             menu.addItem(.separator())
@@ -960,6 +959,8 @@ extension CanvasBoardView {
                 size.items.forEach { $0.target = self }
                 menu.addItem(withTitle: "Size", action: nil, keyEquivalent: "").submenu = size
             }
+            // Any one card out into a window of its own; a tile has its own item (`addTileSection`).
+            if windowableCard != nil { add(menu, "Move to Window", #selector(moveMenuCardToWindow)) }
         }
         addShareMenu(menu)
         if includingTiling { addTiling(menu) }
@@ -1654,7 +1655,7 @@ extension CanvasBoardView {
     /// Close Tab, or Close 3 Tabs: out of the workspace, the cards left on the board.
     @objc func closeMenuTabs(_ sender: Any?) {
         guard let id = menuTile else { return }
-        closeInTiling(tabGroup(for: id))
+        closeCards(tabGroup(for: id))
     }
 
     /// Right-clicking a strip anywhere but on a tab: the tile's menu. What can go into it first — a new
@@ -1693,7 +1694,7 @@ extension CanvasBoardView {
     /// Every tab in the right-clicked one's tile but it.
     @objc func closeOtherMenuTabs(_ sender: Any?) {
         guard let id = menuTile, let tiling else { return }
-        closeInTiling(tiling.tabs(of: id).filter { $0 != id })
+        closeCards(tiling.tabs(of: id).filter { $0 != id })
     }
 
     /// The right-clicked strip's whole tile, every tab of it, out of the view.
@@ -1734,7 +1735,7 @@ extension CanvasBoardView {
 
     @objc func moveMenuTileToWindow(_ sender: Any?) {
         guard let id = menuTile else { return }
-        restoringMaximized { moveTileToWindow(id) }
+        restoringMaximized { moveTileToWindow(id, lifting: true) }
     }
 
     @objc func popOutWorkspace(_ sender: Any?) { popOutWorkspace() }
@@ -1742,7 +1743,7 @@ extension CanvasBoardView {
 
     @objc func moveMenuTabToWindow(_ sender: Any?) {
         guard let id = menuTile else { return }
-        restoringMaximized { moveToWindow(tabGroup(for: id), showing: id) }
+        restoringMaximized { moveToWindow(tabGroup(for: id), showing: id, lifting: true) }
     }
 
     @objc func pullMenuTabOut(_ sender: Any?) {
@@ -3070,6 +3071,19 @@ extension CanvasBoardView: NSUserInterfaceValidations {
         return true
     }
 
+    /// ⌘+ and ⌘− on one card, from a satellite: no board zoom behind it to fall back to.
+    func stepContentZoom(of card: CanvasNodeView, by direction: Int) {
+        guard card.zoomsItsContent else { return }
+        let next = CanvasCardZoom.stepped(card.contentZoom, by: direction)
+        if next != card.contentZoom { setContentZoom(next, on: card) }
+    }
+
+    /// ⌘0 on one card, from a satellite.
+    func resetContentZoom(of card: CanvasNodeView) {
+        guard card.zoomsItsContent else { return }
+        setContentZoom(CanvasCardZoom.normal, on: card)
+    }
+
     /// Written to the document, so it is still there tomorrow — see `CanvasCardZoom`.
     ///
     /// Quietly, though. It saves but registers no undo: a zoom is how you are looking at a card rather
@@ -3120,7 +3134,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     }
 
     @objc func pageExportPDF(_ sender: Any?) {
-        guard let card = printTarget, let window else { return }
+        guard let card = printTarget, let window = card.contentWindow else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
         let name = (card.liveTitle ?? card.liveURL?.host() ?? "Page")
@@ -3136,8 +3150,15 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     /// selection rather than whichever page happens to be engaged.
     /// Move to Window: the page into a window of its own, still running. See `CanvasSatelliteWindow`.
     @objc private func moveMenuCardToWindow() {
-        guard selectedLinkCards.count == 1, let card = selectedLinkCards.first else { return }
-        moveToWindow([card.node.id])
+        guard let card = windowableCard else { return }
+        moveToWindow([card.node.id], lifting: true)
+    }
+
+    /// The one selected card Move to Window would take: any kind but a frame, and not already out.
+    private var windowableCard: CanvasNodeView? {
+        guard selection.count == 1, let id = selection.first, cardKind(id) != .frame,
+              let card = nodeViews[id], card.lentTo == nil else { return nil }
+        return card
     }
 
     @objc private func openMenuPageAsNewCard() {
@@ -3159,6 +3180,15 @@ extension CanvasBoardView: NSUserInterfaceValidations {
 
     func openPageAsNewCard(from card: CanvasLinkNodeView) -> Bool {
         guard let address = card.liveURL?.absoluteString else { return false }
+        // Out in a satellite: a tab there, as a ⌘-click on its page makes, and in its tile.
+        if let satellite = card.lentTo {
+            let id = card.node.id
+            let add = { self.addLinkCard(address, beside: id, joined: false, resuming: card.liveInteractionState) }
+            if tiling?.position(of: id) != nil { addingTab(to: id, add) } else { add() }
+            guard let added = selection.first, added != id else { return true }
+            lendNewTab(added, to: satellite, showing: true)
+            return true
+        }
         addLinkCard(address, beside: card.node.id, joined: false, resuming: card.liveInteractionState)
         return true
     }

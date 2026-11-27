@@ -202,13 +202,58 @@ public enum AwayCalendar {
 /// What agents were busy with around `range`, each minute given to the project its folder belongs to.
 /// Widened by the longest away either side: an away that began in the range can run past its end, and
 /// one that ended in it began before.
-func agentMoments(around range: DoneRange) -> [AgentMoment] {
+func agentMoments(around range: DoneRange, now: Date = Date()) -> [AgentMoment] {
     let wide = DoneRange(start: range.start.addingTimeInterval(-AttentionLog.longestAway),
                          end: range.end.addingTimeInterval(AttentionLog.longestAway))
+    if let kept = AgentMomentsMemo.lookup(wide, now: now) { return kept }
     let moments = AgentActivity.moments(in: wide)
     // Only worth reading every notes file's head when there's a folder to place.
-    guard !moments.isEmpty, let folders = try? AgentFolders.load() else { return moments }
-    return folders.resolve(moments)
+    guard !moments.isEmpty, let folders = try? AgentFolders.load() else {
+        AgentMomentsMemo.keep(moments, for: wide, now: now)
+        return moments
+    }
+    let resolved = folders.resolve(moments)
+    AgentMomentsMemo.keep(resolved, for: wide, now: now)
+    return resolved
+}
+
+/// A short-lived memory of `agentMoments`, for a process that asks the same question many times a
+/// minute. **Off unless a host turns it on** (`lifetime` 0): a `pm` run asks once and exits, and a
+/// test that writes a transcript and asks again must see it.
+///
+/// Folio turns it on because every Day card on every board asks this on its own 20-second poll, and
+/// each answer walks every agent transcript on the Mac and parses the ones touched in the range.
+/// Profiled 2026-11-27 with ten cards: about a fifth of a core, all day, for the same answer ten
+/// times over. Agents' minutes are drawn to the minute, so an answer a few seconds old is as good.
+public enum AgentMomentsMemo {
+    private static let lock = NSLock()
+    private static var storedLifetime: TimeInterval = 0
+    private static var entries: [String: (at: Date, moments: [AgentMoment])] = [:]
+
+    /// How long an answer is reused, in seconds. 0 turns the memo off and forgets what it holds.
+    public static var lifetime: TimeInterval {
+        get { lock.lock(); defer { lock.unlock() }; return storedLifetime }
+        set { lock.lock(); storedLifetime = newValue; if newValue <= 0 { entries = [:] }; lock.unlock() }
+    }
+
+    static func key(_ range: DoneRange) -> String {
+        "\(range.start.timeIntervalSince1970)-\(range.end.timeIntervalSince1970)"
+    }
+
+    static func lookup(_ range: DoneRange, now: Date) -> [AgentMoment]? {
+        lock.lock(); defer { lock.unlock() }
+        guard storedLifetime > 0, let entry = entries[key(range)],
+              now.timeIntervalSince(entry.at) < storedLifetime, now >= entry.at else { return nil }
+        return entry.moments
+    }
+
+    static func keep(_ moments: [AgentMoment], for range: DoneRange, now: Date) {
+        lock.lock(); defer { lock.unlock() }
+        guard storedLifetime > 0 else { return }
+        // Drop what has expired, so ranges asked about once (a week paged past) don't pile up.
+        entries = entries.filter { now.timeIntervalSince($0.value.at) < storedLifetime }
+        entries[key(range)] = (now, moments)
+    }
 }
 
 /// Today's aways still waiting for an answer, oldest first — what the menu bar offers and its dot

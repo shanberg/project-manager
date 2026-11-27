@@ -1,0 +1,456 @@
+<title>Folio Layout Cards</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a mocked Folio space window (sidebar + tiles) on the left; the open questions as switches on the right, stacked below on a phone. Tokens follow the earlier Folio mocks. */
+:root {
+  --page: #eceef2; --panel: #ffffff; --ink: #1d1f24; --ink-2: #5d6270; --ink-3: #9196a1;
+  --rule: #d9dce3; --accent: #2f6fe4; --chip: #eef1f6; --warn: #b4540a;
+  --win: #fbfbfc; --side: #f1f2f5; --tile: #ffffff; --tileline: #dfe1e7; --hover: rgba(28,29,33,.06); --sel: #ffffff;
+  --glass: rgba(255,255,255,.86);
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; --warn: #f0a060;
+  --win: #1f2025; --side: #26282e; --tile: #2a2c33; --tileline: #3a3d46; --hover: rgba(255,255,255,.07); --sel: #3a3d46;
+  --glass: rgba(44,46,54,.9); color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --page: #17181c; --panel: #212329; --ink: #e9eaee; --ink-2: #a3a7b2; --ink-3: #6f7480; --rule: #33363e;
+  --accent: #6b9cff; --chip: #2b2e36; --warn: #f0a060;
+  --win: #1f2025; --side: #26282e; --tile: #2a2c33; --tileline: #3a3d46; --hover: rgba(255,255,255,.07); --sel: #3a3d46;
+  --glass: rgba(44,46,54,.9); color-scheme: dark;
+}
+body { background: var(--page); color: var(--ink); font-family: var(--ui); }
+.wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; padding-block: 20px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1240px; margin: 0 auto; }
+@media (max-width: 920px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px; text-wrap: balance; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 12px; max-width: 86ch; line-height: 1.45; }
+kbd { font: 11px var(--mono); padding: 0 4px; border-radius: 4px; border: 1px solid var(--rule); background: var(--chip); }
+
+.win { display: grid; grid-template-columns: 236px minmax(0, 1fr); height: 560px; border-radius: 12px; overflow: hidden;
+  background: var(--win); border: 1px solid var(--rule); }
+@media (max-width: 560px) { .win { grid-template-columns: 170px minmax(0, 1fr); height: 600px; } }
+.side { background: var(--side); padding: 34px 8px 10px; overflow: auto; font-size: 12.5px; display: flex; flex-direction: column; gap: 1px; position: relative; }
+.lights { position: absolute; top: 12px; left: 12px; display: flex; gap: 7px; }
+.lights i { width: 11px; height: 11px; border-radius: 50%; background: var(--tileline); }
+.addr { padding: 5px 8px; border-radius: 7px; background: var(--hover); color: var(--ink-3); margin-bottom: 8px; font-size: 12px; }
+.favs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 8px; }
+.fav { height: 34px; border-radius: 8px; background: var(--hover); display: grid; place-items: center; }
+.fav.on { background: var(--sel); box-shadow: 0 0 0 1px var(--tileline); }
+.label { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 8px 6px 3px; font-weight: 600; }
+.hr { border-top: 1px solid var(--rule); margin: 8px 6px; }
+.row { display: flex; align-items: center; gap: 7px; padding: 5px 6px; border-radius: 7px; cursor: default; position: relative; min-width: 0; min-height: 18px; }
+.row:hover { background: var(--hover); }
+.row.front { background: var(--sel); box-shadow: 0 0 0 1px var(--tileline); }
+.row.onscreen:not(.front) { background: var(--hover); }
+.row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row.child { margin-left: 16px; }
+.row.ref .t { color: var(--ink-2); }
+.row.ref.dim .t { color: var(--ink-3); }
+.row.flash { animation: flash 1s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 2px transparent; } }
+@media (prefers-reduced-motion: reduce) { .row.flash { animation: none; box-shadow: 0 0 0 2px var(--accent); } }
+.dot { width: 14px; height: 14px; border-radius: 4px; flex: none; background: var(--c); }
+.lay-ico { width: 14px; height: 14px; flex: none; color: var(--ink-2); }
+.chev { width: 14px; flex: none; border: 0; background: none; color: var(--ink-3); cursor: pointer; padding: 0; font-size: 10px; }
+.minis { display: flex; gap: 2px; flex: none; }
+.minis .dot { width: 9px; height: 9px; border-radius: 3px; }
+.tag { flex: none; font-size: 10.5px; color: var(--ink-3); display: flex; align-items: center; gap: 2px; }
+.tag svg, .pin svg { width: 10px; height: 10px; }
+.pin { flex: none; color: var(--ink-3); display: flex; }
+.more { flex: none; border: 0; background: none; color: var(--ink-3); cursor: pointer; padding: 0 3px; border-radius: 4px; font: 12px var(--ui); opacity: 0; }
+.row:hover .more, .row.menu-open .more { opacity: 1; }
+.more:focus-visible { opacity: 1; outline: 2px solid var(--accent); }
+.menu { position: absolute; left: 30px; top: 100%; z-index: 5; min-width: 190px; padding: 4px; border-radius: 8px; background: var(--panel);
+  border: 1px solid var(--rule); box-shadow: 0 8px 24px rgba(0,0,0,.2); font-size: 12px; }
+.menu div { padding: 4px 8px; border-radius: 5px; cursor: pointer; }
+.menu div:hover { background: var(--accent); color: #fff; }
+.menu div.off { color: var(--ink-3); cursor: default; }
+.menu div.off:hover { background: none; color: var(--ink-3); }
+.menu .h { font-size: 10.5px; color: var(--ink-3); cursor: default; padding-top: 2px; padding-bottom: 2px; }
+.menu .h:hover { background: none; color: var(--ink-3); }
+.menu hr { border: 0; border-top: 1px solid var(--rule); margin: 3px 0; }
+
+.stage { position: relative; padding: 8px; display: flex; flex-direction: column; min-width: 0; }
+.grid { flex: 1; display: grid; gap: 6px; min-height: 0; }
+.tile { background: var(--tile); border: 1px solid var(--tileline); border-radius: 9px; padding: 10px; display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow: hidden; }
+.tile.focus { box-shadow: 0 0 0 2px var(--accent); border-color: transparent; }
+.tile .h { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; min-width: 0; }
+.tile .h span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .b { flex: 1; border-radius: 6px; background: repeating-linear-gradient(135deg, transparent 0 9px, var(--hover) 9px 10px); }
+.empty { flex: 1; display: grid; place-items: center; color: var(--ink-3); font-size: 12px; }
+.toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; max-width: calc(100% - 32px);
+  padding: 7px 16px; border-radius: 16px; background: var(--glass); border: 1px solid var(--tileline); box-shadow: 0 6px 20px rgba(0,0,0,.18);
+  font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.toast b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.toast button { border: 0; background: none; color: var(--accent); font: 600 12px var(--ui); cursor: pointer; padding: 0; }
+.note { margin-top: 8px; font-size: 12px; color: var(--ink-2); min-height: 32px; line-height: 1.45; }
+
+.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 14px; align-self: start; }
+.panel h3 { font-size: 12px; margin: 0 0 6px; font-weight: 600; }
+.panel .fixed { font-size: 11.5px; color: var(--ink-2); line-height: 1.45; margin: 0; padding-left: 16px; }
+.opt { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.35; padding: 3px 0; }
+.opt input { margin-top: 2px; }
+.opt small { display: block; color: var(--ink-3); font-size: 11.5px; }
+.log { font: 11.5px var(--mono); color: var(--ink-2); white-space: pre-wrap; min-height: 54px; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; }
+button.plain { font: 12px var(--ui); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--rule); background: var(--chip); color: var(--ink); cursor: pointer; }
+pre.summary { font: 11px var(--mono); color: var(--ink-2); white-space: pre-wrap; background: var(--chip); border-radius: 8px; padding: 8px; margin: 6px 0 0; user-select: all; }
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>A card in a layout, and in the sidebar</h1>
+    <p class="sub">Rule: an unpinned card lives in one place, Today or one layout. Using a card in a second layout pins it, and each layout lists it as a reference. Layouts are always pinned. Try a row's <b>···</b> menu (or right-click): Add to Layout, Close, Move to Today, Unpin. Click a layout to open it; click a card under it to bring that tile forward.</p>
+    <div class="win">
+      <div class="side" id="side"></div>
+      <div class="stage" id="stage"></div>
+    </div>
+    <div class="note" id="note"></div>
+  </div>
+  <div class="panel">
+    <div>
+      <h3>Decided</h3>
+      <ul class="fixed">
+        <li>Unpinned cards: one home, Today or one layout.</li>
+        <li>A second layout pins the card.</li>
+        <li>Layouts sit in Pinned. Notes behaves as a pinned card.</li>
+        <li>Close: unpinned off the board (toast); pinned only leaves that layout.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>A pinned card under a layout</h3>
+      <label class="opt"><input type="radio" name="ref" value="pin" checked><span>Row with a pin mark<small>Full title, a small pin at the end.</small></span></label>
+      <label class="opt"><input type="radio" name="ref" value="dim"><span>Dimmed row with a pin mark<small>Reads as “lives elsewhere”.</small></span></label>
+      <label class="opt"><input type="radio" name="ref" value="none"><span>Not listed under the layout<small>Only its icon on the layout row; the card is in Pinned.</small></span></label>
+    </div>
+    <div>
+      <h3>Layout rows</h3>
+      <label class="opt"><input type="radio" name="fold" value="all" checked><span>Unfolded, fold by the chevron<small>Each layout remembers its own.</small></span></label>
+      <label class="opt"><input type="radio" name="fold" value="front"><span>Only the layout on screen unfolds<small>Others show their tiles’ icons.</small></span></label>
+      <label class="opt"><input type="checkbox" id="oMinis" checked><span>Tiles’ icons on a folded layout</span></label>
+    </div>
+    <div>
+      <h3>A pinned card says where it’s used</h3>
+      <label class="opt"><input type="radio" name="used" value="none"><span>Nothing<small>The right-click menu’s “Show in …” only.</small></span></label>
+      <label class="opt"><input type="radio" name="used" value="count" checked><span>Layout mark and count<small>Click it to go to that layout; with two, a menu.</small></span></label>
+    </div>
+    <div>
+      <h3>Unpinning a card two layouts use</h3>
+      <label class="opt"><input type="radio" name="unpin" value="refuse" checked><span>Can’t: Unpin is dimmed<small>Menu reads “Used in Dashboard, Reading”.</small></span></label>
+      <label class="opt"><input type="radio" name="unpin" value="first"><span>The first layout keeps it<small>It leaves the other layouts.</small></span></label>
+      <label class="opt"><input type="radio" name="unpin" value="ask"><span>Ask which layout keeps it<small>A submenu of its layouts.</small></span></label>
+    </div>
+    <div>
+      <h3>When a card is pinned for you</h3>
+      <label class="opt"><input type="radio" name="tell" value="toast" checked><span>Toast with Undo<small>“Pinned “PM-4127”: it’s in 2 layouts.”</small></span></label>
+      <label class="opt"><input type="radio" name="tell" value="flash"><span>Its Pinned row flashes</span></label>
+    </div>
+    <div><h3>What happened</h3><div class="log" id="log">Nothing yet.</div></div>
+    <div>
+      <div class="btns"><button class="plain" id="copy">Copy summary</button><button class="plain" id="reset">Reset</button></div>
+      <pre class="summary" id="summary"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+var LAYICO = '<svg class="lay-ico" viewBox="0 0 14 14"><rect x="1.5" y="1.5" width="5" height="11" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="7.5" y="1.5" width="5" height="5" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="7.5" y="7.5" width="5" height="5" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
+var LAYSM = LAYICO.replace('class="lay-ico"', '');
+var PIN = '<svg viewBox="0 0 10 10"><path d="M3 1h4l-.6 3 1.6 1.4H2L3.6 4z M5 5.4V9" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>';
+var S, menuFor = null, toast = null, toastTimer = null, flashId = null;
+
+function fresh() {
+  return {
+    cards: {
+      gmail: { t: 'Gmail', c: '#d6455d', pinned: true, fav: true },
+      cal: { t: 'Calendar', c: '#3b7ddd', pinned: true, fav: true },
+      notes: { t: 'Research notes', c: '#c9a227', pinned: true, fav: true },
+      linear: { t: 'PM-4127 Billing rollover fails', c: '#5e6ad2', pinned: true },
+      figma: { t: 'Figma: Folio app', c: '#a259ff', pinned: true },
+      plan: { t: 'Q3 Planning', c: '#2f9e6e', pinned: false },
+      music: { t: 'Apple Music', c: '#e8445a', pinned: false },
+      hn: { t: 'Hacker News', c: '#ff6600', pinned: false },
+      weather: { t: 'Weather', c: '#29a3d9', pinned: false },
+      nyt: { t: 'The case for slower software', c: '#6f7480', pinned: false }
+    },
+    layouts: [
+      { name: 'Dashboard', cards: ['linear', 'plan'], open: true },
+      { name: 'Reading', cards: ['music', 'linear'], open: true }
+    ],
+    today: ['hn', 'weather', 'nyt'],
+    view: { kind: 'layout', name: 'Dashboard', front: 'linear' },
+    log: []
+  };
+}
+function $(id) { return document.getElementById(id); }
+function val(name) { return document.querySelector('input[name=' + name + ']:checked').value; }
+function card(id) { return S.cards[id]; }
+function layout(name) { return S.layouts.filter(function (l) { return l.name === name; })[0]; }
+function layoutsOf(id) { return S.layouts.filter(function (l) { return l.cards.indexOf(id) > -1; }); }
+function say(s) { S.log.unshift(s); S.log = S.log.slice(0, 5); }
+function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+// ---- acts ----
+function openLayout(name, front) {
+  var l = layout(name); if (!l) return;
+  S.view = { kind: 'layout', name: name, front: front || l.cards[0] };
+  if (val('fold') === 'front') S.layouts.forEach(function (x) { x.open = x.name === name; });
+}
+function openCard(id) {
+  S.view = { kind: 'card', id: id };
+  if (val('fold') === 'front') S.layouts.forEach(function (x) { x.open = false; });
+}
+function addToLayout(id, name) {
+  var l = layout(name), c = card(id);
+  if (l.cards.indexOf(id) > -1) return;
+  var before = clone(S);
+  var homes = layoutsOf(id);
+  S.today = S.today.filter(function (x) { return x !== id; });
+  l.cards.push(id);
+  if (!c.pinned && homes.length) {
+    c.pinned = true;
+    say(c.t + ' → also in ' + name + ': pinned, a reference in each layout');
+    if (val('tell') === 'toast') showToast('Pinned “' + c.t + '”: it’s in ' + layoutsOf(id).length + ' layouts', [{ t: 'Undo', run: function () { restore(before, 'undo: not pinned, not in ' + name); } }]);
+    else flashId = id;
+  } else {
+    say(c.t + ' → ' + name + (c.pinned ? ' (pinned, a reference there)' : ' (moved out of Today)'));
+  }
+  openLayout(name, id);
+}
+function moveToToday(id, from) {
+  var l = layout(from);
+  l.cards = l.cards.filter(function (x) { return x !== id; });
+  S.today.unshift(id);
+  say(card(id).t + ' → Today, out of ' + from);
+  dropEmpty(from);
+  if (S.view.kind === 'layout' && S.view.name === from) S.view.front = (layout(from) || {}).cards ? layout(from).cards[0] : null;
+  if (!layout(from)) openCard(id);
+}
+function dropEmpty(name) {
+  var l = layout(name);
+  if (l && !l.cards.length) { S.layouts = S.layouts.filter(function (x) { return x !== l; }); say('layout ' + name + ' had no cards left: gone'); if (S.view.kind === 'layout' && S.view.name === name) S.view = { kind: 'none' }; }
+}
+function close(id, inLayout) {
+  var c = card(id), before = clone(S);
+  if (c.pinned) {
+    if (inLayout) {
+      var l = layout(inLayout);
+      l.cards = l.cards.filter(function (x) { return x !== id; });
+      say('close ' + c.t + ' in ' + inLayout + ': pinned, so it only leaves ' + inLayout);
+      dropEmpty(inLayout);
+      if (S.view.kind === 'layout' && layout(inLayout)) S.view.front = layout(inLayout).cards[0];
+    } else {
+      if (S.view.kind === 'card' && S.view.id === id) S.view = { kind: 'none' };
+      say('close ' + c.t + ': pinned, off the screen, still pinned');
+    }
+    return;
+  }
+  var home = layoutsOf(id)[0];
+  if (home) { home.cards = home.cards.filter(function (x) { return x !== id; }); }
+  S.today = S.today.filter(function (x) { return x !== id; });
+  c.gone = true;
+  say('close ' + c.t + ': off the board' + (home ? ', out of ' + home.name : '') + ' (Archived Cards, ⇧⌘T)');
+  var homeName = home && home.name;
+  if (homeName) { dropEmpty(homeName); if (S.view.kind === 'layout' && layout(homeName)) S.view.front = layout(homeName).cards[0]; }
+  if (S.view.kind === 'card' && S.view.id === id) S.view = { kind: 'none' };
+  var keepState = clone(S);
+  showToast('Closed “' + c.t + '”', [
+    { t: 'Undo', run: function () { restore(before, 'undo: ' + c.t + ' back as it was'); } },
+    { t: 'Keep in Space', run: function () {
+      var view = keepState.view; restore(before, 'keep: ' + c.t + ' back ' + (homeName ? 'under ' + homeName : 'in Today') + ', off the screen');
+      S.view = view;
+      if (homeName && layout(homeName) && S.view.kind === 'layout' && S.view.name === homeName) S.view.front = layout(homeName).cards.filter(function (x) { return x !== id; })[0] || id;
+      draw();
+    } }
+  ]);
+}
+function unpin(id) {
+  var c = card(id), ls = layoutsOf(id), how = val('unpin');
+  if (ls.length > 1 && how === 'refuse') return;
+  if (ls.length > 1 && how === 'first') {
+    ls.slice(1).forEach(function (l) { l.cards = l.cards.filter(function (x) { return x !== id; }); dropEmpty(l.name); });
+    c.pinned = false; c.fav = false;
+    say('unpin ' + c.t + ': stays in ' + ls[0].name + ', leaves ' + ls.slice(1).map(function (l) { return l.name; }).join(', '));
+    return;
+  }
+  c.pinned = false; c.fav = false;
+  if (!ls.length) { S.today.unshift(id); say('unpin ' + c.t + ' → Today'); }
+  else say('unpin ' + c.t + ' → lives under ' + ls[0].name);
+}
+function unpinKeeping(id, name) {
+  var c = card(id);
+  layoutsOf(id).forEach(function (l) { if (l.name !== name) { l.cards = l.cards.filter(function (x) { return x !== id; }); dropEmpty(l.name); } });
+  c.pinned = false; c.fav = false;
+  say('unpin ' + c.t + ': ' + name + ' keeps it');
+}
+function restore(state, line) { var log = S.log; S = state; S.log = log; say(line); hideToast(); draw(); }
+
+function showToast(text, actions) {
+  toast = { text: text, actions: actions };
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 6000);
+}
+function hideToast() { toast = null; clearTimeout(toastTimer); draw(); }
+
+// ---- drawing ----
+function dot(id) { return '<span class="dot" style="--c:' + card(id).c + '"></span>'; }
+function more(key) { return '<button class="more" data-more="' + key + '" aria-label="More">···</button>'; }
+function onScreen(id) {
+  if (S.view.kind === 'card') return S.view.id === id;
+  if (S.view.kind === 'layout') { var l = layout(S.view.name); return !!l && l.cards.indexOf(id) > -1; }
+  return false;
+}
+function cardRow(id, opts) {
+  opts = opts || {};
+  var c = card(id), key = (opts.layout ? opts.layout + '|' : '|') + id;
+  var front = opts.layout ? (S.view.kind === 'layout' && S.view.name === opts.layout && S.view.front === id)
+                          : (S.view.kind === 'card' && S.view.id === id);
+  var cls = 'row' + (opts.layout ? ' child' : '') + (opts.ref ? ' ref' : '') + (opts.ref && val('ref') === 'dim' ? ' dim' : '')
+    + (front ? ' front' : (!opts.layout && onScreen(id) ? ' onscreen' : '')) + (flashId === id && !opts.layout ? ' flash' : '') + (menuFor === key ? ' menu-open' : '');
+  var h = '<div class="' + cls + '" data-row="' + key + '">' + dot(id) + '<span class="t">' + c.t + '</span>';
+  if (opts.ref) h += '<span class="pin" title="Pinned: used in more than one place">' + PIN + '</span>';
+  if (!opts.layout && c.pinned && val('used') === 'count') {
+    var n = layoutsOf(id).length;
+    if (n) h += '<span class="tag" data-used="' + id + '" title="In ' + layoutsOf(id).map(function (l) { return l.name; }).join(', ') + '">' + LAYSM + (n > 1 ? n : '') + '</span>';
+  }
+  h += more(key);
+  if (menuFor === key) h += menu(id, opts.layout);
+  return h + '</div>';
+}
+function menu(id, inLayout) {
+  var c = card(id), ls = layoutsOf(id), h = '<div class="menu">';
+  var others = S.layouts.filter(function (l) { return l.cards.indexOf(id) < 0; });
+  if (others.length) {
+    h += '<div class="h">Add to Layout</div>';
+    others.forEach(function (l) {
+      var pins = !c.pinned && ls.length;
+      h += '<div data-act="add" data-id="' + id + '" data-l="' + l.name + '">' + l.name + (pins ? ' (pins it)' : '') + '</div>';
+    });
+    h += '<hr>';
+  }
+  if (!inLayout && ls.length) ls.forEach(function (l) { h += '<div data-act="show" data-id="' + id + '" data-l="' + l.name + '">Show in “' + l.name + '”</div>'; });
+  if (inLayout && !c.pinned) h += '<div data-act="today" data-id="' + id + '" data-l="' + inLayout + '">Move to Today</div>';
+  if (c.pinned) {
+    var how = val('unpin');
+    if (ls.length > 1 && how === 'refuse') h += '<div class="off">Unpin (used in ' + ls.map(function (l) { return l.name; }).join(', ') + ')</div>';
+    else if (ls.length > 1 && how === 'ask') { h += '<div class="h">Unpin, keeping it in</div>'; ls.forEach(function (l) { h += '<div data-act="unpinkeep" data-id="' + id + '" data-l="' + l.name + '">' + l.name + '</div>'; }); }
+    else h += '<div data-act="unpin" data-id="' + id + '">Unpin</div>';
+  }
+  h += '<hr><div data-act="close" data-id="' + id + '" data-l="' + (inLayout || '') + '">' + (c.pinned && inLayout ? 'Remove from “' + inLayout + '”' : 'Close') + '</div>';
+  return h + '</div>';
+}
+function draw() {
+  var side = '<div class="lights"><i></i><i></i><i></i></div><div class="addr">Search or enter address</div><div class="favs">';
+  Object.keys(S.cards).forEach(function (id) { var c = card(id); if (c.fav && !c.gone) side += '<div class="fav' + (onScreen(id) ? ' on' : '') + '" data-fav="' + id + '">' + dot(id) + '</div>'; });
+  side += '</div><div class="label">Pinned</div>';
+  var foldFront = val('fold') === 'front';
+  S.layouts.forEach(function (l) {
+    var showing = S.view.kind === 'layout' && S.view.name === l.name;
+    var open = foldFront ? showing : l.open;
+    var kids = l.cards.filter(function (id) { return !(card(id).pinned && val('ref') === 'none'); });
+    side += '<div class="row' + (showing ? ' front' : '') + '" data-layout="' + l.name + '"><button class="chev" data-chev="' + l.name + '" aria-label="Fold">' + (open && kids.length ? '▾' : '▸') + '</button>' + LAYICO + '<span class="t">' + l.name + '</span>';
+    if ((!open || !kids.length || val('ref') === 'none') && $('oMinis').checked) side += '<span class="minis">' + l.cards.map(dot).join('') + '</span>';
+    side += '</div>';
+    if (open) kids.forEach(function (id) { side += cardRow(id, { layout: l.name, ref: card(id).pinned }); });
+  });
+  Object.keys(S.cards).forEach(function (id) { var c = card(id); if (c.pinned && !c.fav && !c.gone) side += cardRow(id); });
+  side += '<div class="hr"></div>';
+  S.today.forEach(function (id) { if (!card(id).gone) side += cardRow(id); });
+  side += '<div class="row" style="color:var(--ink-3)"><span style="width:14px;text-align:center">+</span><span class="t">New Tab</span></div>';
+  $('side').innerHTML = side;
+
+  var stage = '';
+  if (S.view.kind === 'layout' && layout(S.view.name)) {
+    var l = layout(S.view.name);
+    stage = '<div class="grid" style="grid-template-columns:repeat(' + l.cards.length + ',minmax(0,1fr))">';
+    l.cards.forEach(function (id) { stage += '<div class="tile' + (S.view.front === id ? ' focus' : '') + '" data-tile="' + id + '"><div class="h">' + dot(id) + '<span>' + card(id).t + '</span></div><div class="b"></div></div>'; });
+    stage += '</div>';
+  } else if (S.view.kind === 'card') {
+    stage = '<div class="grid"><div class="tile"><div class="h">' + dot(S.view.id) + '<span>' + card(S.view.id).t + '</span></div><div class="b"></div></div></div>';
+  } else stage = '<div class="empty">The Board</div>';
+  if (toast) {
+    stage += '<div class="toast" role="status"><b>' + toast.text + '</b>';
+    toast.actions.forEach(function (a, i) { stage += '<button data-toast="' + i + '">' + a.t + '</button>'; });
+    stage += '</div>';
+  }
+  $('stage').innerHTML = stage;
+  $('log').textContent = S.log.length ? S.log.join('\n') : 'Nothing yet.';
+  $('note').textContent = S.view.kind === 'layout'
+    ? 'Layout “' + S.view.name + '”. Its own cards sit under it and nowhere else; a pinned card under it is a reference.'
+    : S.view.kind === 'card' ? 'One card, on its own.' : 'Nothing up.';
+  $('summary').textContent = summary();
+  flashId = null;
+}
+function summary() {
+  var t = function (n) { var el = document.querySelector('input[name=' + n + ']:checked'); return el.parentNode.querySelector('span').firstChild.textContent.trim(); };
+  return 'Layout cards mock\n- Pinned card under a layout: ' + t('ref') + '\n- Layout rows: ' + t('fold') + '; tiles’ icons when folded: ' + ($('oMinis').checked ? 'yes' : 'no')
+    + '\n- Pinned card says where it’s used: ' + t('used') + '\n- Unpinning a card two layouts use: ' + t('unpin') + '\n- When a card is pinned for you: ' + t('tell');
+}
+
+// ---- events ----
+$('side').addEventListener('click', function (e) {
+  var t = e.target, act = t.closest('[data-act]');
+  if (act) {
+    var id = act.dataset.id, l = act.dataset.l; menuFor = null;
+    if (act.dataset.act === 'add') addToLayout(id, l);
+    else if (act.dataset.act === 'show') { openLayout(l, id); say('show ' + card(id).t + ' in ' + l); }
+    else if (act.dataset.act === 'today') moveToToday(id, l);
+    else if (act.dataset.act === 'unpin') unpin(id);
+    else if (act.dataset.act === 'unpinkeep') unpinKeeping(id, l);
+    else if (act.dataset.act === 'close') close(id, l || null);
+    return draw();
+  }
+  if (t.closest('.menu')) return;
+  var m = t.closest('[data-more]');
+  if (m) { menuFor = menuFor === m.dataset.more ? null : m.dataset.more; return draw(); }
+  menuFor = null;
+  var chev = t.closest('[data-chev]');
+  if (chev) { var L = layout(chev.dataset.chev); L.open = !L.open; return draw(); }
+  var used = t.closest('[data-used]');
+  if (used) { var ls = layoutsOf(used.dataset.used); if (ls.length === 1) { openLayout(ls[0].name, used.dataset.used); say('layout mark → ' + ls[0].name); return draw(); } menuFor = '|' + used.dataset.used; return draw(); }
+  var lay = t.closest('[data-layout]');
+  if (lay) { openLayout(lay.dataset.layout); say('open ' + lay.dataset.layout); return draw(); }
+  var fav = t.closest('[data-fav]');
+  if (fav) { openCard(fav.dataset.fav); say('favourite ' + card(fav.dataset.fav).t + ', alone'); return draw(); }
+  var row = t.closest('[data-row]');
+  if (row) {
+    var parts = row.dataset.row.split('|'), inL = parts[0], id = parts[1];
+    if (inL) { openLayout(inL, id); say('click ' + card(id).t + ' under ' + inL + ' → ' + inL + ', that tile in front'); }
+    else { openCard(id); say('click ' + card(id).t + ' → alone'); }
+    return draw();
+  }
+  draw();
+});
+$('side').addEventListener('contextmenu', function (e) {
+  var row = e.target.closest('[data-row]');
+  if (row) { e.preventDefault(); menuFor = row.dataset.row; draw(); }
+});
+$('stage').addEventListener('click', function (e) {
+  var b = e.target.closest('[data-toast]');
+  if (b && toast) { var a = toast.actions[+b.dataset.toast]; toast = null; return a.run(); }
+  var tile = e.target.closest('[data-tile]');
+  if (tile && S.view.kind === 'layout') { S.view.front = tile.dataset.tile; draw(); }
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { menuFor = null; draw(); }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'w') {
+    e.preventDefault();
+    if (S.view.kind === 'layout' && S.view.front) close(S.view.front, S.view.name);
+    else if (S.view.kind === 'card') close(S.view.id, null);
+    draw();
+  }
+});
+document.querySelectorAll('.panel input').forEach(function (i) { i.addEventListener('change', function () { menuFor = null; draw(); }); });
+$('reset').addEventListener('click', function () { S = fresh(); menuFor = null; toast = null; draw(); });
+$('copy').addEventListener('click', function () {
+  var text = summary();
+  try { navigator.clipboard.writeText(text).catch(function () { select(); }); } catch (err) { select(); }
+  function select() { var r = document.createRange(); r.selectNodeContents($('summary')); var s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+});
+S = fresh(); draw();
+</script>

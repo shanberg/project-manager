@@ -6,7 +6,7 @@
 
 import type { JsonValue, TaskRef } from "./pm-api";
 
-export const API_CONTRACT_VERSION = "1.24.0";
+export const API_CONTRACT_VERSION = "1.25.0";
 
 /** Reveal the project's folder in Finder. */
 export interface AppOpenInFinderInput {
@@ -352,6 +352,18 @@ export interface TaskFocusInput {
   task: TaskRef;
 }
 
+/** Keep a task that has gone stale, or several: say it's still meant without working on it now. Its whole tree counts as touched again; the notes aren't changed and nothing is picked up. */
+export interface TaskKeepInput {
+  /** Project name or unambiguous prefix. */
+  project: string;
+  /** The `revision` from the read this came from. When given, the write happens only if the document is still that one. */
+  revision?: string;
+  /** The task to act on. Give this or `tasks`, not both. */
+  task?: TaskRef;
+  /** Several tasks, acted on in one write. Give this or `task`, not both. */
+  tasks?: TaskRef[];
+}
+
 /** Open tasks left in older sittings, across projects: grouped by project and then by sitting, oldest first, each sitting with what it was about and each task with its last pick-up. */
 export interface TaskLeftoversInput {
   /** How old a sitting has to be: before today (the default), before yesterday, before this week, or before a day given as YYYY-MM-DD. */
@@ -593,6 +605,7 @@ export interface ApiInputs {
   "task.drop": TaskDropInput;
   "task.due": TaskDueInput;
   "task.focus": TaskFocusInput;
+  "task.keep": TaskKeepInput;
   "task.leftovers": TaskLeftoversInput;
   "task.list": TaskListInput;
   "task.pick": TaskPickInput;
@@ -660,6 +673,7 @@ export const API_TIERS: Record<
   "task.drop": "mutation",
   "task.due": "query",
   "task.focus": "mutation",
+  "task.keep": "mutation",
   "task.leftovers": "query",
   "task.list": "query",
   "task.pick": "mutation",

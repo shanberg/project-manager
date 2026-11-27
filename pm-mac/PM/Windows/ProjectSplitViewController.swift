@@ -24,7 +24,7 @@ final class ProjectSplitViewController: NSSplitViewController {
     private var sidebarItem: NSSplitViewItem!
     private var contentItem: NSSplitViewItem!
     /// The project list, or — in a space's window — the space's frame (`SpaceFrameSidebar`).
-    private var sidebarHosting: NSHostingController<AnyView>!
+    private var sidebarHosting: MeteredHostingController!
     private var bottomBarView: NSView?
     /// The Arc-style frame, for a space's window. docs/spaces.md § The frame.
     private(set) var spaceFrame: SpaceFrame?
@@ -63,7 +63,8 @@ final class ProjectSplitViewController: NSSplitViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        sidebarHosting = NSHostingController(rootView: AnyView(ProjectSidebar(store: store, state: state)))
+        sidebarHosting = MeteredHostingController(rootView: AnyView(ProjectSidebar(store: store, state: state)))
+        sidebarHosting.meterName = "sidebar"
         wireTabModel()
         // The sidebar keeps `.minSize`, and this is the whole reason its collapse animation looks like
         // a sidebar rather than a glitch: while a split item animates, AppKit sizes the pane's content
@@ -789,6 +790,7 @@ final class ProjectSplitViewController: NSSplitViewController {
         pane.board.opensNewTab = spaceFrame == nil ? nil : { [weak self] address, front in
             self?.spaceFrame?.openNewCard(address, showing: front)
         }
+        pane.board.closesCards = spaceFrame == nil ? nil : { [weak self] ids in self?.spaceFrame?.close(ids) }
         pane.onFrontPageChanged = { [weak self] in self?.spaceFrame?.frontChanged() }
         pane.onTilingChanged = { [weak self] in
             self?.refreshTabModel()
@@ -1062,6 +1064,23 @@ final class ProjectSplitViewController: NSSplitViewController {
         registerWorkspaceStep("Delete Layout",
                               undo: { $0.putWorkspace(tiling, named: name, opening: true) },
                               redo: { $0.dropWorkspace(named: name) })
+    }
+
+    /// A layout whose last card has gone — closed, or taken out of it (docs/spaces.md § Cards in
+    /// layouts): gone without asking, as an Arc split goes with its last tab. ⌘Z puts it back, from
+    /// `tiling` as it was before.
+    func dropEmptiedWorkspace(named name: String, was tiling: CanvasViewState.Tiling?) {
+        dropWorkspace(named: name)
+        guard let tiling else { return }
+        registerWorkspaceStep("Close Layout",
+                              undo: { $0.putWorkspace(tiling, named: name, opening: false) },
+                              redo: { $0.dropWorkspace(named: name) })
+    }
+
+    /// A layout a close took with it, back: the close toast's Undo and Keep.
+    func putBackWorkspace(_ tiling: CanvasViewState.Tiling, named name: String) {
+        guard let url = canvasSource().url, !CanvasWorkspaces.exists(name, of: url) else { return }
+        putWorkspace(tiling, named: name, opening: false)
     }
 
     /// The delete itself: the workspace and its chips gone, with no question and no undo step.

@@ -127,6 +127,70 @@ extension CanvasBoardView {
     /// ending, and the layout itself, since a tiling that has gone has no grips at all.
     func refreshTileHandles() {
         tileGripView.shownTileHandles = tiling.map { Set($0.ids.filter(showsTileHandle)) } ?? []
+        tileGripView.anticipatedTileHandle = gripAnticipated.flatMap { id in anticipatesTileHandle(id) ? id : nil }
+    }
+
+    /// Whether this tile's grip is offered faintly because the pointer is heading for it: everything
+    /// `showsTileHandle` asks, but with the pointer on its way rather than there.
+    func anticipatesTileHandle(_ id: String) -> Bool {
+        guard gripAnticipated == id, gripTile != id, gesture == nil, !tileGripsHeld,
+              !CanvasTileControls.shared.isOpen(on: self, tile: id), tileHandle(id) != nil else { return false }
+        return true
+    }
+
+    /// Follow the pointer's heading, and offer a tile's grip faintly when the pointer is moving towards
+    /// it and looks set to land on or near it.
+    ///
+    /// **The grip only appears once you are there**, which is right for reading — a page never has a
+    /// control on it — and slightly late for reaching: the mark arrives under the pointer rather than
+    /// ahead of it, so it is found rather than aimed at. A pointer travelling straight at a grip is as
+    /// clear a statement of intent as the pointer gets, so the grip answers it at a little under half
+    /// strength, and comes up the rest of the way in its zone as before. A pointer that stops short, or
+    /// turns away, lets it go.
+    ///
+    /// Heading from the last tenth of a second of movement, in view points so it means the same at any
+    /// zoom. Only for a pointer moving with some purpose (over 140 pt/s), within 320 pt, whose line of
+    /// travel passes within the grip's zone.
+    func anticipateTileGrip(at point: NSPoint, time: CFTimeInterval) {
+        pointerTrail.append((point, time))
+        pointerTrail.removeAll { time - $0.at > 0.1 }
+        var next: String?
+        if let first = pointerTrail.first, time - first.at > 0.012, gesture == nil, let tiling {
+            let dt = time - first.at
+            let v = NSPoint(x: (point.x - first.point.x) / dt, y: (point.y - first.point.y) / dt)
+            let speed = hypot(v.x, v.y)
+            if speed > 140 {
+                var best = Double.infinity
+                for id in tiling.ids where id != gripTile {
+                    guard let handle = tileHandle(id) else { continue }
+                    let bar = viewRect(handle.bar)
+                    let d = NSPoint(x: bar.midX - point.x, y: bar.midY - point.y)
+                    let distance = hypot(d.x, d.y)
+                    guard distance > 24, distance < 320, distance < best else { continue }
+                    let heading = (v.x * d.x + v.y * d.y) / (speed * distance)
+                    let miss = abs(v.x * d.y - v.y * d.x) / speed
+                    guard heading > 0.9, miss < Self.gripZoneWidth / 2 else { continue }
+                    best = distance
+                    next = id
+                }
+            }
+        }
+        if next != nil {
+            gripAnticipationEnds?.cancel()
+            let end = DispatchWorkItem { [weak self] in
+                guard let self, self.gripAnticipated != nil else { return }
+                self.gripAnticipated = nil
+                self.refreshTileHandles()
+            }
+            gripAnticipationEnds = end
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: end)
+        }
+        // A pointer still moving but no longer heading anywhere lets it go at once; one that has merely
+        // paused keeps it until the end above.
+        if next != gripAnticipated, next != nil || pointerTrail.count > 2 {
+            gripAnticipated = next
+            refreshTileHandles()
+        }
     }
 
     /// The corners this tile has at the frame of the tile space.

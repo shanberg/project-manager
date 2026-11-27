@@ -82,7 +82,8 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Recorded in `.pm-picked.ndjson` in the project folder: append-only, never pruned.
   - `picked` — the task (`session`, `ordinal`, `line`, `digest`, `text`) and the session it went `into`;
   - `released` — `reverses` the pick it cancels;
-  - `retargeted` — the task's new digest after its text changed.
+  - `retargeted` — the task's new digest after its text changed;
+  - `kept` — the task's tree was kept in a catch-up review: no `into`, cancelled by a `released` naming it. See [Stale](#stale).
 - A pick whose task or session no longer resolves isn't drawn. It is never an error.
 - Picks up: focusing an older task; Pick Up on the row menu; dragging a task onto the current session; ticking, editing, or setting a due date or wait on an older task; adding a child to an older tree.
 - Doesn't pick up: focus advancing on its own; reopening; dropping.
@@ -95,6 +96,16 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Closing a task without doing it, written `- [-]`.
 - `task.drop` drops open descendants too and advances focus. `task.reopen` reopens done or dropped.
 - Progress counts a dropped task as resolved, not done. `pm done` leaves dropped tasks out unless given `--dropped`.
+
+## Stale
+
+([stale-tasks.md](stale-tasks.md), [TaskStaleness.swift](../pm-swift/Sources/PmLib/TaskStaleness.swift))
+
+- A tree is stale when every open line in it is undated, not focused, and untouched for 21 days.
+- Touched: the end of its sitting's day, its tree's latest pick (`picked`), or its latest keep (`kept`), whichever is latest.
+- A project card's pile, the dock's card and the menubar fold stale trees under one line: "N older tasks, untouched for 3+ weeks". A find unfolds them.
+- Catch Up (from that line, the menubar, or a Projects card row): one stale tree at a time, oldest first. Keep, Pick Up, Drop, Skip, Drop the Rest. Each is one ⌘Z step.
+- `task.keep` writes `kept` and nothing else.
 
 ## Done log
 
@@ -183,7 +194,10 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Tabs in a tile: ⌥[ and ⌥]; dragged along the strip or off it.
 - Maximize fills the window with one tile or card. It isn't saved.
 - A satellite is a tile moved out into a window of its own; a tile of tabs becomes a window of tabs. Its content is lent to the window, not reloaded.
-- A tile out keeps its slot in the tiling, shown as an Empty: the card's icon and name, "In a window", Show, Bring Back. Bring Back and closing the window put the card back into that slot.
+- Move to Window: a tile's menu, a tab's menu, a tile dragged out past the window's edge, and (2026-11-13) any one card on the free canvas, not only web cards. A tile let go over one of the board's satellites joins it as tabs.
+- A satellite opened with no frame of its own cascades from the last one up; with none up, it is centred. A remembered frame whose title bar is on no screen comes back on the screen it overlaps most, else the main one, shrunk to fit (`CanvasSatelliteWindow.onScreen`).
+- Satellites off the free canvas are remembered and restored as tiled ones are (scope `""`); before 2026-11-13 they were remembered and never restored.
+- A tile out keeps its slot in the tiling, shown as an Empty: the card's icon and name, "In a window", Show, Bring Back. Bring Back and closing the window put the card back into that slot. The name and icon follow the card while it is out: a page that navigates renames its slot.
 - Satellites stay out while another workspace is up, while their window shows another project, and after their window closes: the board they came from is kept, off screen, until their last one comes home or a window shows that workspace again, which takes them over where they are (`CanvasSatelliteKeeper`). They are put away when their workspace's tab goes, or on quit, and brought back with it (UserDefaults `PMCanvasSatellites`).
 - The last tile out — by Pop Out or by hand — puts the workspace's window away. Not for a workspace of one tile. Remembered (UserDefaults `PMCanvasPoppedOut`): a relaunch that brings the satellites back keeps the window away. Showing the window forgets it.
 - Closing a satellite, or its workspace's window, changes nothing else on screen: no window comes back or forward, and the board's selection and tabs stay. A popped-out window stays away after the last satellite closes; the dock brings it back. Bring Back raises the window and picks out the card's tile.
@@ -191,6 +205,14 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 - Quit and relaunch bring back every satellite — those whose workspace is in a window, and those out with no window — at its windowed frame, minimized or in full screen if it was (`CanvasSatellites.Record`). A satellite of a workspace in a background tab comes back when that tab is shown. With no window: a window that is never shown brings them out and closes (`CanvasSatelliteKeeper.restoreKept`, UserDefaults `PMCanvasKeptWorkspaces`).
 - A satellite becoming key makes its board's project the focused project, as a project window becoming main does. A canvas that is no project's board changes nothing.
 - Satellite header: the title bar's own height (28 pt, no toolbar). The title clears only the controls showing. The card's name, then the workspace's. Bring Back (↙) and Gather show while the pointer is over the window, title bar included.
+- With a page showing: Back, Forward, Reload. Back and Forward list their history when held (0.4 s) or right-clicked. Reload is Stop while the page loads.
+- In a satellite, the Page menu (⌘[ ⌘] ⌘R ⌥⌘R ⌘L ⇧⌘R, Mute, Print, Export as PDF, More Page Commands), ⌘F and ⌘+ ⌘− ⌘0 act on the card showing (`CanvasSatelliteWindow`'s page commands). Before 2026-11-13 they were dim: they are the board's, and the board is not in a satellite's responder chain.
+- ⌘L in a satellite: the address typed over the header's words; Return goes there (an address, else a search on Settings' engine), Escape or leaving the field puts the words back. Open Page as New Card there makes a tab in the satellite.
+- ⌘F in a satellite with a page showing: a find field at the header's trailing end, WebKit's find. Return next, ⇧Return previous, Escape closes. A note's editor answers ⌘F itself.
+- ⌘W in a satellite of several tabs closes the tab showing: its card goes back to its slot, quietly, as closing the window does for every tab. With one tab, ⌘W is the window. The close button and ⇧⌘W are always the window.
+- Satellite tabs: the icon becomes × under the pointer. Dragged along the row, a tab reorders; dragged off it (24 pt above or below, or out of the window) and let go: over another satellite of the board, it joins that one; over the board's window, it comes back; elsewhere, a window of its own there, this one's size. Right-click: Bring Back to the workspace, Move to New Window, Close Tab, Close Other Tabs.
+- A link in a list that reorders, inside a satellite, drags along its list as on the board: the row lit, a line where it goes. Let go along the list, it moves and is not followed.
+- A satellite of a space's board is named for the space (window title, the mark's tooltip). It becoming key makes that space the one used last.
 - Pop Out Workspace: every tile into its own satellite, opened over its tile; the workspace's window is put away. A verb on the workspace, never a tile: the header's button (any workspace, a single tile included), a workspace chip's menu, and the menu bar's workspace items.
 - Gather Workspace: every satellite of the workspace home, and its window back. With every tile out, the tiling is rebuilt from where the windows are: columns left to right, tiles top to bottom. With some out, each fills its slot. The rearranging is one undo step.
 - Satellite dock: a floating panel while any project window is open or any satellite is out, whichever app is in front, on every Space. At the screen's leading edge until dragged — by a mark or the glass between — then where it was left (UserDefaults `PMSatelliteDockPlace`: screen, inset, middle as a fraction of the screen's height). Re-placed when displays change, always inside the visible frame. Its corners are concentric with its icons'. Liquid Glass, as the Mac's Dock. One mark per open project — each project window, and any project with windows out and no window of its own — drawn as an app icon: a squircle in the project's colour with its icon (or the workspace's initial) in white. No count badge. The flyout is glass tinted toward the project. Hover opens a flyout to the right: for a project, its card, 320 × 553 (11:19) whatever it holds — the companion's header (New Task, New Session, Show Window), then the card set to Current with the focused task pinned first, the latest session's last 3 note lines, the line to add to its note, and 5 still-open tasks before "N more"; no origin chips (`CanvasDockCard`). The card scrolls; a row per workspace with windows out sits at its foot: its name, a button per window, Gather. For a window on a file: its name, Show Window and the rows. The card takes the keyboard when it asks for it (a row picked, an editor or the note line opened); while it has it, the flyout stays up with the pointer away, and goes when the keyboard goes elsewhere. Escape gives the keyboard back, or closes the flyout. Clicking the mark shows the project's window — a popped-out workspace's window at that workspace; for a project with no window, one opened on it.

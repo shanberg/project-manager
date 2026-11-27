@@ -77,7 +77,67 @@ enum CrossingBench {
             else { board.endPeek() }
         case .maximize:
             board.tiling?.ids.first.map { board.toggleMaximizeTile($0) }
+        case .windows:
+            windowStep(on: board, at: index)
         }
+    }
+
+    // MARK: Windows
+
+    /// One step of the window journey, in a cycle of six: sweep, full screen in, out, sweep, to the
+    /// other display, back. On one display the move steps sweep instead.
+    ///
+    /// **A sweep is a resize driven frame by frame**, 30 frames in and 30 back out to where it began,
+    /// each one a `setFrame(_:display:)` — what a drag on the window's corner delivers, down to the
+    /// clip view's frame change and the re-tile it sets off (`CanvasScrollView.clipResized`). It is not
+    /// AppKit's live resize (`inLiveResize` stays false), so anything that only engages during a live
+    /// resize is not measured by it.
+    private static func windowStep(on board: CanvasBoardView, at index: Int) {
+        guard let window = board.window else { return }
+        let tiles = board.tiling?.ids.count ?? 0
+        let webTiles = board.tiling?.ids.filter { board.nodeViews[$0] is CanvasLinkNodeView }.count ?? 0
+        let label = { (kind: String) in "window \(kind) (\(tiles) tiles, \(webTiles) web)" }
+        let other = window.screen.flatMap { here in NSScreen.screens.first { $0 != here } }
+        let step = index % 6
+        if step == 1 || step == 2 {
+            FrameMeter.measure(label(step == 1 ? "full screen in" : "full screen out"), on: board, for: 1.6)
+            window.toggleFullScreen(nil)
+            return
+        }
+        // Everything else needs a window that isn't full screen; a step that finds one waits it out.
+        guard !window.styleMask.contains(.fullScreen) else { return }
+        if (step == 4 || step == 5), let there = other {
+            FrameMeter.measure(label("to other display"), on: board, for: 1.2)
+            var frame = window.frame
+            frame.size.width = min(frame.width, there.visibleFrame.width - 80)
+            frame.size.height = min(frame.height, there.visibleFrame.height - 80)
+            frame.origin = NSPoint(x: there.visibleFrame.midX - frame.width / 2,
+                                   y: there.visibleFrame.midY - frame.height / 2)
+            window.setFrame(frame, display: true)
+            return
+        }
+        FrameMeter.measure(label("resize sweep"), on: board, for: 1.4)
+        sweep(window)
+    }
+
+    /// Shrink the window by a quarter of its width and height over half a second, then grow it back.
+    private static func sweep(_ window: NSWindow) {
+        let start = window.frame
+        let frames = 30
+        var tick = 0
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                tick += 1
+                guard tick <= frames * 2 else { return timer.invalidate() }
+                let t = Double(tick <= frames ? tick : frames * 2 - tick) / Double(frames)
+                var frame = start
+                frame.size.width = start.width * (1 - 0.25 * t)
+                frame.size.height = start.height * (1 - 0.25 * t)
+                frame.origin.y = start.maxY - frame.height
+                window.setFrame(frame, display: true)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     /// The workspace the run bounces through, saved under our own name so the same cards resume the
@@ -88,8 +148,14 @@ enum CrossingBench {
     /// legacy conversion in `CanvasTileSession.init(restoring:)`, which runs the arrangement into
     /// columns against the window. That is a path a workspace saved today never takes, and it is extra
     /// work besides, so the bench was measuring a journey the app does not make.
-    private static func prepare(board: CanvasBoardView, tiles: Int) -> CanvasViewState.Tiling? {
-        let cards = board.document.nodes.filter { !$0.isGroup }.prefix(tiles).map(\.id)
+    private static func prepare(board: CanvasBoardView, tiles: Int,
+                                webFirst: Bool = false) -> CanvasViewState.Tiling? {
+        var nodes = board.document.nodes.filter { !$0.isGroup }
+        if webFirst {
+            let web = nodes.filter { CanvasNodeView.kind(of: $0) == CanvasLinkNodeView.self }
+            nodes = web + nodes.filter { CanvasNodeView.kind(of: $0) != CanvasLinkNodeView.self }
+        }
+        let cards = nodes.prefix(tiles).map(\.id)
         guard cards.count >= 2 else {
             Log.write("BENCH declined: \(cards.count) cards on the board")
             return nil
@@ -141,6 +207,9 @@ enum CrossingBench {
     /// what drives them enough times for the numbers to mean something.
     enum Journey: String {
         case crossing, picking, peek, maximize
+        /// Window management over a tiled workspace: resize sweeps, full screen in and out, and a
+        /// move to the other display and back where there is one. What web tiles are felt in.
+        case windows
     }
 
     /// Repeat one of the workspace's own journeys, rather than crossing in and out of the canvas.
@@ -151,7 +220,8 @@ enum CrossingBench {
         guard !isHidden(board) else {
             return Log.write("BENCH declined: the window is not on screen — bring it to the front")
         }
-        guard let plan = prepare(board: board, tiles: tiles) else { return }
+        // The window journey is about web tiles, so it takes the board's web cards first.
+        guard let plan = prepare(board: board, tiles: tiles, webFirst: journey == .windows) else { return }
         guard board.onTileAsWorkspace(plan) else {
             return Log.write("BENCH declined: this window will not keep a workspace")
         }
@@ -213,9 +283,18 @@ enum CrossingBench {
     private static func tiledBoard() -> CanvasBoardView? {
         let windows = ([WindowManager.shared.frontmost?.window].compactMap { $0 } + NSApp.windows)
         for window in windows {
-            if let board = window.contentView.map(everyBoard)?.first(where: \.isTiled) { return board }
+            // On screen, too: a window keeps every tab's pane mounted, and a tiled board in a hidden
+            // pane has a display link that never ticks — 24 of 24 measurements abandoned at 0 frames
+            // (2026-11-27) on a "2 tiles" board nobody could see while the bench's own sat in front.
+            let boards = window.contentView.map(everyBoard) ?? []
+            if let board = boards.first(where: { $0.isTiled && Self.isShowing($0) }) { return board }
         }
         return frontBoard()
+    }
+
+    /// Whether a board is in a pane that is actually up, rather than mounted and hidden.
+    private static func isShowing(_ board: CanvasBoardView) -> Bool {
+        !board.isHiddenOrHasHiddenAncestor && !board.visibleRect.isEmpty
     }
 
     private static func everyBoard(_ view: NSView) -> [CanvasBoardView] {
@@ -242,14 +321,9 @@ enum CrossingBench {
     /// internal for the benefit of a bench. A dev-only tool should not be why a boundary moves.
     private static func frontBoard() -> CanvasBoardView? {
         let window = WindowManager.shared.frontmost?.window ?? NSApp.mainWindow ?? NSApp.keyWindow
-        return window?.contentView.flatMap(descend)
-    }
-
-    private static func descend(_ view: NSView) -> CanvasBoardView? {
-        if let board = view as? CanvasBoardView { return board }
-        for sub in view.subviews {
-            if let found = descend(sub) { return found }
-        }
-        return nil
+        // The one on screen first, for the reason `tiledBoard` gives — the crossing bench measured
+        // nothing at all the same day, which this is the likeliest cause of.
+        let boards = window?.contentView.map(everyBoard) ?? []
+        return boards.first(where: isShowing) ?? boards.first
     }
 }

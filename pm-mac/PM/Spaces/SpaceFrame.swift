@@ -37,6 +37,8 @@ final class SpaceFrame {
         var renamed = false
         /// A layout's slot in ⌘1…9 and ⌃⇥ (`cardsInOrder`), not a card: the layout's name.
         var layout: String?
+        /// The layouts using this card, in the sidebar's order (§ Cards in layouts).
+        var layouts: [String] = []
 
         /// The ✕ does something: an unpinned card closes; a pinned one only while it's on screen,
         /// where it comes off the screen and stays pinned (Arc's).
@@ -71,6 +73,8 @@ final class SpaceFrame {
         var name: String
         var hosts: [String?]
         var showing: Bool
+        /// Its cards, in reading order: its own and the pinned ones it uses (§ Cards in layouts).
+        var rows: [Row] = []
     }
 
     /// The space this frames; nil for a project's board.
@@ -172,6 +176,7 @@ final class SpaceFrame {
         if !isSpace, let notes = CanvasProjectNoteCard.notes(forCanvasAt: canvas) {
             notesCard = CanvasProjectNoteCard.id(on: document, notes: notes, resolver: store.resolver)
         }
+        notesCardID = notesCard
         // The workspace holding the notes card alone (`CanvasProjectNoteCard.notesWorkspace`), read
         // the way the workspace rows are, so the two agree on which one it is.
         let names = CanvasWorkspaces.names(of: canvas)
@@ -180,6 +185,15 @@ final class SpaceFrame {
                 ?? names.first { $0 == CanvasProjectNoteCard.notesWorkspaceName
                     && CanvasWorkspaces.tiling(named: $0, of: canvas)?.ids.contains(card) == true }
         }
+        // The layouts and their cards: the one up as its board has it now, the rest as saved.
+        let live = board?.isTiled == true ? board?.workspaceName : nil
+        let saved = CanvasWorkspaces.of(canvas)
+        let layoutCards: [(name: String, cards: [String])] = CanvasWorkspaces.ordered(of: canvas)
+            .filter { $0 != notesWorkspace }.map { name in
+                let ids = (name == live ? board?.tilingMemory?.ids : nil) ?? saved[name]?.ids ?? []
+                return (name, ids.filter { $0 != notesCard && document.node(id: $0) != nil })
+            }
+        let held = SpaceLayoutCards.membership(layoutCards)
         func row(_ item: CanvasItem) -> Row? {
             guard item.id != notesCard, let node = document.node(id: item.id) else { return nil }
             var host: String?, symbol: String?
@@ -195,19 +209,26 @@ final class SpaceFrame {
                        pinned: SpaceCardMarks.isPinned(node), favorite: SpaceCardMarks.isFavorite(node),
                        showing: tiled.contains(item.id), front: item.id == front, playing: sounding.contains(item.id),
                        muted: CanvasCardMedia.isMuted(node), order: SpaceCardMarks.order(node),
-                       address: address, renamed: SpaceCardMarks.title(node) != nil)
+                       address: address, renamed: SpaceCardMarks.title(node) != nil, layouts: held[item.id] ?? [])
         }
+        var byID: [String: Row] = [:]
         var favorites: [Row] = [], pinned = Group(), today = Group()
         func folderOrder(_ id: String) -> Double? { document.node(id: id).flatMap(SpaceCardMarks.order) }
+        var sectioned = Set<String>()
         for section in sections {
-            let rows = section.items.compactMap(row)
+            if let frame = section.frame { sectioned.insert(frame) }
+            var rows = section.items.compactMap(row)
+            for row in rows { byID[row.id] = row }
+            // A card in the layout up is in front there, under the layout's row; here it's only on screen.
+            if let live { for i in rows.indices where rows[i].layouts.contains(live) { rows[i].front = false } }
             favorites += rows.filter(\.favorite)
-            let pins = rows.filter { $0.pinned && !$0.favorite }, rest = rows.filter { !$0.pinned }
+            // An unpinned card in a layout is the layout's own: listed under it, nowhere else.
+            let pins = rows.filter { $0.pinned && !$0.favorite }, rest = rows.filter { !$0.pinned && $0.layouts.isEmpty }
             if let frame = section.frame {
                 let label = section.label ?? "Folder"
                 let order = folderOrder(frame)
                 if !pins.isEmpty { pinned.folders.append(Folder(id: frame, label: label, rows: pins, order: order)) }
-                if !rest.isEmpty || pins.isEmpty {
+                if !rest.isEmpty || rows.isEmpty {
                     today.folders.append(Folder(id: frame, label: label, rows: rest, order: order))
                 }
             } else {
@@ -217,7 +238,8 @@ final class SpaceFrame {
         }
         // A folder with nothing in it yet (one just made) is still a folder: it shows among Today's,
         // where a card dropped on it goes.
-        let listed = Set(pinned.folders.map(\.id) + today.folders.map(\.id))
+        // Not one whose cards are all under layouts: it has nothing to list.
+        let listed = Set(pinned.folders.map(\.id) + today.folders.map(\.id)).union(sectioned)
         for node in document.nodes where node.isGroup && !listed.contains(node.id) {
             guard case .group(let label, _, _) = node.content else { continue }
             today.folders.append(Folder(id: node.id, label: label ?? "Folder", rows: [],
@@ -245,7 +267,21 @@ final class SpaceFrame {
                 if case .link(let url)? = document.node(id: id)?.content { return URL(string: url)?.host() }
                 return nil
             }
-            return Workspace(name: name, hosts: hosts, showing: current == name && (board?.isTiled ?? false))
+            let cards = layoutCards.first { $0.name == name }?.cards ?? []
+            return Workspace(name: name, hosts: hosts, showing: current == name && (board?.isTiled ?? false),
+                             rows: cards.compactMap { byID[$0] })
+        }
+        layoutCardsNow = layoutCards
+        // A card in a second layout is pinned (§ Cards in layouts). The first look at a board pins its
+        // shared cards quietly; after that, a toast says so and offers Undo.
+        let sharing = SpaceLayoutCards.toPin(held, isPinned: { id in
+            document.node(id: id).map(SpaceCardMarks.isPinned) ?? true
+        }, exempt: notesCard)
+        let before = lastHeld
+        lastHeld = held
+        if !sharing.isEmpty, !autoPinQueued {
+            autoPinQueued = true
+            DispatchQueue.main.async { [weak self] in self?.autoPin(sharing, before: before, now: held) }
         }
         boardShowing = !(board?.isTiled ?? false) && !notesShowing
         // The page the focused tile is on now, not the address the card was saved with.
@@ -257,13 +293,15 @@ final class SpaceFrame {
         frontHost = frontURL.map { CanvasAddressSuggestions.bare($0.absoluteString) }
         picked = picked.filter { document.node(id: $0) != nil }
         let everyRow = favorites + pinned.loose + pinned.folders.flatMap(\.rows) + today.loose + today.folders.flatMap(\.rows)
+            + workspaces.flatMap(\.rows).filter { !$0.pinned }
         // The mini player: a card making sound that isn't on screen, and one it paused, until shown.
         heldInPlayer = heldInPlayer.filter { id in everyRow.contains { $0.id == id && !$0.showing } }
         player = everyRow.first { $0.playing && !$0.showing } ?? everyRow.first { heldInPlayer.contains($0.id) }
         guard let spaceID else {
-            // A project's board: nothing archives, and its colour is the project's.
+            // A project's board: nothing archives, and its colour is the project's. Its cards move to
+            // any space, as a space's do.
             archiveAfter = nil
-            otherSpaces = []
+            otherSpaces = Spaces.shared.all.map { ($0.id, $0.title) }
             spaceTitle = ""
             washColor = project?.color
             spaceColor = Color(nsColor: washColor?.nsColor ?? .systemGray)
@@ -321,8 +359,9 @@ final class SpaceFrame {
     }
 
     private func remove(_ ids: Set<String>, actionName: String, reason: SpaceArchive.Reason) {
-        for id in ids { noteClosed(id) }
-        archive(ids, reason: reason)
+        let nodes = leaving(ids)
+        let entries = archive(nodes, reason: reason)
+        for node in nodes { remember(node, entry: entries[node.id]) }
         store.change(actionName) { doc in
             doc.nodes.removeAll { ids.contains($0.id) }
             doc.edges.removeAll { ids.contains($0.fromNode) || ids.contains($0.toNode) }
@@ -330,24 +369,59 @@ final class SpaceFrame {
         refresh()
     }
 
-    /// Cards leaving a space's board kept in its Archived Cards (`SpaceArchive`), so they can come back
-    /// after ⌘Z and ⇧⌘T have forgotten them. A project's board keeps no archive.
-    private func archive(_ ids: Set<String>, reason: SpaceArchive.Reason) {
-        guard let spaceID else { return }
-        // A web card kept at the page it had got to, as ⇧⌘T remembers it, not where it was saved.
-        let nodes = store.document.nodes.filter { ids.contains($0.id) && !$0.isGroup }.map { node -> CanvasNode in
+    /// The cards about to leave the board, as they'll be kept: a web card at the page it had got to,
+    /// not where it was saved — which is where ⇧⌘T, Undo and Archived Cards bring it back.
+    private func leaving(_ ids: Set<String>) -> [CanvasNode] {
+        store.document.nodes.filter { ids.contains($0.id) && !$0.isGroup }.map { node -> CanvasNode in
             guard case .link = node.content,
                   let live = (board?.nodeViews[node.id] as? CanvasLinkNodeView)?.liveURL else { return node }
             var kept = node
             kept.content = .link(url: live.absoluteString)
             return kept
         }
-        guard !nodes.isEmpty else { return }
+    }
+
+    /// Cards leaving the board kept in its Archived Cards (`SpaceArchive`), a space's or a project's,
+    /// so they can come back after ⌘Z and ⇧⌘T have forgotten them. Each card's entry, by card id.
+    private func archive(_ nodes: [CanvasNode], reason: SpaceArchive.Reason) -> [String: String] {
+        guard !nodes.isEmpty else { return [:] }
         var titles: [String: String] = [:]
-        for node in nodes {
-            titles[node.id] = board?.describeCard(node.id)?.title ?? SpaceCardMarks.title(node)
+        for node in nodes { titles[node.id] = cardTitle(node) }
+        return SpaceArchive.shared.record(nodes, titles: titles, spaceID: archiveKey, reason: reason)
+    }
+
+    /// Where this board's archived cards are kept (`SpaceArchive.key`).
+    var archiveKey: String { SpaceArchive.key(spaceID: spaceID, canvas: canvas) }
+
+    /// What the board is called: the space's name, or the project's.
+    var boardTitle: String {
+        if let spaceID { return Spaces.shared.space(spaceID)?.title ?? "Untitled Space" }
+        let title = project?.notes?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let title, !title.isEmpty { return title }
+        return project?.projectName.map { ProjectCodes.display($0) } ?? canvas.deletingPathExtension().lastPathComponent
+    }
+
+    private func cardTitle(_ node: CanvasNode) -> String {
+        board?.describeCard(node.id)?.title ?? SpaceCardMarks.title(node) ?? "Untitled"
+    }
+
+    /// A card coming off the board, for ⇧⌘T: the whole card, whatever kind, with its lines.
+    private func remember(_ node: CanvasNode, entry: String?) {
+        var address = ""
+        if case .link(let url) = node.content { address = url }
+        let edges = store.document.edges.filter { $0.fromNode == node.id || $0.toNode == node.id }
+        CanvasHistory.didClose(.init(address: address, spaceID: spaceID, canvas: canvas, cardID: node.id,
+                                     node: node, edges: edges, archiveEntry: entry, projectKey: project?.projectKey))
+    }
+
+    /// A card taken off the screen but still on the board, for ⇧⌘T: shown again.
+    private func rememberOnScreen(_ id: String) {
+        var address = ""
+        if case .link(let url)? = store.document.node(id: id)?.content {
+            address = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL?.absoluteString ?? url
         }
-        SpaceArchive.shared.record(nodes, titles: titles, spaceID: spaceID, reason: reason)
+        CanvasHistory.didClose(.init(address: address, spaceID: spaceID, canvas: canvas, cardID: id,
+                                     projectKey: project?.projectKey))
     }
 
     /// When each card was last on screen, by space and card. A card first seen now counts from now.
@@ -415,11 +489,7 @@ final class SpaceFrame {
         refresh()
     }
 
-    func moveToSpace(_ id: String, _ target: String) {
-        guard let spaceID else { return }
-        Spaces.shared.move(id, from: spaceID, to: target)
-        refresh()
-    }
+    func moveToSpace(_ id: String, _ target: String) { moveToSpace([id], target) }
 
     /// A second card on the page this one has got to, with its back list (`openPageAsNewCard`).
     func duplicate(_ id: String) {
@@ -632,6 +702,8 @@ final class SpaceFrame {
     // MARK: Marks
 
     func setPinned(_ id: String, _ on: Bool) {
+        // A card two layouts use stays pinned (§ Cards in layouts); its menu's Unpin is dimmed.
+        if !on, isShared(id) { return NSSound.beep() }
         store.change(on ? "Pin" : "Unpin") { doc in
             if let i = doc.nodes.firstIndex(where: { $0.id == id }) { SpaceCardMarks.setPinned(on, on: &doc.nodes[i]) }
         }
@@ -643,65 +715,240 @@ final class SpaceFrame {
         }
     }
 
-    /// Close: a pinned card comes off the screen and stays pinned (Arc's); any other comes off the
-    /// board (⌘Z brings it back).
-    func close(_ id: String) {
-        guard let node = store.document.node(id: id) else { return }
-        if SpaceCardMarks.isPinned(node) { return closePinned(id) }
-        guard let board else { return }
-        // **Closing the card in front goes to the one you were on before it**, as a browser does — into
-        // its slot, so the layout keeps its shape. See `nextFront`.
-        let tiling = board.tiling
-        let front = board.focusedTile ?? (tiling?.ids.count == 1 ? tiling?.ids.first : nil)
+    // MARK: Closing: a tile is a tab
+
+    /// Close — ⌘W, a row's ✕ or Close, the grip's ✕, a tab's ✕ — is what a browser does to a tab:
+    /// - Pinned, and a project's notes card: off the screen, still in the sidebar (`closePinned`).
+    /// - Any other card: off the board, into Archived Cards; ⇧⌘T brings it back, ⌘Z too, and a toast
+    ///   offers Undo and Keep (back in the sidebar, off the screen).
+    /// - The card in front before it takes the slot it leaves (`leaveScreen`).
+    func close(_ id: String) { close([id]) }
+
+    /// Several as one act: pinned ones off the screen, the rest off the board in one ⌘Z and one toast.
+    func close(_ ids: [String]) {
         let document = store.document
-        let next = id == front ? tiling.flatMap {
-            Self.nextFront(closing: id, recent: recentFronts, tabs: $0.tabs(of: id)) { document.node(id: $0) != nil }
-        } : nil
-        noteClosed(id)
-        archive([id], reason: .closed)
-        if let next, tiling?.cards.contains(next) == false {
-            board.replaceInTiling(id, with: next, animated: false)
-        }
-        board.select([id])
-        board.deleteSelection()
-        if let next { show(next) }
-        refresh()
+        let ids = ids.filter { document.node(id: $0) != nil }
+        let stays = ids.filter(staysListed)
+        for id in stays { closePinned(id) }
+        let going = ids.filter { !stays.contains($0) }
+        guard !going.isEmpty else { return }
+        takeOff(going)
     }
 
-    /// A pinned card's ✕, middle-click or Close: out of the layout, its sound stopped, the card where it
-    /// was in Pinned. The card in front before it takes its slot, as closing any card in front does.
+    /// A card whose close leaves it in the sidebar: pinned (favourites are pinned too), or the project's
+    /// notes card, which is the Notes row and never comes off its board.
+    private func staysListed(_ id: String) -> Bool {
+        guard let node = store.document.node(id: id) else { return false }
+        return SpaceCardMarks.isPinned(node) || id == notesCardID
+    }
+
+    /// A pinned card's close: out of the layout, its sound stopped, the card where it was in Pinned.
     /// Nothing to do for one that isn't on screen.
     func closePinned(_ id: String) {
-        guard let board, let tiling = board.tiling, tiling.cards.contains(id) else { return }
+        guard let board, board.tiling?.cards.contains(id) == true else { return }
         CanvasLinkNodeView.card(id, onCanvas: canvas)?.pauseMedia()
-        let document = store.document
-        let next = Self.nextFront(closing: id, recent: recentFronts, tabs: tiling.tabs(of: id)) {
-            document.node(id: $0) != nil && !tiling.cards.contains($0)
+        rememberOnScreen(id)
+        // Under a layout: Remove from that layout, which goes with its last card.
+        if let name = board.workspaceName, name != notesWorkspace {
+            removeFromLayout([id], name, showingNext: id)
+            return
         }
-        if let next {
-            board.replaceInTiling(id, with: next, animated: false)
+        leaveScreen([id])
+        refresh()
+    }
+
+    /// What a close took off the board, for the toast to put back.
+    private struct Closing {
+        var nodes: [CanvasNode]
+        var edges: [CanvasEdge]
+        var entries: [String]
+        /// The first card's name, read while it was on the board.
+        var title: String
+        /// The arrangement before the close, and the one it left.
+        var before: CanvasTileSession?
+        var after: CanvasTileSession?
+        /// Layouts that went with their last card, as they were.
+        var layouts: [(name: String, tiling: CanvasViewState.Tiling)] = []
+    }
+
+    private func takeOff(_ ids: [String]) {
+        let going = Set(ids)
+        let nodes = leaving(going)
+        let edges = store.document.edges.filter { going.contains($0.fromNode) || going.contains($0.toNode) }
+        let entries = archive(nodes, reason: .closed)
+        for node in nodes { remember(node, entry: entries[node.id]) }
+        let title = nodes.first.map(cardTitle) ?? ""
+        let before = board?.tiling
+        let emptied = SpaceLayoutCards.emptied(by: going, layouts: layoutCardsNow) { [store] in store.document.node(id: $0) != nil }
+        let emptiedSaved = emptied.map { ($0, CanvasWorkspaces.tiling(named: $0, of: canvas)) }
+        let upGoes = board?.isTiled == true && board?.workspaceName.map(emptied.contains) == true
+        let name = ids.count > 1 ? "Close \(ids.count) Cards" : "Close Card"
+        // One ⌘Z: the cards back, then the layout as it was.
+        let undo = store.undoManager
+        undo.beginUndoGrouping()
+        leaveScreen(ids)
+        store.change(name) { SpaceClosing.takeOff(going, from: &$0) }
+        undo.endUndoGrouping()
+        undo.setActionName(name)
+        for (layout, tiling) in emptiedSaved { split?.dropEmptiedWorkspace(named: layout, was: tiling) }
+        if upGoes, let first = ids.first, let next = nextAfterLayout(closing: first, going: going) { show(next) }
+        refresh()
+        offer(Closing(nodes: nodes, edges: edges, entries: Array(entries.values), title: title, before: before,
+                      after: board?.tiling,
+                      layouts: emptiedSaved.compactMap { name, tiling in tiling.map { (name, $0) } }))
+    }
+
+    /// Closing cards off the screen, as `SpaceClosing.plan` says: the card in front gives its slot to
+    /// the card in front before it, or the layout closes up. Returns the card brought forward.
+    @discardableResult
+    private func leaveScreen(_ ids: [String]) -> String? {
+        guard let board, let tiling = board.tiling else { return nil }
+        let document = store.document
+        // A named layout's slot is never filled from outside it: its cards are its own.
+        let plan = SpaceClosing.plan(closing: ids, front: board.focusedTile ?? (tiling.ids.count == 1 ? tiling.ids.first : nil),
+                                     tiling: tiling, recent: recentFronts, fillsSlot: board.workspaceName == nil) {
+            document.node(id: $0) != nil
+        }
+        if let replace = plan.replace { board.replaceInTiling(replace.closing, with: replace.with, animated: false) }
+        if !plan.leave.isEmpty { board.closeInTiling(plan.leave) }
+        if let next = plan.next, board.tiling?.cards.contains(next) == true {
+            board.showTab(next)
             board.select([next])
-        } else {
-            board.closeTileRemembering(id, inSpace: spaceID)
+        }
+        return plan.next
+    }
+
+    // MARK: Cards in layouts
+
+    /// Where you go when the layout you were in goes with the card you closed: the card in front before
+    /// it, alone.
+    private func nextAfterLayout(closing id: String, going: Set<String>) -> String? {
+        let document = store.document
+        return SpaceClosing.nextFront(closing: id, recent: recentFronts, tabs: []) {
+            document.node(id: $0) != nil && !going.contains($0)
+        }
+    }
+
+    /// Cards out of a layout, the card staying on the board: through its board if it's up, else its
+    /// saved tiling. The layout goes with its last card, ⌘Z bringing it back. `showingNext`: the card
+    /// a close took off the screen, whose place is taken as § Closing says.
+    func removeFromLayout(_ ids: [String], _ name: String, showingNext closing: String? = nil) {
+        let saved = CanvasWorkspaces.tiling(named: name, of: canvas)
+        let going = Set(ids)
+        if let board, board.isTiled, board.workspaceName == name, let tiling = board.tiling {
+            let up = ids.filter(tiling.cards.contains)
+            if !tiling.cards.contains(where: { !going.contains($0) }) {
+                split?.dropEmptiedWorkspace(named: name, was: saved)
+                if let next = closing.flatMap({ nextAfterLayout(closing: $0, going: going) }) { show(next) }
+            } else if !up.isEmpty {
+                if let closing { leaveScreen([closing]) } else { board.closeInTiling(up) }
+            }
+        } else if !CanvasWorkspaces.removing(going, from: name, for: canvas) {
+            split?.dropEmptiedWorkspace(named: name, was: saved)
         }
         refresh()
     }
 
-    /// Close several rows as one act: pinned ones off the screen, the rest off the board in one ⌘Z.
-    func close(_ ids: [String]) {
-        guard ids.count > 1 else { return ids.first.map(close) ?? () }
+    /// Move to Today / Cards: out of every layout using it, at the top of the list, unpinned.
+    func moveToList(_ ids: [String]) {
         let document = store.document
-        let pins = ids.filter { document.node(id: $0).map(SpaceCardMarks.isPinned) ?? false }
-        for id in pins { closePinned(id) }
-        let rest = Set(ids).subtracting(pins)
-        guard !rest.isEmpty else { return }
-        if let board, let tiling = board.tiling {
-            for id in rest where tiling.cards.contains(id) { board.closeTileRemembering(id, inSpace: spaceID) }
+        for name in Set(ids.flatMap { id in layoutCardsNow.filter { $0.cards.contains(id) }.map(\.name) }) {
+            removeFromLayout(ids, name)
         }
-        remove(rest, actionName: "Close \(rest.count) Cards", reason: .closed)
+        let list = SpaceCardMarks.List.today(folder: nil)
+        let members = members(of: list)
+        guard ids.allSatisfy({ document.node(id: $0) != nil }) else { return refresh() }
+        store.change(ids.count > 1 ? "Move \(ids.count) Cards" : "Move Card") { doc in
+            SpaceCardMarks.move(ids, to: list, at: 0, members: members, in: &doc)
+        }
+        refresh()
+    }
+
+    /// The layouts a card isn't in yet: what Add to Layout offers.
+    func layouts(notHolding id: String) -> [String] {
+        workspaces.map(\.name).filter { name in !(layoutCardsNow.first { $0.name == name }?.cards.contains(id) ?? false) }
+    }
+
+    /// Whether Unpin would leave a card in two layouts at once, which only a pinned card can be.
+    func isShared(_ id: String) -> Bool { (lastHeld?[id]?.count ?? 0) > 1 }
+
+    /// Cards that have just come to be in a second layout, pinned. Quietly on the first look at a
+    /// board (they were shared before this rule); after that a toast says so, with Undo: the card out
+    /// of the layouts it joined, unpinned.
+    private func autoPin(_ ids: [String], before: [String: [String]]?, now: [String: [String]]) {
+        autoPinQueued = false
+        let ids = ids.filter { store.document.node(id: $0).map { !SpaceCardMarks.isPinned($0) } ?? false }
+        guard !ids.isEmpty else { return }
+        store.change(ids.count > 1 ? "Pin \(ids.count) Shared Cards" : "Pin Shared Card") { doc in
+            for id in ids {
+                if let i = doc.nodes.firstIndex(where: { $0.id == id }) { SpaceCardMarks.setPinned(true, on: &doc.nodes[i]) }
+            }
+        }
+        refresh()
+        guard let before else {
+            return Log.write("frame: pinned \(ids.count) cards already shared by layouts")
+        }
+        let joined = Dictionary(uniqueKeysWithValues: ids.map { ($0, SpaceLayoutCards.joined($0, now: now, before: before)) })
+        let text: String
+        if ids.count == 1, let id = ids.first, let node = store.document.node(id: id) {
+            text = "Pinned \u{201C}\(cardTitle(node))\u{201D}: it\u{2019}s in \(now[id]?.count ?? 2) layouts"
+        } else {
+            text = "Pinned \(ids.count) cards: each is in more than one layout"
+        }
+        pane?.showToast(text, actions: [.init(title: "Undo") { [weak self] in self?.unshare(joined) }])
+    }
+
+    /// The auto-pin's Undo.
+    private func unshare(_ joined: [String: [String]]) {
+        for (id, names) in joined { for name in names { removeFromLayout([id], name) } }
+        setPinned(Array(joined.keys), false)
+    }
+
+    /// The toast after a close: Undo, and Keep (in the sidebar, off the screen).
+    private func offer(_ closing: Closing) {
+        guard let pane, !closing.nodes.isEmpty else { return }
+        let text = closing.nodes.count > 1 ? "Closed \(closing.nodes.count) Cards"
+            : "Closed \u{201C}\(closing.title)\u{201D}"
+        pane.showToast(text, actions: [
+            .init(title: "Undo") { [weak self] in self?.undoClose(closing) },
+            .init(title: isSpace ? "Keep in Space" : "Keep in Project") { [weak self] in self?.keep(closing) },
+        ])
+    }
+
+    /// The toast's Undo: the cards back on the board, and the layout as it was if nothing has changed
+    /// it since; else the first card shown.
+    private func undoClose(_ closing: Closing) {
+        reinstate(closing.nodes, edges: closing.edges, entries: closing.entries,
+                  name: closing.nodes.count > 1 ? "Undo Close \(closing.nodes.count) Cards" : "Undo Close Card")
+        for layout in closing.layouts { split?.putBackWorkspace(layout.tiling, named: layout.name) }
+        if let before = closing.before, board?.putBack(before, ifStill: closing.after) == true { return refresh() }
+        guard let first = closing.nodes.first else { return }
+        if let layout = closing.layouts.first(where: { $0.tiling.ids.contains(first.id) }) {
+            return showInLayout(layout.name, card: first.id)
+        }
+        show(first.id)
+    }
+
+    /// The toast's Keep: the cards back in the sidebar where they were, not on the screen.
+    private func keep(_ closing: Closing) {
+        reinstate(closing.nodes, edges: closing.edges, entries: closing.entries,
+                  name: closing.nodes.count > 1 ? "Keep \(closing.nodes.count) Cards" : "Keep Card")
+        for layout in closing.layouts { split?.putBackWorkspace(layout.tiling, named: layout.name) }
+        refresh()
+    }
+
+    /// Cards back on the board as they were, their lines with them; out of Archived Cards and ⇧⌘T.
+    private func reinstate(_ nodes: [CanvasNode], edges: [CanvasEdge], entries: [String], name: String) {
+        store.change(name) { SpaceClosing.putBack(nodes, edges: edges, into: &$0) }
+        SpaceArchive.shared.remove(Set(entries))
+        CanvasHistory.forgetClosed(cards: Set(nodes.map(\.id)))
+        refresh()
     }
 
     func setPinned(_ ids: [String], _ on: Bool) {
+        // A card two layouts use stays pinned (§ Cards in layouts).
+        let ids = on ? ids : ids.filter { !isShared($0) }
+        guard !ids.isEmpty else { return }
         store.change(on ? "Pin \(ids.count) Cards" : "Unpin \(ids.count) Cards") { doc in
             for id in ids {
                 if let i = doc.nodes.firstIndex(where: { $0.id == id }) { SpaceCardMarks.setPinned(on, on: &doc.nodes[i]) }
@@ -717,8 +964,13 @@ final class SpaceFrame {
         }
     }
 
+    /// Off this board — a space's or a project's — onto the space's, as Today. Out of its layouts first,
+    /// which go with their last card.
     func moveToSpace(_ ids: [String], _ target: String) {
         guard let to = Spaces.shared.canvas(of: target) else { return }
+        for name in Set(ids.flatMap { id in layoutCardsNow.filter { $0.cards.contains(id) }.map(\.name) }) {
+            removeFromLayout(ids, name)
+        }
         if !FileManager.default.fileExists(atPath: to.path) { try? Spaces.shared.makeCanvas(at: to) }
         picked = []
         Spaces.shared.move(ids, fromCanvas: canvas, toCanvas: to) { [weak self] in self?.refresh() }
@@ -819,27 +1071,20 @@ final class SpaceFrame {
 
     /// The cards that have been in front, most recent first: where closing the one in front goes.
     @ObservationIgnored private var recentFronts: [String] = []
+    /// A project's notes card, which a close never takes off the board.
+    @ObservationIgnored private var notesCardID: String?
+    /// The layouts and their cards as the last refresh read them, and which layouts held each card.
+    @ObservationIgnored private var layoutCardsNow: [(name: String, cards: [String])] = []
+    @ObservationIgnored private var lastHeld: [String: [String]]?
+    @ObservationIgnored private var autoPinQueued = false
 
-    /// Where closing `closed`, the card in front, sends you: the card in front before it that is still
-    /// on the board (`recent`, most recent first) — a tab of the same tile first, when it had others,
-    /// so closing a tab stays in its tile. Nil for nowhere remembered, which leaves the tiling's own
-    /// rule (the neighbouring tab, or the board).
-    static func nextFront(closing closed: String, recent: [String], tabs: [String],
-                          exists: (String) -> Bool) -> String? {
-        let candidates = recent.filter { $0 != closed && exists($0) }
-        if tabs.count > 1 { return candidates.first(where: tabs.contains) }
-        return candidates.first
-    }
 
-    /// ⌘W: the card in front, closed as above. False when there's none, so the window closes instead.
-    /// ⌘W: the focused tile out of the layout — the card stays in the sidebar, and ⌘Z puts it back.
-    /// False with no tile focused, so the window closes instead.
+    /// ⌘W: the card in front, closed as a tab (`close`). False with nothing up, so the window closes.
     func closeFront() -> Bool {
         // In a project's notes, ⌘W goes to the board: the notes don't close.
         if notesShowing { showBoard(); return true }
         guard let board, board.isTiled, let id = board.focusedTile ?? board.tiling?.ids.first else { return false }
-        board.closeTileRemembering(id, inSpace: spaceID)
-        refresh()
+        close(id)
         return true
     }
 
@@ -879,26 +1124,26 @@ final class SpaceFrame {
         return true
     }
 
-    /// ⇧⌘T: the card if it's still on the board (⌘W leaves it there), else a new card on its address.
+    /// ⇧⌘T: the card if it's still on the board (a pinned card's close, ⌘Z, Keep), else the card put
+    /// back as it was — any kind — else a new web card on its address.
     func reopen(_ closed: CanvasHistory.Closed) {
         if store.document.node(id: closed.cardID) != nil { return show(closed.cardID) }
+        if let node = closed.node {
+            reinstate([node], edges: closed.edges, entries: closed.archiveEntry.map { [$0] } ?? [],
+                      name: "Reopen Closed Card")
+            return show(node.id)
+        }
+        guard !closed.address.isEmpty else { return NSSound.beep() }
         openNewCard(closed.address, showing: true)
     }
 
-    /// The grip's ✕: this tile out of the layout, as ⌘W on it.
+    /// The grip's ✕: as ⌘W on that tile.
     func closeTile(_ id: String) {
         guard let board, board.isTiled, board.tiling?.ids.contains(id) == true else { return }
-        board.closeTileRemembering(id, inSpace: spaceID)
-        refresh()
+        close(id)
     }
 
     /// For ⇧⌘T, a card coming off the board (a row's Close, Clear): its address and where it was.
-    /// Tiles taken out of the layout are remembered by `closeTileRemembering`.
-    private func noteClosed(_ id: String) {
-        guard let node = store.document.node(id: id), case .link(let address) = node.content else { return }
-        let live = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL?.absoluteString
-        CanvasHistory.didClose(live ?? address, card: id, canvas: canvas, inSpace: spaceID)
-    }
 
     /// ⌃⇥ and ⇧⌘]: the card after the one in front, round to the first.
     func cycleCards(by step: Int) {
@@ -1047,6 +1292,11 @@ final class SpaceFrame {
             picked = []
             store.change(moving.count > 1 ? "Move \(moving.count) Cards" : "Move Card") { doc in
                 SpaceCardMarks.move(moving, to: list, at: index, members: members, in: &doc)
+            }
+            // Into Today / Cards is out of the layouts: an unpinned card has one home.
+            if case .today = list {
+                let layouts = Set(moving.flatMap { id in layoutCardsNow.filter { $0.cards.contains(id) }.map(\.name) })
+                for name in layouts { removeFromLayout(moving, name) }
             }
             refresh()
         }
@@ -1452,9 +1702,17 @@ struct SpaceFrameSidebar: View {
             if !frame.favorites.isEmpty { favorites } else if frame.dragging != nil { favoritesWell }
             // The list fills the scroll area at least, so the empty sidebar under the last row is the
             // drag area behind the rows rather than the scroll view's own ground (which moves nothing).
-            GeometryReader { area in
+            //
+            // **Filled by layout, not by a `GeometryReader`.** The fill used to be the reader's height
+            // handed in as a `minHeight`, which made every row's body a function of the window's height:
+            // each frame of a window resize re-ran this whole list, at 12.7 ms a frame — most of the
+            // budget, and more than the board's own re-tile (FrameMeter, 2026-11-27). A clear spacer as
+            // tall as the scroll area, behind rows that size themselves, is the same minimum height as
+            // a layout fact: a resize re-measures one spacer and nothing re-runs.
             ScrollViewReader { scroller in
             ScrollView {
+                ZStack(alignment: .topLeading) {
+                Color.clear.containerRelativeFrame(.vertical)
                 VStack(alignment: .leading, spacing: 2) {
                     if !frame.isSpace {
                         SpaceSidebarRow(title: "Notes", symbol: "doc.text", on: frame.notesShowing) { frame.showNotes() }
@@ -1463,6 +1721,10 @@ struct SpaceFrameSidebar: View {
                                     trailing: "\(frame.cardCount)", on: frame.boardShowing, dim: true) { frame.showBoard() }
                     ForEach(Array(frame.workspaces.enumerated()), id: \.element.id) { index, workspace in
                         workspaceRow(workspace, index: index)
+                        // Only the layout on screen is unfolded (§ Cards in layouts).
+                        if workspace.showing {
+                            ForEach(workspace.rows) { row in layoutCardRow(row, in: workspace.name) }
+                        }
                     }
                     group(frame.pinned, pinned: true)
                     ruleMarks(Group { if frame.isSpace { todayRule } else { cardsRule } })
@@ -1474,7 +1736,10 @@ struct SpaceFrameSidebar: View {
                     group(frame.today, pinned: false)
                 }
                 .padding(.bottom, 8)
-                .frame(maxWidth: .infinity, minHeight: area.size.height, alignment: .topLeading)
+                // Its own height whatever the scroll area's, so a resize never re-lays the rows out.
+                .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .background { WindowDragArea { frame.addMenu() } }
                 // Files let go anywhere a row doesn't take them (Notes, Board, the empty sidebar below
                 // the rows): the end of Today / Cards. Files only — a row has to land on a row.
@@ -1486,7 +1751,6 @@ struct SpaceFrameSidebar: View {
             .onChange(of: frontRowID) { _, id in
                 guard let id else { return }
                 withAnimation(Motion.animation(.easeOut(duration: Motion.Tempo.quick))) { scroller.scrollTo(id) }
-            }
             }
             }
             .accessibilityElement(children: .contain)
@@ -1835,6 +2099,21 @@ struct SpaceFrameSidebar: View {
     /// A card's row: click to show, double-click to name it, drag to move it (and every picked row
     /// with it) in the list, into a folder or workspace, or onto the tiles. The line marks where it
     /// would land; nothing moves until it's let go.
+    /// A card's row under the layout on screen: its own card, or a pinned one it uses (a pin at its
+    /// end). Click: that tile in front. Its ✕ closes as § Closing; a pinned one only leaves the layout.
+    private func layoutCardRow(_ row: SpaceFrame.Row, in layout: String) -> some View {
+        SpaceSidebarRow(row: row, indent: true, picked: false, glyphs: nil,
+                        close: { frame.close(row.id) },
+                        pause: { row.muted ? frame.setMuted(row.id, false) : frame.pause(row.id) }) {
+            frame.showInLayout(layout, card: row.id)
+        }
+        .marks(reference: row.pinned, layouts: [], open: nil)
+        .id("layout:" + layout + ":" + row.id)
+        .contextMenu { singleMenu(row, inLayout: layout) }
+        .opacity(frame.isDragging(row.id) ? 0.4 : 1)
+        .onDrag { frame.beginDrag(row.id) }
+    }
+
     private func cardRow(_ row: SpaceFrame.Row, indent: Bool, list: SpaceCardMarks.List, index: Int,
                          count: Int) -> some View {
         let editing = renamingCard == row.id
@@ -1848,6 +2127,8 @@ struct SpaceFrameSidebar: View {
                                    renamingCard = nil
                                    if let new { frame.renameCard(row.id, to: new) }
                                }) { frame.click(row.id) }
+            .marks(reference: false, layouts: row.pinned ? row.layouts : [],
+                   open: { frame.showInLayout($0, card: row.id) })
             .id(row.id)
             .contextMenu { menu(for: row) }
             .overlay(alignment: .top) {
@@ -1877,11 +2158,25 @@ struct SpaceFrameSidebar: View {
     }
 
     @ViewBuilder
-    private func singleMenu(_ row: SpaceFrame.Row) -> some View {
-        Button(row.pinned ? "Unpin" : "Pin") { frame.setPinned(row.id, !row.pinned) }
+    private func singleMenu(_ row: SpaceFrame.Row, inLayout: String? = nil) -> some View {
+        if row.pinned && row.layouts.count > 1 {
+            // Only a pinned card can be in two layouts (§ Cards in layouts).
+            Button("Unpin (used in \(ListFormatter.localizedString(byJoining: row.layouts)))") {}.disabled(true)
+        } else {
+            Button(row.pinned ? "Unpin" : "Pin") { frame.setPinned(row.id, !row.pinned) }
+        }
         Button(row.favorite ? "Remove from Favourites" : "Add to Favourites") { frame.setFavorite(row.id, !row.favorite) }
-        ForEach(frame.layouts(holding: row.id), id: \.self) { name in
+        ForEach(frame.layouts(holding: row.id).filter { $0 != inLayout }, id: \.self) { name in
             Button("Show in \u{201C}\(name)\u{201D}") { frame.showInLayout(name, card: row.id) }
+        }
+        let others = frame.layouts(notHolding: row.id)
+        if !others.isEmpty {
+            Menu("Add to Layout") {
+                ForEach(others, id: \.self) { name in Button(name) { frame.addToWorkspace(row.id, name) } }
+            }
+        }
+        if inLayout != nil, !row.pinned {
+            Button(frame.isSpace ? "Move to Today" : "Move to Cards") { frame.moveToList([row.id]) }
         }
         Button("Open in a Tile Beside") { frame.tileBeside(row.id) }
         Divider()
@@ -1902,10 +2197,15 @@ struct SpaceFrameSidebar: View {
             }
         }
         // A pinned card's Close takes it off the screen and leaves it pinned; Unpin is above. Not
-        // offered for a pinned card that's already off the screen: there's nothing to close.
+        // offered for a pinned card that's already off the screen: there's nothing to close. Under a
+        // layout, a pinned card's is Remove from that layout.
         if row.closable {
             Divider()
-            Button("Close") { frame.close(row.id) }
+            if let inLayout, row.pinned {
+                Button("Remove from \u{201C}\(inLayout)\u{201D}") { frame.close(row.id) }
+            } else {
+                Button("Close") { frame.close(row.id) }
+            }
         }
     }
 
@@ -2200,6 +2500,11 @@ struct SpaceSidebarRow: View {
     var closable = true
     var glyphs: Namespace.ID?
     var cardID: String?
+    /// A pinned card under a layout: a pin at its end (§ Cards in layouts).
+    var reference = false
+    /// A pinned card's layouts, as a mark with a count; `openLayout` goes to one.
+    var layoutNames: [String] = []
+    var openLayout: ((String) -> Void)?
     let tap: () -> Void
     @State private var hover = false
     @Environment(\.sidebarMetrics) private var metrics
@@ -2307,9 +2612,48 @@ struct SpaceSidebarRow: View {
         .accessibilityAction(named: "Close") { if hasCloseSlot { close?() } }
     }
 
+    /// The pin and layout marks (§ Cards in layouts).
+    func marks(reference: Bool, layouts: [String], open: ((String) -> Void)?) -> Self {
+        var copy = self
+        copy.reference = reference
+        copy.layoutNames = layouts
+        copy.openLayout = open
+        return copy
+    }
+
+    private var layoutMark: some View {
+        HStack(spacing: 2) {
+            Image(systemName: "rectangle.split.2x1").font(.system(size: 9.5))
+            if layoutNames.count > 1 { Text("\(layoutNames.count)").font(.system(size: metrics.font - 2)).monospacedDigit() }
+        }
+        .foregroundStyle(.tertiary)
+        .frame(minWidth: 18, minHeight: 18)
+        .contentShape(Rectangle())
+    }
+
     /// Count (or a folder's + on hover), speaker, ✕ — each in a slot of its own fixed width.
     @ViewBuilder
     private var trailingControls: some View {
+        if reference {
+            Image(systemName: "pin.fill").font(.system(size: 8.5)).foregroundStyle(.tertiary)
+                .frame(width: 14, height: 18)
+                .help("Pinned: used in more than one place")
+        }
+        if let openLayout, let first = layoutNames.first {
+            if layoutNames.count == 1 {
+                Button { openLayout(first) } label: { layoutMark }
+                    .buttonStyle(.plain)
+                    .help("In \u{201C}\(first)\u{201D}")
+            } else {
+                Menu {
+                    ForEach(layoutNames, id: \.self) { name in
+                        Button("Show in \u{201C}\(name)\u{201D}") { openLayout(name) }
+                    }
+                } label: { layoutMark }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .help("In \(ListFormatter.localizedString(byJoining: layoutNames))")
+            }
+        }
         if addMenu != nil || trailing != nil {
             ZStack {
                 if let addMenu, hover {

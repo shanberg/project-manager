@@ -92,6 +92,9 @@ final class CanvasSatelliteDock: NSObject {
     private let card = CanvasDockCard()
     private var flyoutKey: String?
     private var hideFlyout: DispatchWorkItem?
+    /// Counts the flyout's comings and goings, so a fade out that a new hover has overtaken leaves the
+    /// flyout up rather than ordering it out from under the pointer.
+    private var flyoutShowings = 0
     /// Menus open while the flyout is up (`flyoutHolds`).
     private var menusOpen = 0
     private var refreshQueued = false
@@ -115,7 +118,12 @@ final class CanvasSatelliteDock: NSObject {
 
     /// Satellites have come or gone, or changed what they show: rebuilt on the next turn, once for any
     /// number of asks in this one.
+    /// Off in test harnesses, which drive satellites with no dock: its rebuild reads the real spaces
+    /// and projects.
+    static var isEnabled = true
+
     func refresh() {
+        guard Self.isEnabled else { return }
         _ = audioWatch
         guard !refreshQueued else { return }
         refreshQueued = true
@@ -828,8 +836,24 @@ final class CanvasSatelliteDock: NSObject {
         // Its top at the mark's, unless that would run it off the bottom of the screen.
         let y = max(markOnScreen.maxY - size.height + 2, visible.minY + Self.margin)
         let origin = NSPoint(x: x, y: min(y, visible.maxY - size.height).rounded())
-        flyout.setFrame(NSRect(origin: origin, size: size), display: true)
+        let frame = NSRect(origin: origin, size: size)
+        flyoutShowings += 1
+        // Moving from mark to mark, the flyout that is up just goes to the new one. Coming up, it fades
+        // in and drifts 4 points out from the dock — the side it opens on — as a menu does from its
+        // title; under Reduce Motion it only fades.
+        guard !flyout.isVisible || flyout.alphaValue < 1 else {
+            return flyout.setFrame(frame, display: true)
+        }
+        let drift: CGFloat = Motion.isReduced ? 0 : (x >= right ? -4 : 4)
+        if !flyout.isVisible { flyout.alphaValue = 0 }
+        flyout.setFrame(frame.offsetBy(dx: drift, dy: 0), display: true)
         flyout.orderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Motion.Tempo.quick  // motion: drift guarded above
+            context.timingFunction = Motion.Curve.out
+            flyout.animator().alphaValue = 1
+            if drift != 0 { flyout.animator().setFrame(frame, display: true) }
+        }
     }
 
     /// The pointer has left. Not while the card has the keyboard: you are working in it, wherever the
@@ -866,7 +890,21 @@ final class CanvasSatelliteDock: NSObject {
         CanvasFocusHint.shared.hide()
         CanvasWindowGhost.shared.end()
         CanvasDockTip.shared.hide()
-        flyout?.orderOut(nil)
+        if let flyout, flyout.isVisible {
+            // Out more quietly than it came in. A hover arriving during the fade takes the flyout over.
+            let showing = flyoutShowings
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Motion.Tempo.exit  // motion: fade-only
+                context.timingFunction = Motion.Curve.exit
+                flyout.animator().alphaValue = 0
+            } completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.flyoutShowings == showing else { return }
+                    flyout.orderOut(nil)
+                    flyout.alphaValue = 1
+                }
+            }
+        }
         flyoutKey = nil
         menusOpen = 0
         card.release()
@@ -1700,8 +1738,20 @@ final class CanvasFocusHint {
         }
     }
 
+    /// Gone as quietly as it came: the ring fades rather than blinking out.
     func hide() {
-        panel?.orderOut(nil)
+        guard let panel, panel.isVisible else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Motion.Tempo.exit  // motion: fade-only
+            context.timingFunction = Motion.Curve.exit
+            panel.animator().alphaValue = 0
+        } completionHandler: { [weak panel] in
+            MainActor.assumeIsolated {
+                // Not if it was shown again meanwhile, which put it back at full strength.
+                guard let panel, panel.alphaValue == 0 else { return }
+                panel.orderOut(nil)
+            }
+        }
     }
 
     private func makePanel() -> NSPanel {
@@ -1819,4 +1869,21 @@ extension CanvasSatelliteDock: NSWindowDelegate {
         guard let flyout, flyout.isVisible else { return }
         if !flyout.frame.contains(NSEvent.mouseLocation) { closeFlyout() }
     }
+}
+
+/// A view that says when the pointer comes over it and goes, wherever in it — the dock's, for what it
+/// shows on hover.
+@MainActor
+final class CanvasHoverView: NSView {
+    var onHover: (Bool) -> Void = { _ in }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHover(true) }
+    override func mouseExited(with event: NSEvent) { onHover(false) }
 }

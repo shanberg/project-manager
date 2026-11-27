@@ -730,6 +730,31 @@ extension CanvasBoardView {
         undo.setActionName(name)
     }
 
+    /// A close's Undo from its toast: `before` back, if the arrangement up is still the one the close
+    /// left (`after`). False otherwise, and nothing changes. Not an undo step of its own: the cards
+    /// coming back are.
+    func putBack(_ before: CanvasTileSession, ifStill after: CanvasTileSession?) -> Bool {
+        guard let now = tiling, let after, Self.sameArrangement(now, after) else { return false }
+        var restored = before
+        restored.area = now.area
+        restored.restoreVisible = now.restoreVisible
+        restored.restoreZoom = now.restoreZoom
+        tiling = restored
+        let back = Set(restored.ids).subtracting(now.cards)
+        if !back.isEmpty { selection = back }
+        setLayout(restored.layout, animated: false)
+        onTilingChanged?()
+        announceTiling()
+        return true
+    }
+
+    /// Close cards from a tab's ✕ or the strip's Close: as a browser's tab under a frame, which
+    /// `closesCards` answers; out of the layout on a board without one.
+    func closeCards(_ ids: [String]) {
+        if let closesCards { return closesCards(ids) }
+        closeInTiling(ids)
+    }
+
     /// Whether two sessions are the same arrangement, whatever window they were measured for.
     static func sameArrangement(_ a: CanvasTileSession, _ b: CanvasTileSession) -> Bool {
         var a = a
@@ -1698,13 +1723,34 @@ extension CanvasBoardView {
         guard !isPicking else { return }
         // **Nor mid-crossing.** The board is somewhere between two zooms while it flies into or out of a
         // workspace (`CanvasScrollView.fly`), so `tileableRect` measured now describes a window nobody
-        // is looking at — and re-laying the tiles into it would retarget every card in mid-air. The
-        // flight lands at the zoom the tiles were measured for, which is the answer this would be
-        // looking for anyway.
+        // is looking at — and re-laying the tiles into it would retarget every card in mid-air.
+        //
+        // **Declined, not dropped.** The flight lands at the zoom the tiles were measured for, but not
+        // in the window they were measured in if the window changed under it — and a window opening or
+        // coming forward is exactly when it does: the window settling its frame, a sidebar sliding, the
+        // titlebar re-measured, all inside the 0.42s a crossing into a workspace takes. Nothing resizes
+        // again after that, so the tiles kept the region measured before the flight and the big tile ran
+        // off the window's edge until the next resize. The landing asks again — see
+        // `retileIfTheWindowChangedInFlight`.
         guard scrollView?.canvasScroll?.isFlying != true else { return }
-        session.area = tileableRect
-        tiling = session
-        setLayout(session.layout, animated: false)
+        FrameMeter.span("retile") {
+            session.area = tileableRect
+            tiling = session
+            setLayout(session.layout, animated: false)
+        }
+    }
+
+    /// A flight has just landed: lay the tiles out again if the window they fill changed while it ran.
+    ///
+    /// The other half of the mid-crossing guard in `retileForWindowSize`, which turns away every resize
+    /// that arrives while the board is flying. Asked of the window rather than remembered from the
+    /// resizes that were turned away, because not everything that moves the tiles' region posts one —
+    /// a safe-area change mid-flight arrives as `coveredRegionChanged`, a titlebar as nothing at all.
+    /// A no-op when the flight landed where the tiles were measured for, which is nearly always.
+    func retileIfTheWindowChangedInFlight() {
+        guard let session = tiling, !isPicking, !visibleRect.isEmpty,
+              CanvasTiling.needsRetile(laidOutIn: session.area, toFill: tileableRect) else { return }
+        retileForWindowSize()
     }
 
     // MARK: Frames

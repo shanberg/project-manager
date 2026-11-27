@@ -83,6 +83,10 @@ final class PMStore {
     /// Every standing pick that still resolves in this read: which older task was picked up into which
     /// sitting (docs/sessions.md D2). Each task also carries its latest one as `Todo.picked`.
     private(set) var picks: [TaskPick] = []
+    /// Every line of every task tree that has gone stale — open, undated, and untouched for three weeks
+    /// (`TaskStaleness`, docs/stale-tasks.md) — by `TaskStaleness.key`. Worked out once per load, since
+    /// a card asks of every pile row on every draw.
+    private(set) var staleLines: Set<String> = []
     /// What each distinct wait target on this project's tasks turns out to name, resolved once per
     /// load rather than once per row.
     ///
@@ -266,6 +270,7 @@ final class PMStore {
         ("textureStyle", { $0.textureStyle }),
         ("todos", { $0.todos }),
         ("picks", { $0.picks }),
+        ("staleLines", { $0.staleLines }),
         ("waitTargets", { $0.waitTargets }),
         ("focusedKey", { $0.focusedKey as Any }),
         ("lastEditedAt", { $0.lastEditedAt as Any }),
@@ -374,6 +379,25 @@ final class PMStore {
     /// app's bookkeeping that follows the notes (`ProjectLinksSync`). Unset wherever there is no app.
     static var onNotesRead: ((_ notesPath: String, _ projectPath: String) -> Void)?
 
+    /// Told the files a write of this store's has just changed, before the re-read it asks for — so the
+    /// file watch doesn't take the app's own write for somebody else's (`ConfigWatcher.adoptOwnWrite`).
+    static var onOwnWrite: ((_ paths: [String]) -> Void)?
+
+    /// The files this store's project is read from: the notes, and the pick log beside them.
+    var watchedPaths: [String] {
+        [notesPath, projectPath.map { PickLog.logPath(projectPath: $0) }].compactMap { $0 }
+    }
+
+    /// Set a published property only when the value is new.
+    ///
+    /// `@Observable` doesn't compare: every assignment invalidates every view that read the property,
+    /// equal or not. A reload re-publishes the whole project, and most reloads change one task or
+    /// none — so without this, every tick repainted every surface showing the project, and woke the
+    /// app delegate's pass (menubar, notifications, window titles) for nothing.
+    private func publish<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<PMStore, Value>, _ value: Value) {
+        if self[keyPath: keyPath] != value { self[keyPath: keyPath] = value }
+    }
+
     func reload(then: (@MainActor () -> Void)? = nil) {
         let key = boundKey
         guard let key, let name = PMFiles.projectName(fromKey: key) else {
@@ -391,6 +415,7 @@ final class PMStore {
             textureStyle = .standard
             todos = []
             picks = []
+            staleLines = []
             lastEditedAt = nil
             focusedKey = nil
             heroSnapshot = nil   // no project → nothing to animate from next time
@@ -452,22 +477,24 @@ final class PMStore {
                     // A different project's board is a different question, and the old answer must not
                     // be read as this one's while the new one is being looked for.
                     if projectChanged { self.hasResolvedCanvasPath = false }
-                    self.projectKey = key
-                    self.projectName = name
-                    self.notesPath = path
-                    self.projectPath = projectPath
-                    self.notes = output.notes
-                    self.icon = icon
-                    self.color = color
-                    self.texture = texture
-                    self.textureStyle = textureStyle
-                    self.todos = output.todos
-                    self.picks = output.picks
+                    self.publish(\.projectKey, key)
+                    self.publish(\.projectName, name)
+                    self.publish(\.notesPath, path)
+                    self.publish(\.projectPath, projectPath)
+                    self.publish(\.notes, output.notes)
+                    self.publish(\.icon, icon)
+                    self.publish(\.color, color)
+                    self.publish(\.texture, texture)
+                    self.publish(\.textureStyle, textureStyle)
+                    self.publish(\.todos, output.todos)
+                    self.publish(\.picks, output.picks)
+                    let stale = TaskStaleness.staleLines(in: output.todos)
+                    if stale != self.staleLines { self.staleLines = stale }
                     self.resolveWaits()
-                    self.lastEditedAt = lastEdited
-                    self.focusedKey = output.focusedKey
-                    self.errorMessage = nil
-                    self.hasLoaded = true
+                    self.publish(\.lastEditedAt, lastEdited)
+                    self.publish(\.focusedKey, output.focusedKey)
+                    self.publish(\.errorMessage, nil)
+                    self.publish(\.hasLoaded, true)
                     self.refreshCanvasPath(projectPath: projectPath)
                     PMStore.onNotesRead?(path, projectPath)
                     let newHero = self.makeHeroSnapshot(output.todos)
@@ -689,7 +716,13 @@ final class PMStore {
                                     name: picks.isEmpty ? nil : stepName)
                 Task { @MainActor in self?.recordUndo(step) }
             }
-            Task { @MainActor in self?.reload(then: then) }
+            // Only a write that happened is adopted: one that changed nothing left no date to adopt.
+            let written = changed || !picks.isEmpty
+                ? handle.map { [$0.notesPath, PickLog.logPath(projectPath: $0.projectPath)] } ?? [] : []
+            Task { @MainActor in
+                if !written.isEmpty { PMStore.onOwnWrite?(written) }
+                self?.reload(then: then)
+            }
         }
     }
 
@@ -766,7 +799,9 @@ final class PMStore {
                     Task { @MainActor in self?.noteWriteFailure(message) }
                 }
             }
+            let written = [step.document?.notesPath, projectPath.map { PickLog.logPath(projectPath: $0) }].compactMap { $0 }
             Task { @MainActor in
+                PMStore.onOwnWrite?(written)
                 guard let self else { return }
                 if !self[keyPath: source].isEmpty { self[keyPath: source].removeLast() }
                 if banked != nil || !appended.isEmpty {
@@ -841,6 +876,20 @@ final class PMStore {
             try PMContract.perform(.taskPick, Self.references(todos, project: project)).sidecar ?? []
         }
     }
+
+    /// Keep: say each task's tree is still meant, without working on it now — the catch-up review's
+    /// verb (docs/stale-tasks.md). It counts as touched again and leaves the pile of stale work; the
+    /// notes aren't written and nothing lands in today's Picked up. One step.
+    func keep(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
+        guard !todos.isEmpty else { then?(); return }
+        mutating(named: "Keep", then: then) { project in
+            try PMContract.perform(.taskKeep, Self.references(todos, project: project)).sidecar ?? []
+        }
+    }
+
+    /// The trees that have gone stale, by their roots, the longest-forgotten first — what a catch-up
+    /// review goes through.
+    var staleRoots: [Todo] { TaskStaleness.staleRoots(in: todos) }
 
     /// Put Back: take each task's latest pick back. The tasks aren't touched. One step.
     func putBack(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {

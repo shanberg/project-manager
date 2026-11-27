@@ -476,6 +476,8 @@ final class CanvasScrollView: NSScrollView {
         // wheel.
         board.magnificationChanged()
         board.settlePageBudget()
+        // A resize that came in while this was flying was turned away (`retileForWindowSize`).
+        board.retileIfTheWindowChangedInFlight()
     }
 
     /// The flight as a layer transform.
@@ -574,7 +576,14 @@ final class CanvasScrollView: NSScrollView {
             MainActor.assumeIsolated {
                 guard let self, self.travelling == travelledFrom else { return }
                 self.travelling = nil
+                // Landed by the board's reckoning as well as the compositor's. `isFlying` reads this
+                // against the clock, and a timer can fire a hair before the instant it was set for —
+                // which would have the retile below decline as if still in the air.
+                self.transformingUntil = nil
                 self.refitPanRoom()
+                // A resize that came in while this was flying was turned away (`retileForWindowSize`).
+                // Before the cards are built, so they are built for the tiles' real places.
+                self.board.retileIfTheWindowChangedInFlight()
                 self.board.refreshVisibleCards()
                 self.board.landPageBudget()
             }

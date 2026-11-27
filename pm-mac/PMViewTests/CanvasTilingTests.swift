@@ -1384,6 +1384,30 @@ final class CanvasTilingPlanTests: XCTestCase {
         XCTAssertNil(CanvasTiling.strayMove(from: nil, to: standing))
     }
 
+    // MARK: Retiling after a flight
+
+    private let wide = CanvasRect(x: 0, y: 0, width: 1200, height: 600)
+
+    /// A resize that lands mid-crossing is turned away (`retileForWindowSize`), and the landing asks
+    /// whether the tiles still fill the window. These are the answers it gets.
+    func testTilesThatStillFillTheWindowAreLeftAlone() {
+        XCTAssertFalse(CanvasTiling.needsRetile(laidOutIn: wide, toFill: wide))
+        // A flight lands at its centre through a rounding; that is not a resize.
+        let rounded = CanvasRect(x: 0.2, y: -0.3, width: 1200.1, height: 600.2)
+        XCTAssertFalse(CanvasTiling.needsRetile(laidOutIn: wide, toFill: rounded))
+    }
+
+    func testAWindowThatGrewWhileFlyingIsRetiled() {
+        let grown = CanvasRect(x: 0, y: 0, width: 1440, height: 600)
+        XCTAssertTrue(CanvasTiling.needsRetile(laidOutIn: wide, toFill: grown))
+    }
+
+    /// A sidebar opening keeps the window's size and moves the tiles' leading edge in.
+    func testAnEdgeThatMovedIsRetiledEvenAtTheSameSize() {
+        let shifted = CanvasRect(x: 240, y: 0, width: 1200, height: 600)
+        XCTAssertTrue(CanvasTiling.needsRetile(laidOutIn: wide, toFill: shifted))
+    }
+
     // MARK: Summary
 
     func testTheSummaryCountsCardsAndNotFrames() {

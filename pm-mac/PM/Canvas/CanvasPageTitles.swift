@@ -66,6 +66,7 @@ enum CanvasPageTitles {
         // a card you look at every day from being pruned in favour of one you opened once.
         all[key] = try? JSONEncoder().encode(Entry(title: trimmed, seen: Date()))
         UserDefaults.standard.set(prune(all), forKey: defaultsKey)
+        cache.invalidate()
     }
 
     /// Whether this title says anything the card isn't already saying.
@@ -122,9 +123,12 @@ enum CanvasPageTitles {
 
     private static let defaultsKey = "PMCanvasPageTitles"
 
-    private static func stored() -> [String: Data] {
+    /// Kept between reads — see `DefaultsCache`. Every card title on every board comes through here.
+    private static let cache = DefaultsCache {
         UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: Data] ?? [:]
     }
+
+    private static func stored() -> [String: Data] { cache.current }
 
     private static func decode(_ data: Data) -> Entry? {
         try? JSONDecoder().decode(Entry.self, from: data)

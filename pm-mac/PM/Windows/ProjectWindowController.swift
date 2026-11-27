@@ -609,6 +609,20 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         ProjectTabMemory.remember(split.tabs, for: projectKey)
     }
 
+    /// `then` with this window's frame (its sidebar) once its board has loaded and the frame is up —
+    /// a window just opened builds its board a turn or more later. After about a second with none
+    /// (a project with no board yet), `otherwise`.
+    func whenFramed(tries: Int = 20, otherwise: (() -> Void)? = nil, _ then: @escaping (SpaceFrame) -> Void) {
+        if let frame = split.spaceFrame { return then(frame) }
+        guard tries > 0 else {
+            Log.write("window: no frame came up for \(projectKey ?? "a file")")
+            return otherwise?() ?? ()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.whenFramed(tries: tries - 1, otherwise: otherwise, then)
+        }
+    }
+
     /// A workspace up for a page the quick bar carried in — see
     /// `ProjectSplitViewController.goToWorkspaceForIncomingPage`.
     func showWorkspaceForIncomingPage() {

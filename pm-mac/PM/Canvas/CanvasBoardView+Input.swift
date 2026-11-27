@@ -151,7 +151,7 @@ extension CanvasBoardView {
             if let tile = newTabButton(at: where_) { return popUpNewTabMenu(for: tile) }
             if let closing = tabClose(at: where_) {
                 hoveredTab = nil
-                return closeInTiling([closing])
+                return closeCards([closing])
             }
             let chip = tabChip(at: where_)
             let id = chip?.card ?? owner
@@ -558,7 +558,11 @@ extension CanvasBoardView {
                 overlay.needsDisplay = true
                 previewDrop(of: id, nil, pulling: pulling)
                 let frame = satelliteFrame(for: base[id])
-                if pulling { moveToWindow(tabDragGroup.count > 1 ? tabDragGroup : [id], showing: id, frame: frame) }
+                // Over one of this board's satellites, into it as tabs; anywhere else, a window there.
+                if let into = satellite(atScreenPoint: Self.pointerOnScreen()) {
+                    moveToSatellite(pulling ? (tabDragGroup.count > 1 ? tabDragGroup : [id]) : tileCards(of: id),
+                                    showing: id, into: into)
+                } else if pulling { moveToWindow(tabDragGroup.count > 1 ? tabDragGroup : [id], showing: id, frame: frame) }
                 else { moveTileToWindow(id, frame: frame) }
                 tabDragGroup = []
                 break
@@ -1010,6 +1014,7 @@ extension CanvasBoardView {
                 refreshTileHandles()
                 tileGripView.needsDisplay = true
             }
+            anticipateTileGrip(at: convert(event.locationInWindow, from: nil), time: event.timestamp)
             let tab = gesture == nil ? tabChip(at: where_)?.card : nil
             let next = tab.map { (card: $0, onClose: tabClose(at: where_) == $0) }
             if next?.card != hoveredTab?.card || next?.onClose != hoveredTab?.onClose { hoveredTab = next }
@@ -1050,6 +1055,11 @@ extension CanvasBoardView {
         hoveredTab = nil
         hoveredNewTab = nil
         hoveredStrip = nil
+        pointerTrail = []
+        if gripAnticipated != nil {
+            gripAnticipated = nil
+            refreshTileHandles()
+        }
         if gripTile != nil, gesture == nil {
             gripTile = nil
             refreshTileHandles()

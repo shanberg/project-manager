@@ -1,4 +1,5 @@
 import Foundation
+import PmLib
 
 /// The workspaces you named and kept, per board.
 ///
@@ -40,11 +41,18 @@ import Foundation
 enum CanvasWorkspaces {
     /// Everything saved for this board.
     static func of(_ url: URL) -> [String: CanvasViewState.Tiling] {
-        guard let data = stored()[key(url)],
-              let all = try? JSONDecoder().decode([String: CanvasViewState.Tiling].self, from: data)
-        else { return [:] }
+        let key = key(url)
+        if let kept = decoded.current.withLock({ $0[key] }) { return kept }
+        let all = stored()[key].flatMap {
+            try? JSONDecoder().decode([String: CanvasViewState.Tiling].self, from: $0)
+        } ?? [:]
+        decoded.current.withLock { $0[key] = all }
         return all
     }
+
+    /// Each board's workspaces as last decoded, thrown away with any change to the defaults. The Spaces
+    /// sidebar asks once per card row per layout pass, which in a window resize is every frame.
+    private static let decoded = DefaultsCache { LockedBox<[String: [String: CanvasViewState.Tiling]]>([:]) }
 
     /// The names, in the order a menu should list them. Alphabetical rather than by when they were
     /// made: a dictionary has no order to preserve, and a list you look things up in wants the order
@@ -120,6 +128,23 @@ enum CanvasWorkspaces {
         of(url)[name] != nil
     }
 
+    /// Cards out of a saved workspace that isn't up (one that is goes through its board, which keeps
+    /// it saved). The workspace goes when none of its cards are left. Returns whether it is left.
+    @discardableResult
+    static func removing(_ ids: Set<String>, from name: String, for url: URL) -> Bool {
+        guard let saved = tiling(named: name, of: url) else { return false }
+        guard !Set(saved.ids).isDisjoint(with: ids) else { return true }
+        let room = CanvasRect(x: 0, y: 0, width: 1600, height: 1000)
+        guard let session = CanvasTileSession(restoring: saved, keeping: { !ids.contains($0) }, area: room,
+                                              restoreVisible: room, restoreZoom: 1),
+              !session.cards.isEmpty else {
+            remove(name, for: url)
+            return false
+        }
+        save(session.memory, as: name, for: url)
+        return true
+    }
+
     static func remove(_ name: String, for url: URL) {
         var all = of(url)
         guard all.removeValue(forKey: name) != nil else { return }
@@ -130,13 +155,17 @@ enum CanvasWorkspaces {
         var rows = stored()
         rows[key(url)] = all.isEmpty ? nil : try? JSONEncoder().encode(all)
         UserDefaults.standard.set(rows, forKey: defaultsKey)
+        rowsCache.invalidate()
+        decoded.invalidate()
     }
 
     private static let defaultsKey = "PMCanvasWorkspaces"
 
-    private static func stored() -> [String: Data] {
+    private static let rowsCache = DefaultsCache {
         UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: Data] ?? [:]
     }
+
+    private static func stored() -> [String: Data] { rowsCache.current }
 
     /// The path, standardized — the same key `CanvasViewMemory` uses, so one board is one row in both.
     private static func key(_ url: URL) -> String { url.standardizedFileURL.path }

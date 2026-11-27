@@ -58,7 +58,7 @@ final class HistoryMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         switch item.action {
         case #selector(reopenClosed(_:)): return !CanvasHistory.closed.isEmpty
         case #selector(clear(_:)): return !CanvasHistory.visits.isEmpty
-        case #selector(showArchive(_:)): return Spaces.shared.frontSpace != nil
+        case #selector(showArchive(_:)): return Self.frontFrame != nil
         default: return true
         }
     }
@@ -66,15 +66,30 @@ final class HistoryMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     @objc func reopenClosed(_ sender: Any?) {
         guard let closed = CanvasHistory.takeLastClosed() else { return NSSound.beep() }
         if closed.spaceID != nil { return Spaces.shared.reopen(closed) }
+        // A project's board under its frame: put back as a space's is (`SpaceFrame.reopen`).
+        if let window = SpaceArchive.window(onCanvas: closed.canvas), let frame = window.spaceFrame {
+            window.window?.makeKeyAndOrderFront(nil)
+            return frame.reopen(closed)
+        }
+        // Its project's window closed: opened, then the card put back once its frame is up.
+        if let key = closed.projectKey {
+            let window = WindowManager.shared.open(projectKey: key)
+            return window.whenFramed { $0.reopen(closed) }
+        }
         guard ProjectWindowController.reopen(closed) else { return NSSound.beep() }
+    }
+
+    /// The front window's frame — a space's or a project's sidebar.
+    private static var frontFrame: SpaceFrame? {
+        NSApp.orderedWindows.lazy.compactMap { $0.windowController as? ProjectWindowController }.first?.spaceFrame
     }
 
     @objc func showAll(_ sender: Any?) { HistoryWindow.shared.show() }
 
-    /// The front space window's Archived Cards (`SpaceArchive`).
+    /// The front window's Archived Cards (`SpaceArchive`), a space's or a project's.
     @objc func showArchive(_ sender: Any?) {
-        guard let space = Spaces.shared.frontSpace else { return NSSound.beep() }
-        SpaceArchive.present(spaceID: space)
+        guard let frame = Self.frontFrame else { return NSSound.beep() }
+        SpaceArchive.present(frame)
     }
 
     @objc private func open(_ sender: NSMenuItem) {

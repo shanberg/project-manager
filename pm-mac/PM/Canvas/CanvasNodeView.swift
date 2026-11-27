@@ -861,6 +861,22 @@ class CanvasNodeView: NSView {
     /// The content that is out, while it is.
     private(set) var lentContent: NSView?
 
+    /// What the card's slot shows while its content is out. See `CanvasSatelliteEmpty`.
+    var satelliteEmpty: CanvasSatelliteEmpty? { lentTo == nil ? nil : clip.subviews.first as? CanvasSatelliteEmpty }
+
+    /// The row of a reorderable list under a point in the satellite's window, while the content is
+    /// out there — `linkRow(at:)`'s answer for a card with no board around it.
+    func lentLinkRow(atWindowPoint point: NSPoint) -> (list: UUID, slot: Int)? {
+        guard lentLink(atWindowPoint: point) != nil, let space = linkSpace else { return nil }
+        return linkZones.row(at: space.convert(point, from: nil))
+    }
+
+    /// A reorderable list's rows, in order, in the satellite's window's coordinates.
+    func lentLinkRows(of list: UUID) -> [NSRect] {
+        guard lentTo != nil, let space = linkSpace, let rows = linkZones.list(list)?.ordered else { return [] }
+        return rows.map { space.convert($0, to: nil) }
+    }
+
     /// The card's content, wherever it is — in the card, or out in a satellite.
     var cardContent: NSView? { lentContent ?? clip.subviews.first }
 
@@ -900,6 +916,7 @@ class CanvasNodeView: NSView {
         guard lentTo == nil, let content = clip.subviews.first else { return nil }
         lentTo = satellite
         lentContent = content
+        titleIsElsewhere(true)
         content.removeFromSuperview()
         let away = CanvasSatelliteEmpty(card: self)
         away.translatesAutoresizingMaskIntoConstraints = false
@@ -913,6 +930,11 @@ class CanvasNodeView: NSView {
         return lentContent
     }
 
+    /// Told when the card's content goes out to a satellite and when it comes back. The satellite's
+    /// title row names the card (`CanvasSatelliteWindow`), so a card that draws its own name at its top
+    /// stops while it is out there, rather than say it twice, one above the other.
+    func titleIsElsewhere(_ elsewhere: Bool) {}
+
     /// What the content was last put in with, so content back from a satellite goes back the same.
     private var contentInsets = NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1)
 
@@ -923,6 +945,7 @@ class CanvasNodeView: NSView {
         lentTo = nil
         lentContent = nil
         if wasEngaged { engage(false) }
+        titleIsElsewhere(false)
         content.removeFromSuperview()
         setContent(content, insets: contentInsets)
         // Back at the board's zoom, whatever that is.

@@ -259,7 +259,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // Open tasks grouped by context (custom rows). Click focuses; ⌥-click completes; the focused
         // row completes on click. Capped at `menuTaskCap` rows — the rest live in the window — so a
         // large project can't blow out the menu.
-        let open = store.openTodos
+        // Stale trees stay out of the list (docs/stale-tasks.md): a glance at the menu bar shouldn't be
+        // a month of leftovers. They're counted below, with the way through them.
+        let open = store.openTodos.filter { !store.staleLines.contains(TaskStaleness.key($0)) }
+        let staleTrees = store.staleRoots.count
         var shown = 0
         for (context, todos) in contextGroups() {
             let slice = todos.prefix(max(0, Self.menuTaskCap - shown))
@@ -272,6 +275,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         if open.count > shown {
             menu.addItem(actionItem("Show all \(open.count) tasks…", #selector(showPanel), symbol: "ellipsis"))
+        }
+        if staleTrees > 0 {
+            menu.addItem(actionItem("Catch Up on \(staleTrees) Older \(staleTrees == 1 ? "Task" : "Tasks")…",
+                                    #selector(catchUp), symbol: "checklist"))
         }
 
         // Constant actions inline; less-frequent actions collapsed into submenus (Balanced layout).
@@ -456,7 +463,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func contextGroups() -> [(context: String, todos: [Todo])] {
         var order: [String] = []
         var map: [String: [Todo]] = [:]
-        for t in store.openTodos {
+        for t in store.openTodos where !store.staleLines.contains(TaskStaleness.key(t)) {
             if map[t.context] == nil { order.append(t.context) }
             map[t.context, default: []].append(t)
         }
@@ -613,6 +620,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// to a project and the Waiting list isn't, so there's no state here for the app delegate to
     /// supply and nothing to route.
     @objc private func showWaiting() { WaitingWindowController.shared.show() }
+    @objc private func catchUp() { StaleReviewWindowController.shared.show(for: store) }
     @objc private func quit() { NSApp.terminate(nil) }
 
     // MARK: Launch at Login (SMAppService, macOS 13+)
