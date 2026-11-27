@@ -59,6 +59,23 @@ final class CanvasColorWash: NSView {
 
     private var cached: (key: String, image: CGImage)?
     private var cachedTexture: (key: String, image: CGImage)?
+    /// The ink and appearance the cached texture was made in — a change of either is remade at once.
+    private var cachedLook: String?
+    /// Set for the one draw after the reach has held still, which remakes the texture at its new reach.
+    private var textureSettled = false
+    private var textureSettle: DispatchWorkItem?
+
+    /// Remake the texture once the reach has held still for 0.2s, each change putting it off again.
+    private func settleTextureSoon() {
+        textureSettle?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.textureSettled = true
+            self.needsDisplay = true
+        }
+        textureSettle = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -123,13 +140,22 @@ final class CanvasColorWash: NSView {
         guard dirty.intersects(CGRect(origin: .zero, size: reach)) || inLiveResize else { return }
         let ink = CanvasTexture.ink(for: rgb, dark: dark)
         let key = "\(ink)|\(dark)|\(reach)"
-        if cachedTexture?.key != key, !(inLiveResize && cachedTexture != nil) {
+        let look = "\(ink)|\(dark)"
+        // **A reach that is still moving keeps the last texture**, and the new one is made once it has
+        // held still for a moment. Live resize already did this; a window resized frame by frame from
+        // code (full screen, a tiling's crossing, the sidebar folding) did not, and remade the whole
+        // bitmap on every frame — 10% of a resize sweep (sidebar-7 trace, 2026-11-27).
+        let reachMoving = cachedTexture != nil && cachedLook == look && !textureSettled
+        if reachMoving, cachedTexture?.key != key { settleTextureSoon() }
+        textureSettled = false
+        if cachedTexture?.key != key, !(inLiveResize && cachedTexture != nil), !reachMoving {
             let pixel = CGFloat(texture.style.pixel)
             guard let image = CanvasTexture.image(tile: texture.tile, ink: ink,
                                                   alpha: CanvasTexture.alpha(texture.style, dark: dark),
                                                   pixel: pixel, reach: reach)
             else { return }
             cachedTexture = (key, image)
+            cachedLook = look
         }
         guard let image = cachedTexture?.image else { return }
         let pixel = CGFloat(texture.style.pixel)

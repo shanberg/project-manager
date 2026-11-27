@@ -195,6 +195,11 @@ final class CanvasBoardView: NSView {
     /// The named workspaces holding any of these cards — the contextual menu's Workspaces submenu.
     var workspacesHolding: (Set<String>) -> [String] = { _ in [] }
 
+    /// The last tiling `tileCorners` laid out, and its layout. Every card asks for its corners on every
+    /// layout pass, and each ask used to lay the whole tiling out again: on a resize that was the
+    /// tiling once per card per frame (`CanvasTiling.frames`, ~5% of a resize sweep, 2026-11-27).
+    var tileLayoutMemo: (session: CanvasTileSession, layout: CanvasLayout)?
+
     /// The tiled view that is up, if one is. See `CanvasBoardView+Tiling`.
     var tiling: CanvasTileSession? {
         didSet {

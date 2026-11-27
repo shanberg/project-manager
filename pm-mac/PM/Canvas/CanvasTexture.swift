@@ -183,7 +183,10 @@ enum CanvasTexture {
                 let strength = CanvasColorWash.strength(at: (dx * dx + dy * dy).squareRoot())
                 guard (Double(bayer[(y & 7) * 8 + (x & 7)]) + 0.5) / 64 < strength else { continue }
                 let base = (y * columns + x) * 4
-                pixels.replaceSubrange(base..<base + 4, with: channels)
+                pixels.withUnsafeMutableBufferPointer { out in
+                    out[base] = channels[0]; out[base + 1] = channels[1]
+                    out[base + 2] = channels[2]; out[base + 3] = channels[3]
+                }
             }
         }
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
