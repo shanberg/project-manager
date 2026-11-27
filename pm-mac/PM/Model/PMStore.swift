@@ -270,6 +270,7 @@ final class PMStore {
         ("textureStyle", { $0.textureStyle }),
         ("todos", { $0.todos }),
         ("picks", { $0.picks }),
+        ("staleLines", { $0.staleLines }),
         ("waitTargets", { $0.waitTargets }),
         ("focusedKey", { $0.focusedKey as Any }),
         ("lastEditedAt", { $0.lastEditedAt as Any }),
