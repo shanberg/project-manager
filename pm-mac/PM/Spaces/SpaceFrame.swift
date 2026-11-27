@@ -162,8 +162,12 @@ final class SpaceFrame {
     func refresh() {
         let document = store.document
         let board = self.board
-        let tiled = Set(board?.tiling?.ids ?? [])
-        let front = board?.focusedTile ?? (tiled.count == 1 ? tiled.first : nil)
+        // A canvas posing in the tiles of the layout it takes over from (`poseAsTiling`) isn't tiled:
+        // read as a tiling with no name, it would unlight Board and light that layout's cards for the
+        // frames before it leaves them.
+        let tiledNow = board?.isTiled == true && board?.isPosedAsTiling != true
+        let tiled = tiledNow ? Set(board?.tiling?.ids ?? []) : []
+        let front = (tiledNow ? board?.focusedTile : nil) ?? (tiled.count == 1 ? tiled.first : nil)
         if let front, recentFronts.first != front {
             recentFronts.removeAll { $0 == front }
             recentFronts.insert(front, at: 0)
@@ -187,7 +191,7 @@ final class SpaceFrame {
                     && CanvasWorkspaces.tiling(named: $0, of: canvas)?.ids.contains(card) == true }
         }
         // The layouts and their cards: the one up as its board has it now, the rest as saved.
-        let live = board?.isTiled == true ? board?.workspaceName : nil
+        let live = tiledNow ? board?.workspaceName : nil
         let saved = CanvasWorkspaces.of(canvas)
         let layoutCards: [(name: String, cards: [String])] = CanvasWorkspaces.ordered(of: canvas)
             .filter { $0 != notesWorkspace }.map { name in
@@ -258,10 +262,17 @@ final class SpaceFrame {
         self.pinned = sorted(pinned)
         self.today = sorted(today)
         cardCount = sections.reduce(0) { $0 + $1.items.count }
-        let current = board?.workspaceName
         let selectedTab = split?.tabs.selected.view
+        // The layout that's up: the board's, once it has tiled; until then, the one its tab asked for.
+        //
+        // A layout's tab can show a frame or more before its board tiles — a pane being built, a board
+        // read off main, the first layout of a fresh tab. Read off the board alone, that frame said no
+        // layout was up: Board lit, every layout folded, the new one's cards nowhere, then everything
+        // snapping to where it was going all along. The tab is where the window is going, so the rows
+        // go there with it. A board tiled under no name (a card shown alone) is its own answer.
+        let current: String? = tiledNow ? board?.workspaceName : selectedTab?.workspaceName
         notesShowing = !isSpace && (selectedTab?.isNotesTab == true
-            || (current != nil && current == notesWorkspace && (board?.isTiled ?? false)))
+            || (current != nil && current == notesWorkspace))
         // A web card's tile in a layout's icon wears its site's hue, as its letter badge does.
         func tint(_ id: String) -> LayoutShape.Tint {
             guard case .link(let url)? = document.node(id: id)?.content,
@@ -275,7 +286,7 @@ final class SpaceFrame {
             let tiling = (name == live ? liveTiling : nil) ?? saved[name]
             let cards = layoutCards.first { $0.name == name }?.cards ?? []
             return Workspace(name: name, shape: LayoutShape(tiling, tint: tint),
-                             showing: current == name && (board?.isTiled ?? false),
+                             showing: current == name,
                              rows: cards.compactMap { byID[$0] })
         }
         layoutCardsNow = layoutCards
@@ -290,7 +301,7 @@ final class SpaceFrame {
             autoPinQueued = true
             DispatchQueue.main.async { [weak self] in self?.autoPin(sharing, before: before, now: held) }
         }
-        boardShowing = !(board?.isTiled ?? false) && !notesShowing
+        boardShowing = !tiledNow && current == nil && !notesShowing
         // The page the focused tile is on now, not the address the card was saved with.
         let frontURL: URL? = front.flatMap { id in
             if let live = (board?.nodeViews[id] as? CanvasLinkNodeView)?.liveURL { return live }
@@ -1646,6 +1657,13 @@ struct SpaceFrameSidebar: View {
     /// Favourites moves it between the two (`matchedGeometryEffect`).
     @Namespace private var glyphs
 
+    /// A layout's cards as it comes up: they drop 4 pt out from under its row as they fade in, which
+    /// says they belong to it. Going, they're gone at once: the rows below close up in the same frame,
+    /// and a fade there would be drawn under them. Reduce Motion: a fade.
+    static var unfolding: AnyTransition {
+        Motion.moving(.asymmetric(insertion: .opacity.combined(with: .offset(y: -4)), removal: .identity))
+    }
+
     /// Every card's place in the sidebar. A change to it (closing, Clear, archive, ⌘T, pinning,
     /// favouriting, Move to Space) animates the rows into their new places; anything else, such as the
     /// card in front changing, doesn't. Folding a folder isn't in it: folders snap.
@@ -1727,11 +1745,18 @@ struct SpaceFrameSidebar: View {
                     SpaceSidebarRow(title: "Board", symbol: "rectangle.on.rectangle.angled",
                                     trailing: "\(frame.cardCount)", on: frame.boardShowing, dim: true) { frame.showBoard() }
                     ForEach(Array(frame.workspaces.enumerated()), id: \.element.id) { index, workspace in
-                        workspaceRow(workspace, index: index)
-                        // Only the layout on screen is unfolded (§ Cards in layouts).
-                        if workspace.showing {
-                            ForEach(workspace.rows) { row in layoutCardRow(row, in: workspace.name) }
+                        // A layout and its cards, spaced as the list is, so the cards can unfold as one.
+                        VStack(alignment: .leading, spacing: 2) {
+                            workspaceRow(workspace, index: index)
+                                // Its chip lights at once, as every row's does: a click is answered now.
+                                .transaction { $0.animation = nil }
+                            // Only the layout on screen is unfolded (§ Cards in layouts).
+                            if workspace.showing {
+                                ForEach(workspace.rows) { row in layoutCardRow(row, in: workspace.name) }
+                                    .transition(Self.unfolding)
+                            }
                         }
+                        .animation(Motion.animation(.easeOut(duration: Motion.Tempo.standard)), value: workspace.showing)
                     }
                     group(frame.pinned, pinned: true)
                     ruleMarks(Group { if frame.isSpace { todayRule } else { cardsRule } })

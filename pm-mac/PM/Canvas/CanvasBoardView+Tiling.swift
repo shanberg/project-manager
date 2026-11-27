@@ -312,6 +312,8 @@ extension CanvasBoardView {
         var posed = session
         posed.restoreZoom = Double(scrollView?.magnification ?? 1)
         posed.restoreVisible = canvasRect(visibleRect)
+        // Before the tiling, so whatever `tiling`'s change wakes (the sidebar) already reads a pose.
+        isPosedAsTiling = true
         tiling = posed
         // Held rather than set: `tiling` starts the crossing fading *towards* tiles, and this board is
         // to be found already there. See `CanvasFade.hold`.
