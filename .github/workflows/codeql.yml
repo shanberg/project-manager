@@ -91,10 +91,12 @@ jobs:
         working-directory: pm-swift
         run: swift build
       - name: Build Folio.app (Debug, arm64 only)
+        # Under the CodeQL tracer xcodebuild runs as x86_64, so "My Mac" is x86_64 only;
+        # use the generic destination and pin the architecture instead.
         run: |
           xcodebuild build \
             -project pm-mac/PM.xcodeproj -scheme PM -configuration Debug \
-            -destination 'platform=macOS,arch=arm64' ONLY_ACTIVE_ARCH=YES \
+            -destination 'generic/platform=macOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             COMPILATION_CACHE_ENABLE_CACHING=NO SWIFT_ENABLE_COMPILE_CACHE=NO \
             -skipPackagePluginValidation
