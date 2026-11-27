@@ -46,7 +46,12 @@ final class FrameMeter {
     /// `CanvasBoardView.settlePageBudget` lands 0.75s after it with a pass that can start and stop web
     /// renderers — which is part of what a crossing costs, arrives while you are still looking at it,
     /// and would be invisible to a meter that stopped when the cards did.
-    static func measure(_ label: @autoclosure () -> String, on view: NSView, for seconds: Double = 1.2) {
+    ///
+    /// `movement` is how much of the window is the movement itself, for the frame split and for which
+    /// spans count — 0.35s for a crossing, longer for a journey whose movement is longer (a resize
+    /// sweep is a second of `setFrame`s, and a 0.35s window saw only its first eleven).
+    static func measure(_ label: @autoclosure () -> String, on view: NSView, for seconds: Double = 1.2,
+                        movement: TimeInterval = FrameMeter.movement) {
         guard isEnabled else { return }
         let name = label()
         if let running = current {
@@ -62,7 +67,7 @@ final class FrameMeter {
         guard let window = view.window, window.screen != nil else {
             return Log.write("FRAME \(name): not measured, no screen")
         }
-        let meter = FrameMeter(label: name, seconds: seconds)
+        let meter = FrameMeter(label: name, seconds: seconds, movement: movement)
         current = meter
         meter.start(on: view)
     }
@@ -94,7 +99,7 @@ final class FrameMeter {
     }
 
     private func record(_ name: String, at: CFTimeInterval, _ duration: CFTimeInterval) {
-        guard at - startedAt <= Self.movement else { return }
+        guard at - startedAt <= movement else { return }
         let existing = spans[name] ?? (0, 0)
         spans[name] = (existing.total + duration, existing.count + 1)
     }
@@ -125,9 +130,13 @@ final class FrameMeter {
     /// When each callback ran, and what the display said its refresh interval was at the time.
     fileprivate var ticks: [(at: CFTimeInterval, interval: CFTimeInterval)] = []
 
-    private init(label: String, seconds: Double) {
+    /// How long the movement lasts for this measurement — see `measure(_:on:for:movement:)`.
+    private let movement: TimeInterval
+
+    private init(label: String, seconds: Double, movement: TimeInterval) {
         self.label = label
         self.seconds = seconds
+        self.movement = movement
         ticks.reserveCapacity(Int(seconds * 130) + 8)
     }
 
@@ -183,8 +192,8 @@ final class FrameMeter {
         // is a filter that removes exactly the evidence you are looking for, and it flattered whichever
         // configuration stalled hardest.
         let gaps = zip(ticks, ticks.dropFirst()).map { (at: $0.at - start, span: $1.at - $0.at) }
-        let crossing = gaps.filter { $0.at <= Self.movement }
-        let settle = gaps.filter { $0.at > Self.movement }
+        let crossing = gaps.filter { $0.at <= movement }
+        let settle = gaps.filter { $0.at > movement }
         Log.write("FRAME \(label): \(phase("crossing", crossing, nominal)) | "
             + "\(phase("settle", settle, nominal)) | \(String(format: "%.0fHz", 1 / nominal))")
         Log.write("SPAN  \(label): \(spanReport())")
@@ -193,7 +202,7 @@ final class FrameMeter {
     /// How long the movement itself lasts. `Motion.duration(0.3)` at both ends of a crossing — see
     /// `CanvasBoardView.settleIntoLayout` and `CanvasScrollView.fly` — plus a frame of slack, so a
     /// crossing that lands a little late is not scored against the phase after it.
-    private static let movement: TimeInterval = 0.35
+    static let movement: TimeInterval = 0.35
 
     /// One phase's worth of frames, as a line fragment.
     private func phase(_ name: String, _ gaps: [(at: CFTimeInterval, span: CFTimeInterval)],

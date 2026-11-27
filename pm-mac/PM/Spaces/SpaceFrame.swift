@@ -1667,6 +1667,8 @@ struct SpaceFrameSidebar: View {
     @State private var candidates: [CanvasAddressSuggestions.Candidate] = []
     @State private var fieldWidth: CGFloat = 220
     @State private var ruleHover = false
+    /// **Temporary**, for `CrossingBench`'s sidebar journey: the rows without the fill under them.
+    @AppStorage("PMBenchSidebarNoFill") private var benchNoFill = false
     @State private var sidebarHover = false
     /// The layout whose row's name is being typed into, if one is.
     @State private var renamingWorkspace: String?
@@ -1758,7 +1760,7 @@ struct SpaceFrameSidebar: View {
             ScrollViewReader { scroller in
             ScrollView {
                 ZStack(alignment: .topLeading) {
-                Color.clear.containerRelativeFrame(.vertical)
+                if !benchNoFill { Color.clear.containerRelativeFrame(.vertical) }
                 VStack(alignment: .leading, spacing: 2) {
                     if !frame.isSpace {
                         SpaceSidebarRow(title: "Notes", symbol: "doc.text", on: frame.notesShowing) { frame.showNotes() }
