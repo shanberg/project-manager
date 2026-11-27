@@ -1,0 +1,103 @@
+# CodeQL code scanning (advanced setup). Replaces GitHub's default setup, whose Swift job
+# ran Xcode's autobuild of pm-mac in Release for both x86_64 and arm64 on every push and
+# PR: 30-80 minutes per run, ending in BUILD FAILED, and holding macOS runners that the
+# pm-swift check then queued behind.
+#
+# The Linux languages are cheap and run on every push to main and every PR. The Swift job
+# does an explicit Debug, arm64-only build and runs only when Swift sources or the
+# projects change, plus weekly so new queries still get a pass over unchanged code.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 13 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      swift: ${{ steps.filter.outputs.swift }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # Scheduled and manual runs always scan Swift; so does a push with no usable base.
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ] \
+             || [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "swift=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git diff --name-only "$BASE" HEAD \
+             | grep -qE '\.swift$|(^|/)Package\.(swift|resolved)$|^pm-mac/(PM\.xcodeproj|project\.yml)|^\.github/workflows/codeql\.yml$'; then
+            echo "swift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "swift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, javascript-typescript, python, c-cpp]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
+
+  analyze-swift:
+    name: Analyze (swift)
+    needs: changes
+    if: needs.changes.outputs.swift == 'true'
+    # pm-mac targets macOS 26, so it needs an Xcode 26 image (macos-latest is macos-26 today).
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: swift
+          build-mode: manual
+      - name: Build pm-swift (CLI and PmLib)
+        working-directory: pm-swift
+        run: swift build
+      - name: Build Folio.app (Debug, arm64 only)
+        run: |
+          xcodebuild build \
+            -project pm-mac/PM.xcodeproj -scheme PM -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            COMPILATION_CACHE_ENABLE_CACHING=NO SWIFT_ENABLE_COMPILE_CACHE=NO \
+            -skipPackagePluginValidation
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:swift
