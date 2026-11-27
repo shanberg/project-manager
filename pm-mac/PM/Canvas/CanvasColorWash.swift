@@ -123,7 +123,7 @@ final class CanvasColorWash: NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             if let resolved = color?.nsColor.usingColorSpace(.sRGB) {
-                rgb = (Double(resolved.redComponent), Double(resolved.greenComponent), Double(resolved.blueComponent))
+                rgb = (resolved.redComponent, resolved.greenComponent, resolved.blueComponent)
             }
         }
         if let rgb, dirty.minY < washHeight { drawWash(rgb: rgb, dark: dark, in: dirty, context: context) }
