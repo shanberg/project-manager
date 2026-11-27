@@ -75,7 +75,7 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
 - For spaces and projects alike. A project's sidebar has Notes as a row. Replaces the window's tab row; supersedes "projects keep their window" above.
 - Sidebar, top to bottom: the address; favourites as icons; Board (the freeform canvas, the overview); Pinned; Today (spaces only), with New Tab.
 - A row is a card: web, folder, file, note, view. Frames on the board are folders in the sidebar.
-- Named workspaces are rows among Pinned, showing their tiles' icons.
+- Named workspaces are rows among Pinned, led by a drawing of the layout: its columns and tiles, a web card's tile in its site's hue (`LayoutShapeGlyph`).
 - Pinned and favourite are marks on the card, stored on the node (`pm*` keys), so the board stays the one record. The rest of a space's cards are Today; they stay until closed.
 - Clicking a card that isn't showing, and that no layout holds, replaces the tile you're in, as Arc. In a named workspace of several tiles, that leaves the workspace for the card on its own.
 - Clicking a card that a layout holds (the one on screen, or another named workspace) opens it alone, on the board's own tab; the layouts are left as they were (2026-11-05, `SpaceFrame.openAlone`; was: jumped to the workspace with the card's tile picked).
@@ -88,7 +88,8 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
 - Double-click a card's row (or its menu's Rename…) to name it in place: `pmTitle` on the node, which beats the page's name everywhere a card is named (`describeCard`). "Use the Page’s Name" clears it.
 - A row's tooltip: its whole title and, for a web card, its saved address.
 - Rows follow System Settings ▸ Appearance ▸ Sidebar icon size (`SidebarMetrics`: 28 / 32 / 38pt rows, 12 / 13 / 15pt text).
-- A row's trailing controls (count, folder +, speaker, ✕) keep fixed slots: hovering never re-truncates the title.
+- A row's trailing controls (layout mark, count, folder +, folder chevron, speaker, ✕) keep fixed slots: hovering never re-truncates the title. A pinned card under a layout shows its pin in the ✕'s slot until hovered.
+- The icon column (`SpaceSidebarGlyphs.swift`, polished 2026-11-27): every icon in one box (`SidebarMetrics.glyph`) at one x, so every title starts on one edge; a folder's chevron is at its end for the same reason. A card with no favicon wears its initial on its site's hue (`SidebarHue`, one of eight, stable across launches), its title's when it has no site. Favicons are fitted, not stretched, with a hairline edge, and fade in when they arrive. A folder's or the open layout's cards hang from a hairline under its icon; only the card in front is raised.
 - The sidebar scrolls to the card in front when it changes (⌃⇥, ⌘9, a link); to its folder's row when the folder is folded.
 - Rows are a container labelled Tabs (Cards in a project) for VoiceOver; each row says pinned / playing / on screen / expanded, and has a Close action.
 - Favourite tiles: deeper fill when on screen but not in front; accent outline when picked; the speaker pauses; middle-click takes it off the screen. A drop on a tile is before or after by the tile's own middle (tiles are 44–80pt).
@@ -180,7 +181,7 @@ Decided 2026-11-13 in `.claude/mocks/folio-layout-cards.html`; built the same da
 - Under each layout using it, a pinned card is a row with a pin mark at its end. Its own row is in Pinned.
 - A pinned card's row in Pinned: a layout mark with a count (no count for one). Click: that layout, the card in front; with two or more, a menu of them.
 - Layouts are pinned: rows at the head of Pinned, always.
-- Only the layout on screen is unfolded. A folded layout row shows its tiles' icons.
+- Only the layout on screen is unfolded. A folded layout row shows its drawing.
 - Click a row under a layout: that layout, that tile in front. Click a row in Pinned or Today: the card alone (`openAlone`).
 - Add to Layout (a row's menu, or a drag onto a layout row or its tiles): an unpinned card moves under that layout, out of Today / Cards. One already in a layout is pinned, and a toast says so: Pinned “<name>”: it’s in 2 layouts, with Undo.
 - Move to Today / Cards (a row's menu, or dragging it out): out of the layout.
