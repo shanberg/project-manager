@@ -77,6 +77,7 @@
 		23FD0FF54F6B01B004848183 /* CanvasLinkPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A42DCEE46B90072369341C2 /* CanvasLinkPreview.swift */; };
 		2414C8CD0D4FAF28DDCCCF33 /* CanvasTileCarry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90243B130F92792DBE0DE091 /* CanvasTileCarry.swift */; };
 		24303FA69FF5DF1DBF4D2730 /* AttentionKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492EF47D503135DF9A6D100B /* AttentionKeeper.swift */; };
+		24C2FA9FFEDFBD0FC53239DA /* StaleReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90327E212297D216087DBD1E /* StaleReview.swift */; };
 		24F8436279997AFB022835C8 /* ProjectContentPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ECFDF5D89C4016A603F2DEF /* ProjectContentPane.swift */; };
 		25199D8009632DD05AF2DB7D /* CanvasFileWatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FF6ECAEF432775C80253903 /* CanvasFileWatchTests.swift */; };
 		2685E0C4D2015049B6C1297F /* CanvasLinkStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB7FA3D22A87310BDDE926E5 /* CanvasLinkStatus.swift */; };
@@ -128,7 +129,6 @@
 		3A7D8CAA7F82F8A2C614A6E4 /* SessionPicksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAF03BC376FBB593A7D24263 /* SessionPicksTests.swift */; };
 		3A87569A4ACE823EC2BC8684 /* SpaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43B1FB7602D9B9AFC9A92410 /* SpaceModel.swift */; };
 		3B1AD8FC20DF706C9572997E /* TaskMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DE496B1AB05F26705086349 /* TaskMenu.swift */; };
-		5A7E1C0DF00D5EED00000002 /* StaleReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A7E1C0DF00D5EED00000001 /* StaleReview.swift */; };
 		3B20AF1229DB131ADF821433 /* CanvasFrozenPageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0257BF597EE7CBA3C8810C6 /* CanvasFrozenPageTests.swift */; };
 		3BC2826F3D5108E7A8FF7650 /* CanvasPagePaint.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E37819EC2BC3995C0BB412 /* CanvasPagePaint.swift */; };
 		3C1A6B970D5F7D05AAAF0F93 /* CanvasItemDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FC5C81D79C2F574B7D02B35 /* CanvasItemDetailView.swift */; };
@@ -741,7 +741,6 @@
 		6D1B73E6D3D6F188C4DE96EB /* MenuPictures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuPictures.swift; sourceTree = "<group>"; };
 		6D875EB76F3DC60050396219 /* EmojiCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiCatalog.swift; sourceTree = "<group>"; };
 		6DE496B1AB05F26705086349 /* TaskMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMenu.swift; sourceTree = "<group>"; };
-		5A7E1C0DF00D5EED00000001 /* StaleReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaleReview.swift; sourceTree = "<group>"; };
 		6EC9845DCA2208C734345817 /* CanvasBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasBoardView.swift; sourceTree = "<group>"; };
 		6F0FB41551E862485887BCEA /* SessionNoteMergeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionNoteMergeTests.swift; sourceTree = "<group>"; };
 		6F585177DE07327A668755CF /* ProjectWindowState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWindowState.swift; sourceTree = "<group>"; };
@@ -802,6 +801,7 @@
 		8F5AF9B9F2692316AA0D48C8 /* HangWatchdog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HangWatchdog.swift; sourceTree = "<group>"; };
 		8FF6ECAEF432775C80253903 /* CanvasFileWatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasFileWatchTests.swift; sourceTree = "<group>"; };
 		90243B130F92792DBE0DE091 /* CanvasTileCarry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasTileCarry.swift; sourceTree = "<group>"; };
+		90327E212297D216087DBD1E /* StaleReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaleReview.swift; sourceTree = "<group>"; };
 		90A29BE9C624BCA20C640DDA /* CanvasItemListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasItemListView.swift; sourceTree = "<group>"; };
 		90BB9DDD079FFA1FD9822C54 /* CoalescerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoalescerTests.swift; sourceTree = "<group>"; };
 		91DAF694D06EA74A49555934 /* SessionPicks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPicks.swift; sourceTree = "<group>"; };
@@ -1199,7 +1199,7 @@
 			children = (
 				3E0EE114EBE0F9568379C8A6 /* CompletingTextField.swift */,
 				96A8A6EA7A3C620EA8E64574 /* OutsideClick.swift */,
-				5A7E1C0DF00D5EED00000001 /* StaleReview.swift */,
+				90327E212297D216087DBD1E /* StaleReview.swift */,
 				00F2EDB988BDEA63F99FFDEC /* TaskDeleteConfirmation.swift */,
 				C5C091CF8691F406FDF304F2 /* TaskEditors.swift */,
 				1827632D51602B8F2EAA6994 /* TaskLineLayout.swift */,
@@ -2003,6 +2003,7 @@
 				0951ED1A45B7EF4530A3FDE7 /* SpaceModel.swift in Sources */,
 				41E0C9332A3B58A1D0FF62EA /* SpaceSettings.swift in Sources */,
 				1E880DAB37B7B34881DD922E /* Spaces.swift in Sources */,
+				24C2FA9FFEDFBD0FC53239DA /* StaleReview.swift in Sources */,
 				ED22C0E8FDAFBCD7991FBF03 /* StatusItemController.swift in Sources */,
 				D5374E7501A1917BD1D28D87 /* StoreRegistry.swift in Sources */,
 				3073C7288DEEA01B332ABB56 /* SwitcherController.swift in Sources */,
@@ -2013,7 +2014,6 @@
 				92006127F2FED5B39114B8C2 /* TaskEditors.swift in Sources */,
 				E87A74E4DFF6B5ADD4D33CF7 /* TaskLineLayout.swift in Sources */,
 				3B1AD8FC20DF706C9572997E /* TaskMenu.swift in Sources */,
-				5A7E1C0DF00D5EED00000002 /* StaleReview.swift in Sources */,
 				DC32442F95F99A489935F8C3 /* TaskMenuRow.swift in Sources */,
 				9ABD95EC8E5E37FFC95FCEC1 /* TaskPasteboard.swift in Sources */,
 				E4012FFE5E8FB1E976753460 /* TaskTiming.swift in Sources */,
