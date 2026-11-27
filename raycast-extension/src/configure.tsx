@@ -26,7 +26,7 @@ export default function Command() {
 
   if (pathsOrNull === undefined) {
     return (
-      <Detail navigationTitle="Configure Project Manager" markdown="Loading…" />
+      <Detail navigationTitle="Configure Folio" markdown="Loading…" />
     );
   }
 
@@ -60,7 +60,7 @@ export default function Command() {
 
   return (
     <Detail
-      navigationTitle="Configure Project Manager"
+      navigationTitle="Configure Folio"
       markdown={`# Paths
 
 Where your projects live. **Edit Paths** to change active, archive, or para path.

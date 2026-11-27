@@ -1311,7 +1311,7 @@ private func pickUp(_ references: [TaskRefInput], batch: Bool, _ context: Docume
     let notes = normalizeFocusMarker(notes: try parseNotes(markdown: text))
     let todos = try parseTodos(notes: notes)
     guard let into = PickLog.sitting(at: session.sessionIndex, in: notes) else {
-        throw ApiError(.writeFailed, "The current session's heading isn't a date PM can name.")
+        throw ApiError(.writeFailed, "The current session's heading isn't a date Folio can name.")
     }
     let standing = PickLog.resolved(projectPath: context.projectPath, notes: notes, todos: todos)
     let at = timestamp()
@@ -1338,7 +1338,7 @@ private func pickUp(_ references: [TaskRefInput], batch: Bool, _ context: Docume
         if todo.sessionIndex == session.sessionIndex { out.alreadyHere += 1; continue }
         if pickedHere.contains(treeKey(todo)) { out.alreadyPicked += 1; continue }
         guard let task = PickLog.task(todo, in: notes) else {
-            throw ApiError(.invalidField, "\u{201C}\(todo.text)\u{201D} is under a heading PM can't date, so it can't be picked up.",
+            throw ApiError(.invalidField, "\u{201C}\(todo.text)\u{201D} is under a heading Folio can't date, so it can't be picked up.",
                            detail: .string("task"))
         }
         out.events.append(PickEvent(at: at, event: .picked, task: task, into: into, source: source))
