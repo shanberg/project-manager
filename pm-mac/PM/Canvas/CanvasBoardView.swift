@@ -527,6 +527,13 @@ final class CanvasBoardView: NSView {
     }
     /// The tile whose top centre the pointer is near, which is the one tile showing its grip.
     var gripTile: String?
+    /// The tile whose grip the pointer is on its way to, which offers it faintly ahead of arrival. See
+    /// `anticipateTileGrip`.
+    var gripAnticipated: String?
+    /// The last tenth of a second of pointer positions, in view points, for the heading.
+    var pointerTrail: [(point: NSPoint, at: CFTimeInterval)] = []
+    /// Lets the faint grip go again when the pointer stops short of it.
+    var gripAnticipationEnds: DispatchWorkItem?
     /// Which match ⌘G steps to next.
     var findCursor = 0
     /// Where a middle-button pan took hold of the board, in view coordinates. Non-nil only while that
@@ -640,6 +647,7 @@ final class CanvasBoardView: NSView {
     func pageStateChanged() {
         onPageStateChanged?()
         CanvasTileControls.shared.pageMoved(on: self)
+        tileGripView.refreshLoading()
     }
 
     /// Told when the mode changes, so the window's header can say which one the board is in.

@@ -22,9 +22,15 @@ import WebKit
 /// Back and Reload when a page is showing, and the way home. AppKit controls rather than SwiftUI ones,
 /// since the header sits in the title bar's drag band and only controls carve their clicks out of it.
 ///
-/// **Dressed as its project**, so a window on another screen still says where it belongs: the header
-/// lies on the project's colour and texture — the wash its board lies on, `CanvasColorWash` — and the
-/// project's icon leads, its tooltip the project's name.
+/// **One surface.** A satellite is a card on its own, and its window is the card: no band across the
+/// top, no line under it. The card's ground runs to the window's edges, title bar included, and the
+/// card's name sits on it beside the traffic lights — where a compact Safari window keeps its tabs. A
+/// full project window has a header of its own; a satellite having none is how the two are told apart.
+///
+/// **Dressed as its project**, so a window on another screen still says where it belongs: the
+/// project's colour is a glow that fades down from the top of the window (`CanvasSatelliteGlow`),
+/// with a hairline of it along the top edge, and the project's icon leads the title, its tooltip the
+/// project's name. A page covers all but the title row of the glow, which is as it should be.
 @MainActor
 final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     /// Every satellite up, in every window.
@@ -52,7 +58,8 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     /// nothing else: see `satelliteReturned`.
     private var bringingBack = false
     private let stage = NSView()
-    private let wash = CanvasColorWash()
+    private let glow = CanvasSatelliteGlow()
+    private var washColor: ProjectColor?
     /// The project's icon, drawn once into a picture: a hosted SwiftUI view in an AppKit row sizes and
     /// places itself by rules of its own, and this only ever needs to be a picture.
     private let mark = NSImageView()
@@ -67,6 +74,10 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     /// The window's menu, innermost of the buttons on the right: the project panel, and the way to the
     /// workspace's other tiles and the project's other workspaces. See `showMenu`.
     private let more = NSButton()
+    /// A project card's two verbs, which its own title row holds on the board. Out here that row is
+    /// the window's (see `CanvasNodeView.titleIsElsewhere`), so the verbs come up into it too.
+    private let newTask = NSButton()
+    private let newSession = NSButton()
     private let tabs = CanvasSatelliteTabs()
     /// The header's words: the project's mark, the card's title and host, or the tabs, and the
     /// workspace's name. Hidden while the address is being typed.
@@ -93,7 +104,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     /// The project's name, colour and icon, as the header draws them — and the dock, which groups
     /// satellites by workspace and wants each group dressed as its project.
     private(set) var projectTitle: String?
-    var projectColor: NSColor? { wash.color?.nsColor }
+    var projectColor: NSColor? { washColor?.nsColor }
     var projectMark: NSImage? { mark.image }
     /// The project's icon itself, for the dock to draw at its own size and in its own colour.
     private(set) var projectMarkIcon: ProjectIcon?
@@ -118,8 +129,14 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     }
 
     /// Lend `cards` to a new window. Nil when none of them had anything to lend.
-    static func open(_ cards: [CanvasNodeView], showing: String?, frame: NSRect?, on board: CanvasBoardView)
-        -> CanvasSatelliteWindow? {
+    ///
+    /// - Parameter lifting: the window flies out of the tile it came from (`CanvasSatelliteFlight`),
+    ///   for a move asked for in so many words; otherwise it fades in where it is.
+    static func open(_ cards: [CanvasNodeView], showing: String?, frame: NSRect?, on board: CanvasBoardView,
+                     lifting: Bool = false) -> CanvasSatelliteWindow? {
+        // Before the content is lent, while the tile still shows it.
+        let origin = lifting ? (cards.first { $0.node.id == showing } ?? cards.first)
+            .flatMap(CanvasSatelliteFlight.origin(of:)) : nil
         let satellite = CanvasSatelliteWindow(board: board, frame: frame.map { onScreen($0) })
         for card in cards { satellite.take(card) }
         guard !satellite.cards.isEmpty else { return nil }
@@ -128,7 +145,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         satellite.showTab(satellite.cards.firstIndex { $0.node.id == showing } ?? 0)
         satellite.refreshAppearance()
         if frame == nil, let window = satellite.window { place(window, after: before) }
-        satellite.showWindow(nil)
+        CanvasSatelliteFlight.arrive(satellite, from: origin)
         satellite.remember()
         return satellite
     }
@@ -390,24 +407,10 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
 
     private func content() -> NSView {
         let root = NSView()
-        // A plain view holds the controls, with the wash behind them: the wash is a board's ground,
-        // which takes no clicks (`CanvasColorWash.hitTest`), and controls inside it would take none
-        // either — Return, Back and the tabs drawn but dead.
+        // The card's ground, edge to edge, is the glow's (`CanvasSatelliteGlow`): the title bar is laid
+        // over the content and is transparent, so it shows the same ground.
+        // A plain view holds the controls, over the glow.
         let bar = NSView()
-        // Clipped, both: the wash fills whatever it is asked to redraw, and a view isn't clipped to its
-        // bounds unless it says so — on a board it lies under everything, but here it is in front of
-        // the page and painted the board's ground over all of it.
-        bar.clipsToBounds = true
-        wash.clipsToBounds = true
-        wash.translatesAutoresizingMaskIntoConstraints = false
-        bar.addSubview(wash)
-        NSLayoutConstraint.activate([
-            wash.topAnchor.constraint(equalTo: bar.topAnchor), wash.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
-            wash.leadingAnchor.constraint(equalTo: bar.leadingAnchor), wash.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
-        ])
-        let line = NSBox()
-        line.boxType = .separator
-
         configure(back, "chevron.backward", "Back", #selector(goBack))
         configure(forward, "chevron.forward", "Forward", #selector(goForward))
         configure(reload, "arrow.clockwise", "Reload", #selector(reloadPage))
@@ -417,6 +420,13 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         configure(bringBack, "arrow.down.left", "Bring Back to Workspace", #selector(returnToWorkspace))
         configure(gather, "rectangle.grid.2x2", "Gather Workspace", #selector(gatherWorkspace))
         configure(more, "ellipsis.circle", "More", #selector(showMenu))
+        configure(newTask, "plus", "New Task", #selector(newTaskInCard))
+        configure(newSession, "calendar.badge.plus", "New Session", #selector(newSessionInCard))
+        newSession.toolTip = "New Session — hold ⌥ to start another, unless this one is still empty"
+        newTask.contentTintColor = .labelColor
+        newSession.contentTintColor = .labelColor
+        newTask.isHidden = true
+        newSession.isHidden = true
         showButtons(false)
         findField.placeholderString = "Find in Page"
         findField.controlSize = .small
@@ -428,9 +438,10 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         findField.delegate = self
         findField.isHidden = true
         findField.widthAnchor.constraint(equalToConstant: 180).isActive = true
-        let home = NSStackView(views: [findField, more, gather, bringBack])
+        let home = NSStackView(views: [findField, newTask, newSession, more, gather, bringBack])
         home.spacing = 0
         home.setCustomSpacing(6, after: findField)
+        home.setCustomSpacing(6, after: newSession)
 
         addressField.font = .systemFont(ofSize: 12)
         addressField.controlSize = .small
@@ -443,7 +454,9 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         addressField.delegate = self
         addressField.isHidden = true
 
-        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        // The card's name in the title bar's own type — the size and weight of a window's title, which
+        // is what it now is — rather than a heading's: the title row is the window's, not the card's.
+        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         titleLabel.lineBreakMode = .byTruncatingTail
         // The title gives way first: the host is the half that says whose page this is.
         titleLabel.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
@@ -472,13 +485,18 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         words.spacing = 6
         words.setCustomSpacing(8, after: mark)
 
-        for view in [bar, line, back, forward, reload, home, words, addressField, stage] as [NSView] {
+        for view in [bar, back, forward, reload, home, words, addressField, stage] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
         }
+        // Under everything: the glow is the ground's colour, and the card's content lies on it as it
+        // lies on the card's fill on the board — a note shows it through its top, a page covers it.
+        glow.frame = root.bounds
+        glow.autoresizingMask = [.width, .height]
+        root.addSubview(glow)
         root.addSubview(stage)
         root.addSubview(reorderMark)
         root.addSubview(bar)
-        for view in [line, back, forward, reload, home, words, addressField] as [NSView] { bar.addSubview(view) }
+        for view in [back, forward, reload, home, words, addressField] as [NSView] { bar.addSubview(view) }
         // Clear of the traffic lights, which sit at the leading edge of the title bar; measured again once
         // the window has its title bar (`fitToTitleBar`).
         let lights: CGFloat = 78
@@ -486,8 +504,11 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         let backLeading = back.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: lights)
         self.barHeight = barHeight
         self.backLeading = backLeading
-        let centred = words.centerXAnchor.constraint(equalTo: bar.centerXAnchor)
-        centred.priority = .defaultLow
+        // Beside the lights, or beside Reload when a page shows it — as near the leading edge as the two
+        // `clearOf` constraints allow. A window's title centres itself over an empty bar; this one is the
+        // start of the card's row, and reads from where the row starts.
+        let leading = words.leadingAnchor.constraint(equalTo: bar.leadingAnchor)
+        leading.priority = .defaultLow
         let clearOfLights = words.leadingAnchor.constraint(greaterThanOrEqualTo: back.leadingAnchor, constant: 4)
         let clearOfPage = words.leadingAnchor.constraint(greaterThanOrEqualTo: reload.trailingAnchor, constant: 8)
         clearOfLights.isActive = true
@@ -498,9 +519,6 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
             bar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             bar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             barHeight,
-            line.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
-            line.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
-            line.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
             backLeading,
             back.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             forward.leadingAnchor.constraint(equalTo: back.trailingAnchor, constant: 2),
@@ -512,7 +530,7 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
             addressField.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             home.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -10),
             home.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
-            centred,
+            leading,
             words.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
             words.trailingAnchor.constraint(lessThanOrEqualTo: home.leadingAnchor, constant: -6),
             stage.topAnchor.constraint(equalTo: bar.bottomAnchor),
@@ -644,6 +662,9 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
                                accessibilityDescription: loading ? "Stop" : "Reload")
         reload.toolTip = loading ? "Stop" : "Reload"
         if page == nil { endAddress(); endFind() }
+        let verbs = (shownCard as? CanvasFileNodeView)?.offersProjectVerbs == true && !many
+        newTask.isHidden = !verbs
+        newSession.isHidden = !verbs
         words.isHidden = !addressField.isHidden
         refreshPlaceholders()
         workspaceLabel.stringValue = workspace.isEmpty ? "" : "· \(workspace)"
@@ -661,15 +682,15 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
     func refreshAppearance() {
         guard let board else { return }
         let ground = board.enclosingScrollView as? CanvasScrollView
-        wash.color = ground?.washColor
-        wash.texture = ground?.groundView.texture
+        washColor = ground?.washColor
+        glow.color = washColor?.nsColor
         // From the sidebar's index, which read the notes off main — never the notes file here.
         let folder = CanvasProjectNoteCard.candidateProject(forCanvasAt: board.store.url).lastPathComponent
         let icon = ProjectIndex.shared.allProjects.first { $0.name == folder }
             .flatMap { entry in entry.icon?.resolved(notesPath: entry.notesPath) }
         projectMarkIcon = icon.flatMap { ProjectIconMark.canDraw($0) ? $0 : nil }
-        let tint = wash.color?.swiftUIColor
-        // In the title's ink rather than the project's colour, which the bar's wash already says: drawn
+        let tint = washColor?.swiftUIColor
+        // In the title's ink rather than the project's colour, which the window's glow already says: drawn
         // black and handed over as a template, for the image view to tint with the label colour as the
         // appearance changes. An emoji, or an image in colours of its own, keeps them.
         let ink = icon.map { ProjectIconMark.canDraw($0) && !ProjectIconMark.keepsOwnColors($0) } ?? false
@@ -752,10 +773,16 @@ final class CanvasSatelliteWindow: NSWindowController, NSWindowDelegate {
         page?.go(to: item)
     }
     @objc private func returnToWorkspace() {
+        guard !bringingBack else { return }
         bringingBack = true
-        close()
+        CanvasSatelliteFlight.home([self]) { [weak self] in self?.close() }
     }
     @objc private func gatherWorkspace() { board?.gatherWorkspace() }
+    @objc private func newTaskInCard() { (shownCard as? CanvasFileNodeView)?.projectCommands.requestNewTask() }
+    @objc private func newSessionInCard() {
+        (shownCard as? CanvasFileNodeView)?.projectCommands
+            .requestNewSession(forcingNew: NSEvent.modifierFlags.contains(.option))
+    }
 
     // MARK: A tab's menu
 
@@ -1345,10 +1372,10 @@ extension CanvasBoardView {
     /// - Parameter frame: where the window goes, in screen coordinates; nil centres it.
     @discardableResult
     func moveToWindow(_ ids: [String], showing: String? = nil, frame: NSRect? = nil,
-                      restoring: Bool = false) -> CanvasSatelliteWindow? {
+                      restoring: Bool = false, lifting: Bool = false) -> CanvasSatelliteWindow? {
         let cards = ids.compactMap { nodeViews[$0] }.filter { $0.lentTo == nil }
         guard !cards.isEmpty else { return nil }
-        let satellite = CanvasSatelliteWindow.open(cards, showing: showing, frame: frame, on: self)
+        let satellite = CanvasSatelliteWindow.open(cards, showing: showing, frame: frame, on: self, lifting: lifting)
         CanvasSatelliteDock.shared.refresh()
         if !restoring, isAllOut, (tiling?.ids.count ?? 0) > 1 { putWindowAway() }
         return satellite
@@ -1386,10 +1413,12 @@ extension CanvasBoardView {
 
     /// Move the whole tile holding `id` — every tab of it — into a window of its own.
     @discardableResult
-    func moveTileToWindow(_ id: String, frame: NSRect? = nil) -> CanvasSatelliteWindow? {
-        guard let tiling, let at = tiling.position(of: id) else { return moveToWindow([id], frame: frame) }
+    func moveTileToWindow(_ id: String, frame: NSRect? = nil, lifting: Bool = false) -> CanvasSatelliteWindow? {
+        guard let tiling, let at = tiling.position(of: id) else {
+            return moveToWindow([id], frame: frame, lifting: lifting)
+        }
         let tile = tiling.columns[at.column].tiles[at.tile]
-        return moveToWindow(tile.cards, showing: tile.shown, frame: frame)
+        return moveToWindow(tile.cards, showing: tile.shown, frame: frame, lifting: lifting)
     }
 
     /// A satellite has come home. Its cards kept their slots, so there is nothing to place.
@@ -1454,7 +1483,8 @@ extension CanvasBoardView {
             guard tile.cards.contains(where: { nodeViews[$0]?.lentTo == nil }), let frame = frames[tile.shown]
             else { continue }
             moveToWindow(tile.cards, showing: tile.shown,
-                         frame: window.convertToScreen(convert(viewRect(frame), to: nil)), restoring: true)
+                         frame: window.convertToScreen(convert(viewRect(frame), to: nil)), restoring: true,
+                         lifting: true)
         }
         if isAllOut { putWindowAway() }
     }
@@ -1469,6 +1499,11 @@ extension CanvasBoardView {
     func gatherWorkspace() {
         let out = satellites
         guard !out.isEmpty else { return showWorkspaceWindow() }
+        // Every window's picture flies home into the slot its card ends up in, once the windows have gone.
+        CanvasSatelliteFlight.home(out) { [weak self] in self?.gather(out) }
+    }
+
+    private func gather(_ out: [CanvasSatelliteWindow]) {
         let undoFrom = beginTilingUndo()
         defer { endTilingUndo("Gather Workspace", from: undoFrom) }
         let rebuilt = isAllOut ? tiling.flatMap { session in
@@ -1917,5 +1952,68 @@ final class CanvasHistoryButton: NSButton {
     private func showHistory() {
         guard let menu = history() else { return }
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY + 4), in: self)
+    }
+}
+
+/// **The project's colour on a satellite**: a glow down from the top of the window, and a hairline of
+/// it along the top edge where a window's highlight would be.
+///
+/// Over about eighty points, which is the title row and the first lines under it — enough to say whose
+/// window this is at a glance, and gone before anything you read. Stronger in dark appearance, where a
+/// colour on a dark ground reads weaker. Takes no clicks: it is the ground, and everything is on it.
+final class CanvasSatelliteGlow: NSView {
+    var color: NSColor? { didSet { refresh() } }
+    private let gradient = CAGradientLayer()
+    private let highlight = CALayer()
+    static let depth: CGFloat = 80
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.addSublayer(gradient)
+        layer?.addSublayer(highlight)
+        refresh()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewDidChangeEffectiveAppearance() { refresh() }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        gradient.frame = NSRect(x: 0, y: 0, width: bounds.width, height: Self.depth)
+        highlight.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 1)
+        CATransaction.commit()
+    }
+
+    private func refresh() {
+        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        var ground = NSColor.clear.cgColor
+        var top = NSColor.clear.cgColor
+        var bottom = NSColor.clear.cgColor
+        var line = NSColor.clear.cgColor
+        // Resolved in this view's appearance: the card's colour and the project's are both dynamic.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            ground = CanvasPalette.card.cgColor
+            if let color {
+                top = color.withAlphaComponent(dark ? 0.42 : 0.28).cgColor
+                bottom = color.withAlphaComponent(0).cgColor
+                line = color.withAlphaComponent(dark ? 0.45 : 0.3).cgColor
+            }
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.backgroundColor = ground
+        // Flipped, so the first colour is at the top.
+        gradient.colors = [top, bottom]
+        gradient.startPoint = CGPoint(x: 0.5, y: 0)
+        gradient.endPoint = CGPoint(x: 0.5, y: 1)
+        highlight.backgroundColor = line
+        CATransaction.commit()
+        needsLayout = true
     }
 }

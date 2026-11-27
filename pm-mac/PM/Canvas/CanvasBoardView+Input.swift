@@ -1014,6 +1014,7 @@ extension CanvasBoardView {
                 refreshTileHandles()
                 tileGripView.needsDisplay = true
             }
+            anticipateTileGrip(at: convert(event.locationInWindow, from: nil), time: event.timestamp)
             let tab = gesture == nil ? tabChip(at: where_)?.card : nil
             let next = tab.map { (card: $0, onClose: tabClose(at: where_) == $0) }
             if next?.card != hoveredTab?.card || next?.onClose != hoveredTab?.onClose { hoveredTab = next }
@@ -1054,6 +1055,11 @@ extension CanvasBoardView {
         hoveredTab = nil
         hoveredNewTab = nil
         hoveredStrip = nil
+        pointerTrail = []
+        if gripAnticipated != nil {
+            gripAnticipated = nil
+            refreshTileHandles()
+        }
         if gripTile != nil, gesture == nil {
             gripTile = nil
             refreshTileHandles()

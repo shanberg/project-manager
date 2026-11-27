@@ -916,6 +916,7 @@ class CanvasNodeView: NSView {
         guard lentTo == nil, let content = clip.subviews.first else { return nil }
         lentTo = satellite
         lentContent = content
+        titleIsElsewhere(true)
         content.removeFromSuperview()
         let away = CanvasSatelliteEmpty(card: self)
         away.translatesAutoresizingMaskIntoConstraints = false
@@ -929,6 +930,11 @@ class CanvasNodeView: NSView {
         return lentContent
     }
 
+    /// Told when the card's content goes out to a satellite and when it comes back. The satellite's
+    /// title row names the card (`CanvasSatelliteWindow`), so a card that draws its own name at its top
+    /// stops while it is out there, rather than say it twice, one above the other.
+    func titleIsElsewhere(_ elsewhere: Bool) {}
+
     /// What the content was last put in with, so content back from a satellite goes back the same.
     private var contentInsets = NSEdgeInsets(top: 1, left: 1, bottom: 1, right: 1)
 
@@ -939,6 +945,7 @@ class CanvasNodeView: NSView {
         lentTo = nil
         lentContent = nil
         if wasEngaged { engage(false) }
+        titleIsElsewhere(false)
         content.removeFromSuperview()
         setContent(content, insets: contentInsets)
         // Back at the board's zoom, whatever that is.

@@ -1735,7 +1735,7 @@ extension CanvasBoardView {
 
     @objc func moveMenuTileToWindow(_ sender: Any?) {
         guard let id = menuTile else { return }
-        restoringMaximized { moveTileToWindow(id) }
+        restoringMaximized { moveTileToWindow(id, lifting: true) }
     }
 
     @objc func popOutWorkspace(_ sender: Any?) { popOutWorkspace() }
@@ -1743,7 +1743,7 @@ extension CanvasBoardView {
 
     @objc func moveMenuTabToWindow(_ sender: Any?) {
         guard let id = menuTile else { return }
-        restoringMaximized { moveToWindow(tabGroup(for: id), showing: id) }
+        restoringMaximized { moveToWindow(tabGroup(for: id), showing: id, lifting: true) }
     }
 
     @objc func pullMenuTabOut(_ sender: Any?) {
@@ -3151,7 +3151,7 @@ extension CanvasBoardView: NSUserInterfaceValidations {
     /// Move to Window: the page into a window of its own, still running. See `CanvasSatelliteWindow`.
     @objc private func moveMenuCardToWindow() {
         guard let card = windowableCard else { return }
-        moveToWindow([card.node.id])
+        moveToWindow([card.node.id], lifting: true)
     }
 
     /// The one selected card Move to Window would take: any kind but a frame, and not already out.

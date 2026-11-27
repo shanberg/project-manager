@@ -74,8 +74,12 @@ final class CanvasFade {
         onChange()
     }
 
-    func set(_ wanted: Bool) {
-        let next: Double = wanted ? 1 : 0
+    func set(_ wanted: Bool) { set(level: wanted ? 1 : 0) }
+
+    /// Ease towards a level between none and full — a mark that is offered faintly before it is shown.
+    /// Rising takes `rise` and falling `fall`, whichever way the level moves.
+    func set(level: Double) {
+        let next = min(1, max(0, level))
         guard next != target else { return }
         target = next
 
