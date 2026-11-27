@@ -2046,14 +2046,14 @@ struct SpaceFrameSidebar: View {
     private func group(_ group: SpaceFrame.Group, pinned: Bool) -> some View {
         let loose: SpaceCardMarks.List = pinned ? .pinned(folder: nil) : .today(folder: nil)
         ForEach(Array(group.loose.enumerated()), id: \.element.id) { index, row in
-            cardRow(row, indent: false, list: loose, index: index, count: group.loose.count)
+            cardRow(row, indent: false, list: loose, index: index, in: group.loose)
         }
         ForEach(Array(group.folders.enumerated()), id: \.element.id) { index, folder in
             folderRow(folder, pinned: pinned, index: index, count: group.folders.count)
             if !frame.closedFolders.contains(folder.id) {
                 let list: SpaceCardMarks.List = pinned ? .pinned(folder: folder.id) : .today(folder: folder.id)
                 ForEach(Array(folder.rows.enumerated()), id: \.element.id) { index, row in
-                    cardRow(row, indent: true, list: list, index: index, count: folder.rows.count)
+                    cardRow(row, indent: true, list: list, index: index, in: folder.rows)
                 }
             }
         }
@@ -2121,9 +2121,22 @@ struct SpaceFrameSidebar: View {
         .onDrag { frame.beginDrag(row.id) }
     }
 
+    /// How a row is lit, for joining it to its neighbours: the front card's chip stands alone, but a
+    /// run of picked rows, or of rows on screen, reads as one block (`SpaceRowGround`).
+    private func ground(_ row: SpaceFrame.Row?) -> SpaceRowGround.Kind {
+        guard let row else { return .none }
+        if row.front { return .front }
+        if frame.picked.contains(row.id) { return .picked }
+        return row.showing ? .on : .none
+    }
+
     private func cardRow(_ row: SpaceFrame.Row, indent: Bool, list: SpaceCardMarks.List, index: Int,
-                         count: Int) -> some View {
+                         in rows: [SpaceFrame.Row]) -> some View {
+        let count = rows.count
         let editing = renamingCard == row.id
+        let kind = ground(row)
+        let joinsAbove = kind.joins && ground(index > 0 ? rows[index - 1] : nil) == kind
+        let joinsBelow = kind.joins && ground(index + 1 < count ? rows[index + 1] : nil) == kind
         return SpaceSidebarRow(row: row, indent: indent, picked: frame.picked.contains(row.id), glyphs: glyphs,
                                close: { frame.close(row.id) },
                                pause: { row.muted ? frame.setMuted(row.id, false) : frame.pause(row.id) },
@@ -2134,6 +2147,7 @@ struct SpaceFrameSidebar: View {
                                    renamingCard = nil
                                    if let new { frame.renameCard(row.id, to: new) }
                                }) { frame.click(row.id) }
+            .joined(above: joinsAbove, below: joinsBelow)
             .marks(reference: false, layouts: row.pinned ? row.layouts : [],
                    shape: row.pinned ? row.layouts.first.flatMap { name in
                        frame.workspaces.first { $0.name == name }?.shape } : nil,
@@ -2516,6 +2530,10 @@ struct SpaceSidebarRow: View {
     var layoutNames: [String] = []
     /// The first of those layouts' shape, drawn small as the mark.
     var layoutShape: LayoutShape?
+    /// Lit the same as the row above or below it: the corners between them go square and the ground
+    /// runs across the gap, so a run of picked rows reads as one selection, as Finder draws one.
+    var joinsAbove = false
+    var joinsBelow = false
     var openLayout: ((String) -> Void)?
     let tap: () -> Void
     @State private var hover = false
@@ -2598,12 +2616,16 @@ struct SpaceSidebarRow: View {
         .background {
             if front { SpaceSelectedFill(radius: 8) }
             else {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(picked ? Color.accentColor.opacity(0.12)
-                          : Color.primary.opacity(on ? 0.07 : hover ? 0.05 : 0))
+                SpaceRowGround(kind: picked ? .picked : on ? .on : .none, hover: hover,
+                               above: joinsAbove, below: joinsBelow)
             }
         }
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(picked ? Color.accentColor : .clear, lineWidth: 1.5))
+        // The card in front and picked: its chip, with the picked outline (it never joins).
+        .overlay {
+            if front && picked {
+                RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.accentColor, lineWidth: 1.5)
+            }
+        }
         // A folder's or a layout's cards hang from a hairline under its icon, rather than each wearing
         // a pill. Each row draws its own length and the gap above it, so the line runs unbroken.
         .background(alignment: .topLeading) {
@@ -2628,6 +2650,13 @@ struct SpaceSidebarRow: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(front || picked ? .isSelected : [])
         .accessibilityAction(named: "Close") { if hasCloseSlot { close?() } }
+    }
+
+    func joined(above: Bool, below: Bool) -> Self {
+        var copy = self
+        copy.joinsAbove = above
+        copy.joinsBelow = below
+        return copy
     }
 
     /// Where a row's icon starts, and so where every title's edge is worked out from.
@@ -2764,6 +2793,55 @@ extension SpaceSidebarRow {
         guard editing else { return }
         let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         endRename?(keeping && !name.isEmpty && name != title ? name : nil)
+    }
+}
+
+/// A row's ground when it isn't the card in front: picked (accent wash and outline), on screen (a
+/// faint fill), hovered, or nothing. Joined to a neighbour lit the same way, its corners on that side go
+/// square and it reaches 1 pt into the 2 pt gap, where the neighbour's reaches the other 1 pt; the
+/// outline loses that edge, so a run is one shape with one outline.
+struct SpaceRowGround: View {
+    enum Kind: Equatable {
+        case none, on, picked, front
+        /// The chip in front is one card, raised: it never joins.
+        var joins: Bool { self == .on || self == .picked }
+    }
+
+    var kind: Kind
+    var hover = false
+    var above = false
+    var below = false
+    static let radius: CGFloat = 8
+    /// Half the rows' spacing (`spacing: 2` in the sidebar's list).
+    static let reach: CGFloat = 1
+
+    private var shape: UnevenRoundedRectangle {
+        let top = above ? 0 : Self.radius, bottom = below ? 0 : Self.radius
+        return UnevenRoundedRectangle(topLeadingRadius: top, bottomLeadingRadius: bottom,
+                                      bottomTrailingRadius: bottom, topTrailingRadius: top, style: .continuous)
+    }
+
+    var body: some View {
+        let fill: Color = switch kind {
+        case .picked: Color.accentColor.opacity(0.12)
+        case .on: Color.primary.opacity(0.07)
+        case .none, .front: Color.primary.opacity(hover ? 0.05 : 0)
+        }
+        shape.fill(fill)
+            .overlay {
+                if kind == .picked {
+                    // Drawn past the joined edge and clipped back, so that edge's stroke falls outside.
+                    Color.clear
+                        .overlay {
+                            shape.strokeBorder(Color.accentColor, lineWidth: 1.5)
+                                .padding(.top, above ? -4 : 0).padding(.bottom, below ? -4 : 0)
+                        }
+                        .clipped()
+                }
+            }
+            .padding(.top, above ? -Self.reach : 0)
+            .padding(.bottom, below ? -Self.reach : 0)
+            .allowsHitTesting(false)
     }
 }
 
