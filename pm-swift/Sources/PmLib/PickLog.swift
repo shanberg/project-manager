@@ -73,6 +73,11 @@ public struct PickEvent: Codable, Equatable, Sendable {
         /// A picked task was renamed through PM. Carries the new digest and text, and the picks it
         /// applies to, so a rename doesn't strand them.
         case retargeted
+        /// A task was looked at and kept: still meant, though not worked on now — what Keep says in a
+        /// catch-up review (`TaskStaleness`). Has no `into`, because nothing was taken up into a
+        /// sitting; all it does is start the task's untouched clock again. A `released` naming it in
+        /// `reverses` takes it back.
+        case kept
     }
 
     public var id: String
@@ -80,7 +85,8 @@ public struct PickEvent: Codable, Equatable, Sendable {
     public var at: String
     public var event: Kind
     public var task: PickedTask
-    /// The sitting a pick went into. On `released`, the sitting the cancelled pick went into.
+    /// The sitting a pick went into. On `released`, the sitting the cancelled pick went into — nil
+    /// when what it cancels is a keep.
     public var into: PickedInto?
     /// `released`: the id of the pick it cancels.
     public var reverses: String?
@@ -198,7 +204,11 @@ public enum PickLog {
                 return PickEvent(at: at, event: .released, task: event.task, into: event.into,
                                  reverses: event.id, source: source)
             case .released:
-                return PickEvent(at: at, event: .picked, task: event.task, into: event.into, source: source)
+                // A release with no sitting cancelled a keep, and taking it back keeps the task again.
+                return PickEvent(at: at, event: event.into == nil ? .kept : .picked, task: event.task,
+                                 into: event.into, source: source)
+            case .kept:
+                return PickEvent(at: at, event: .released, task: event.task, reverses: event.id, source: source)
             case .retargeted:
                 var task = event.task
                 task.digest = event.to ?? task.digest
@@ -260,9 +270,28 @@ public enum PickLog {
                     kept[i]?.task.ordinal = event.task.ordinal
                     kept[i]?.task.line = event.task.line
                 }
+            case .kept:
+                // Not a pick: `keeps` reads these.
+                continue
             }
         }
         return kept.compactMap { $0 }
+    }
+
+    /// The keeps still standing, oldest first: every `kept` that no `released` names.
+    static func keeps(_ events: [PickEvent]) -> [PickEvent] {
+        let cancelled = Set(events.filter { $0.event == .released }.compactMap(\.reverses))
+        return events.filter { $0.event == .kept && !cancelled.contains($0.id) }
+    }
+
+    /// When each task tree in this document was last kept, by the position of the line the keep named.
+    /// A keep whose task no longer resolves is left out, as a pick is.
+    static func resolvedKeeps(_ events: [PickEvent], notes: ProjectNotes,
+                              todos: [Todo]) -> [(sessionIndex: Int, lineIndex: Int, at: String)] {
+        keeps(events).compactMap { event in
+            guard let task = try? resolveTaskRef(event.task.ref, notes: notes, todos: todos) else { return nil }
+            return (task.sessionIndex, task.lineIndex, event.at)
+        }
     }
 
     /// A standing pick, resolved against one read of the document.
@@ -331,10 +360,24 @@ extension NotesShowOutput {
     /// This read with the project's picks attached: every standing pick, and on each task the latest
     /// sitting it was picked up into.
     func attachingPicks(projectPath: String) -> NotesShowOutput {
-        let resolved = PickLog.resolved(projectPath: projectPath, notes: notes, todos: todos)
-        guard !resolved.isEmpty else { return self }
+        let events = PickLog.events(projectPath: projectPath)
+        let resolved = PickLog.resolve(PickLog.standing(events), notes: notes, todos: todos)
+        let keeps = PickLog.resolvedKeeps(events, notes: notes, todos: todos)
+        guard !resolved.isEmpty || !keeps.isEmpty else { return self }
         var out = self
         out.picks = resolved.map(\.pick)
+        // A keep covers the tree too, as a pick does, and the latest one written wins.
+        for keep in keeps {
+            guard let named = todos.first(where: {
+                $0.sessionIndex == keep.sessionIndex && $0.lineIndex == keep.lineIndex
+            }) else { continue }
+            for member in TaskTree.members(of: TaskTree.root(of: named, in: todos), in: todos) {
+                guard let i = out.todos.firstIndex(where: {
+                    $0.sessionIndex == member.sessionIndex && $0.lineIndex == member.lineIndex
+                }) else { continue }
+                out.todos[i].kept = keep.at
+            }
+        }
         for pick in resolved {
             guard let named = todos.first(where: {
                 $0.sessionIndex == pick.sessionIndex && $0.lineIndex == pick.lineIndex

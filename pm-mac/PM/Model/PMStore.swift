@@ -83,6 +83,10 @@ final class PMStore {
     /// Every standing pick that still resolves in this read: which older task was picked up into which
     /// sitting (docs/sessions.md D2). Each task also carries its latest one as `Todo.picked`.
     private(set) var picks: [TaskPick] = []
+    /// Every line of every task tree that has gone stale — open, undated, and untouched for three weeks
+    /// (`TaskStaleness`, docs/stale-tasks.md) — by `TaskStaleness.key`. Worked out once per load, since
+    /// a card asks of every pile row on every draw.
+    private(set) var staleLines: Set<String> = []
     /// What each distinct wait target on this project's tasks turns out to name, resolved once per
     /// load rather than once per row.
     ///
@@ -391,6 +395,7 @@ final class PMStore {
             textureStyle = .standard
             todos = []
             picks = []
+            staleLines = []
             lastEditedAt = nil
             focusedKey = nil
             heroSnapshot = nil   // no project → nothing to animate from next time
@@ -463,6 +468,8 @@ final class PMStore {
                     self.textureStyle = textureStyle
                     self.todos = output.todos
                     self.picks = output.picks
+                    let stale = TaskStaleness.staleLines(in: output.todos)
+                    if stale != self.staleLines { self.staleLines = stale }
                     self.resolveWaits()
                     self.lastEditedAt = lastEdited
                     self.focusedKey = output.focusedKey
@@ -841,6 +848,20 @@ final class PMStore {
             try PMContract.perform(.taskPick, Self.references(todos, project: project)).sidecar ?? []
         }
     }
+
+    /// Keep: say each task's tree is still meant, without working on it now — the catch-up review's
+    /// verb (docs/stale-tasks.md). It counts as touched again and leaves the pile of stale work; the
+    /// notes aren't written and nothing lands in today's Picked up. One step.
+    func keep(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
+        guard !todos.isEmpty else { then?(); return }
+        mutating(named: "Keep", then: then) { project in
+            try PMContract.perform(.taskKeep, Self.references(todos, project: project)).sidecar ?? []
+        }
+    }
+
+    /// The trees that have gone stale, by their roots, the longest-forgotten first — what a catch-up
+    /// review goes through.
+    var staleRoots: [Todo] { TaskStaleness.staleRoots(in: todos) }
 
     /// Put Back: take each task's latest pick back. The tasks aren't touched. One step.
     func putBack(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
