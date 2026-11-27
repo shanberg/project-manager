@@ -120,7 +120,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
 
         // Watch the config dir (+ every open project's notes file) for CLI/Raycast/Obsidian edits.
-        watcher = ConfigWatcher { [weak self] in self?.handleExternalChange() }
+        watcher = ConfigWatcher { [weak self] change in self?.handleExternalChange(change) }
+        // The app's own writes are not outside changes — see `ConfigWatcher.adoptOwnWrite`.
+        PMStore.onOwnWrite = { [weak self] paths in self?.watcher?.adoptOwnWrite(paths: paths) }
         watcher.start()
         // And the PARA roots themselves, so a project archived outside PM is noticed rather than
         // waiting for some unrelated reload to stumble on it. The folder scan already publishes where
@@ -285,7 +287,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// External change (watcher fired): reload data and re-apply panel settings that Raycast may have
     /// written to panel-settings.json.
-    private func handleExternalChange() {
+    ///
+    /// **Only the projects whose files moved**, when nothing but notes files and pick logs did. An edit
+    /// in Obsidian to one project used to re-read every open project, force a folder scan and re-read
+    /// the panel settings — work for a change that, by construction, touched none of them.
+    private func handleExternalChange(_ change: ConfigWatcher.Change) {
+        if let paths = change.notesOnly {
+            for store in StoreRegistry.shared.liveStores where store.watchedPaths.contains(where: paths.contains) {
+                store.reload()
+            }
+            return
+        }
         let disk = PanelSettings.load()
         if disk != settings {
             settings = disk
