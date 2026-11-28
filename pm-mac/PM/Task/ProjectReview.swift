@@ -365,7 +365,7 @@ struct ProjectReviewView: View {
             VStack(alignment: .leading, spacing: 12) {
                 BriefLabel(model.lastReviewed.map { "Since the last review, \($0)" } ?? "The last three weeks")
                 if model.recap.isEmpty {
-                    Text("No sittings.").font(FolioType.body).foregroundStyle(.secondary)
+                    Text("No sessions.").font(FolioType.body).foregroundStyle(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(model.recap.prefix(12)) { sitting in
@@ -501,7 +501,7 @@ struct ProjectReviewView: View {
                     TextField("Optional", text: $model.nextTask)
                         .textFieldStyle(.roundedBorder).font(FolioType.body)
                 }
-                Text("This becomes the note of today's Review sitting.")
+                Text("This becomes the note of today's Review session.")
                     .font(FolioType.meta).foregroundStyle(.tertiary)
             }
             .padding(16)
@@ -511,7 +511,7 @@ struct ProjectReviewView: View {
     private var wrapUp: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(model.tally.isEmpty ? "Nothing changed." : model.tally).font(FolioType.body)
-            Text("Finish to write the review into today's sitting. Each change is a step you can undo with ⌘Z in the project.")
+            Text("Finish to write the review into today's session. Each change is a step you can undo with ⌘Z in the project.")
                 .font(FolioType.meta).foregroundStyle(.tertiary)
         }
         .padding(16)

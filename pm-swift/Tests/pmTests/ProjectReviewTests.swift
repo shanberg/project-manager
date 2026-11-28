@@ -145,7 +145,7 @@ final class ProjectReviewTests: XCTestCase {
         XCTAssertEqual(health.daysSinceLastSitting, 40)
         XCTAssertTrue(health.hasGoneQuiet)
         XCTAssertTrue(health.isCreaky)
-        XCTAssertEqual(health.reasons, ["no sitting for 5 weeks"])
+        XCTAssertEqual(health.reasons, ["no session for 5 weeks"])
     }
 
     /// An empty brief is reported, for the review's brief step, but on its own it isn't a creak.

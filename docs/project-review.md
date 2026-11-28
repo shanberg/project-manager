@@ -44,7 +44,7 @@ carries:
 
 `isCreaky` is any of the first five. An empty brief is reported for the brief step but isn't a creak on
 its own: plenty of small projects never fill one in. `score` ranks a queue, overdue heaviest; `reasons`
-are the words a queue row shows ("2 overdue", "12 stale tasks", "no sitting for 5 weeks").
+are the words a queue row shows ("2 overdue", "12 stale tasks", "no session for 5 weeks").
 
 ### D3 — The walk
 

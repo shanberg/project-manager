@@ -176,7 +176,7 @@ public struct ProjectHealth: Equatable, Sendable {
         if releasedWaits > 0 { out.append("\(releasedWaits) \(releasedWaits == 1 ? "wait" : "waits") released") }
         if staleTrees > 0 { out.append("\(staleTrees) stale \(staleTrees == 1 ? "task" : "tasks")") }
         if focusGoneQuiet { out.append("focus untouched for 3+ weeks") }
-        if hasGoneQuiet, let d = daysSinceLastSitting { out.append("no sitting for \(Self.span(days: d))") }
+        if hasGoneQuiet, let d = daysSinceLastSitting { out.append("no session for \(Self.span(days: d))") }
         return out
     }
 
