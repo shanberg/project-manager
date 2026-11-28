@@ -290,6 +290,10 @@ enum MainMenu {
         // controller, so it animates and persists in one place.
         add(menu, "Show Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), target: nil,
             key: "s", modifiers: [.command, .control])
+        // ⌥⌘F, Mail's and Notes' key for the search over their sidebar's list. See
+        // `ProjectWindowController.filterSidebar`.
+        add(menu, "Filter Sidebar", #selector(ProjectWindowController.filterSidebar(_:)), target: nil,
+            key: "f", modifiers: [.command, .option])
         // ⌘. takes the window down to what's on screen; ⌥⌘. to the one card. See
         // `ProjectWindowController.toggleFocusMode`. The title says Leave while it's on.
         add(menu, "Enter Focus Mode", #selector(ProjectWindowController.toggleFocusMode(_:)), target: nil,

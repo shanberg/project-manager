@@ -27,7 +27,7 @@ Rebuilt 2026-11-04 on workspaces (`Spaces`, `SpaceModel`). The first build, a br
 
 Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces the same day (`SpaceFrame`, `SpaceCardMarks`); for projects 2026-11-05 (below).
 
-- Built: the sidebar in place of the project list in a space's window (the tab row hidden); favourites, Board, workspaces among Pinned, pinned and Today cards, frames as folders (click to fold); click, ⌥-click, ⌘-click + ⌘↩ ("Tile N as a Workspace"); Pin, Favourite, Open Beside, Close on a row's menu; the address field (⌘T) making a web card; ⌘W on the card in front.
+- Built: the sidebar in place of the project list in a space's window (the tab row hidden); favourites, Board (until 2026-11-28; § below), workspaces among Pinned, pinned and Today cards, frames as folders (click to fold); click, ⌥-click, ⌘-click + ⌘↩ ("Tile N as a Workspace"); Pin, Favourite, Open Beside, Close on a row's menu; the address field (⌘T) making a web card; ⌘W on the card in front.
 - Polished 2026-11-04 against renders of a real window: Arc's row and favourite styles (the card in front a raised chip), a rule between pinned and Today, workspace rows led by their tiles' icons, the space's colour and name at the foot, the window washed in the space's colour.
 - No header in a space's window (`CanvasPaneController.hidesHeader`): no title pill, tab bar or trailing controls. Tiles have the usual 6pt gap on every side, sidebar or not.
 - Dead space, as Arc: in a layout (a space's or, since 2026-11-05, a project's, and the one card filling the window in focus mode), a press in the top 96pt of a tile's page (`CanvasPageView.deadSpaceBand`; 56pt missed Apple Music's header) on nothing usable moves the window; double-click is the title bar's action. Nothing usable = WebKit's cursor is the plain arrow (not a hand or an I-beam) and its last hover report was no link, image, media or editable field (`isDeadSpace`, `hoverIsInteractive` from `mouseDidMoveOverElement`). And the page itself says nothing there is its own (`CanvasPageView.pageUses`, asked on each WebKit hover report — `mouseMoved` and the view's own tracking areas never hear the moves; a press before the answer for the latest report is the page's; "page kept a press in the band" logs one): not inside a button, form control, ARIA widget role, `tabindex` ≥ 0, `draggable`, `contenteditable` or `onclick`; not on a `canvas`, `iframe`, `embed` or `object`; not inside a dialog, or a fixed/absolute box inset from the viewport's left, right and top (a floating panel). Figma's toolbar buttons keep the arrow cursor and its Variables panel has a blank header, 2026-11-05. A video's picture (2026-11-05, `CanvasPageView.Press.video`) is held rather than taken: a visible `<video>` at least 200×100, above the 96pt strip along its foot (player controls), not under a control; an ancestor that only holds the video (a player's `tabindex=0` wrapper) or a layer covering the whole picture is not a control. Anywhere on it, not only in the top band. The press is not passed to the page: moved 4pt (`videoDragSlop`) it moves the window; released first, the page gets the mouse-down and mouse-up together (a click pauses, a double-click goes full screen). A hover over media no longer counts as `hoverIsInteractive` (`hoverIsMedia`; it still blocks the top band). Logs "window drag from a video: <host>". Whether a page is a space's tile is asked of the board it's in at the press, not the card that built it: running pages are handed between panes. A drag from a page logs "window drag from page dead space: <host>".
@@ -65,7 +65,7 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
   - Filters (Active / Archived / All, by due / by domain): chips over the list.
   - Favourites: as a space's, icon tiles under the name.
   - Cards not pinned: a Cards section, every unpinned card on the board, frames as folders. No auto-archive, no Today, no Clear; a closed card goes to Archived Cards (§ Closing).
-  - Notes: a row above Board.
+  - Notes: the first row of the list.
   - The foot: the focused task (tick to complete) and the session's time, in place of a space's name.
   - Everything keyed to a space's frame applies to a project's too: no header or tab row (so no title pill, board capsule, Away or browser chips), ⌘T / ⌘L the sidebar's address, ⌘1…⌘9 and ⌃⇥ the sidebar's cards, ⌘W the card in front (in Notes: back to the board), ⇧⌘C the page's address, ⌘S the sidebar, Pin and Favourite in the tile capsule.
   - ⌘-click and new-window links in a project: a new card, shown in the tile you're in, as a space's.
@@ -75,7 +75,8 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
 
 - An Arc-style sidebar over a board's workspaces. The sidebar lists what's on the board; the main area is the workspace tiling.
 - For spaces and projects alike. A project's sidebar has Notes as a row. Replaces the window's tab row; supersedes "projects keep their window" above.
-- Sidebar, top to bottom: the address; favourites as icons; Board (the freeform canvas, the overview); Pinned; Today (spaces only), with New Tab.
+- Sidebar, top to bottom: the address; the filter field; favourites as icons; Pinned; Today (spaces only), with New Tab.
+- The board is not a row (2026-11-28). Go ▸ Canvas (⌥⌘C) shows it, in a space's window as in a project's; on it, a Board row is listed (lit, with the card count) to say where you are, and goes when you leave. Was: a Board row, always, under the address. The sidebar is the way in: the free canvas is kept, as one way to look at the same cards, not the place you go to find them.
 - A row is a card: web, folder, file, note, view. Frames on the board are folders in the sidebar.
 - Named workspaces are rows among Pinned, led by a drawing of the layout: its columns and tiles, a web card's tile in its site's hue (`LayoutShapeGlyph`).
 - Pinned and favourite are marks on the card, stored on the node (`pm*` keys), so the board stays the one record. The rest of a space's cards are Today; they stay until closed.
@@ -120,6 +121,18 @@ Decided 2026-11-04 in `.claude/mocks/folio-space-frame.html`. Built for spaces t
 - Not built: a grey bar beside the mark of the window in front, apart from focus.
 - Playing sound: WebKit's own `_isPlayingAudio`, observed on the page (`CanvasPageView.isPlayingAudio`, posted as `audioChanged`) — on the page because pages move between panes. Shown as a speaker on the card's sidebar row (click: pause) and favourite tile, on the card and tile rows of the ⌥Tab switcher, a dot under the dock mark, and in the space's flyout.
 - A space's dock flyout (`SpaceDockCard`): name, card count, Show Window; a Now Playing row with pause for each card making sound; the cards, pinned first, which open in the space; a web card's menu sends it to a recent project as a card (off the space), into its Links, or as a task.
+
+### Filtering the sidebar
+
+(2026-11-28; `SidebarFilter`, `SpaceFrame.refilter`.)
+
+- A field under the address: Filter Cards in a project, Filter Tabs in a space. View ▸ Filter Sidebar (⌥⌘F) puts the keyboard in it, unfolding a folded sidebar first.
+- Typing narrows the list to the layouts and cards that match; favourites, Notes, the rules and New Tab go while it does. Every word must be found, in any order, case and accents aside.
+- A card matches on its name, its site, its address and its folder's label (so a folder's name finds what's in it), and on what it says, as the board's search finds it (`CanvasSearch`): a document card's text, a web card's remembered page name. A card only a layout shows is listed too.
+- A layout matches on its name, or when it shows a card that matches.
+- The list: the layouts, then loose cards, then each folder's under its label, in the sidebar's order. "No Matches" when nothing does.
+- ↑ ↓ move a highlight (a ring, drawn while the field has the keyboard); Return opens it and clears the field; Esc or the field's ✕ clears it. A click opens a result as a click on its row would and keeps the filter, for looking through several. Right-click is the row's menu.
+- Not kept: the filter starts empty in every window and at launch. Rows can't be dragged while it's up.
 
 ## Browsing
 
