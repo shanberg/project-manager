@@ -43,7 +43,7 @@ final class StaleReviewModel {
         }
     }
 
-    enum Answer { case kept, picked, dropped, skipped }
+    enum Answer { case kept, picked, next, dropped, skipped }
 
     let store: PMStore
     private(set) var items: [Item]
@@ -75,6 +75,7 @@ final class StaleReviewModel {
             switch answer {
             case .kept: store.keep([root])
             case .picked: store.pickUp([root])
+            case .next: store.keepAsNext(root)
             case .dropped: store.drop([root])
             case .skipped: break
             }
@@ -172,7 +173,8 @@ struct StaleReviewView: View {
                     .font(FolioType.body).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
-            Text("Still meant? Keep it for later, pick it up now, or let it go.")
+            Text(embedded ? "Still meant? Keep it for later, make it the next thing, or let it go."
+                          : "Still meant? Keep it for later, pick it up now, or let it go.")
                 .font(FolioType.meta).foregroundStyle(.tertiary)
         }
         .padding(16)
@@ -189,7 +191,7 @@ struct StaleReviewView: View {
     }
 
     private var summary: String {
-        let parts: [(StaleReviewModel.Answer, String)] = [(.kept, "kept"), (.picked, "picked up"),
+        let parts: [(StaleReviewModel.Answer, String)] = [(.kept, "kept"), (.picked, "picked up"), (.next, "made next"),
                                                           (.dropped, "dropped"), (.skipped, "skipped")]
         return parts.compactMap { answer, word in
             let n = model.count(answer)
@@ -216,7 +218,13 @@ struct StaleReviewView: View {
                 Spacer()
                 Button("Skip") { model.answer(.skipped) }.keyboardShortcut(.rightArrow, modifiers: [])
                 Button("Drop") { model.answer(.dropped) }.keyboardShortcut("d", modifiers: [])
-                Button("Pick Up") { model.answer(.picked) }.keyboardShortcut("p", modifiers: [])
+                // In a review, the one to do next is focused and kept rather than picked up: the pick
+                // belongs to the session it's worked in, not to the review's.
+                if embedded {
+                    Button("Next") { model.answer(.next) }.keyboardShortcut("n", modifiers: [])
+                } else {
+                    Button("Pick Up") { model.answer(.picked) }.keyboardShortcut("p", modifiers: [])
+                }
                 Button("Keep") { model.answer(.kept) }.keyboardShortcut(.defaultAction)
             }
         }

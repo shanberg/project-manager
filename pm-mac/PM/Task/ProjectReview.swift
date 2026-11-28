@@ -246,6 +246,7 @@ final class ProjectReviewModel {
         func add(_ n: Int, _ word: String) { if n > 0 { parts.append("\(word) \(n)") } }
         add(c?.count(.kept) ?? 0, "kept")
         add(c?.count(.picked) ?? 0, "picked up")
+        add(c?.count(.next) ?? 0, "made next")
         add((c?.count(.dropped) ?? 0) + dropped, "dropped")
         add(redated, "redated")
         add(waitsCleared, "waits cleared")

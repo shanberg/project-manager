@@ -54,7 +54,10 @@ are the words a queue row shows ("2 overdue", "12 stale tasks", "no session for 
    first one), each by its lede, and how many tasks were done and dropped since (the done log).
 2. **The Brief.** Summary, Problem, Goals, Approach, edited in place. Written when the step is left, and
    only if something changed. One ⌘Z step.
-3. **Older Tasks.** Catch Up itself (`StaleReviewView`, embedded), over the stale trees.
+3. **Older Tasks.** Catch Up itself (`StaleReviewView`, embedded), over the stale trees, with one change:
+   Pick Up becomes **Next** (N), which keeps the tree and focuses it without picking it up
+   (`PMStore.keepAsNext`, `task.focus` with `pick: false`). The pick comes in the session it's worked in,
+   so the Review session's Picked up holds only what the review worked on.
 4. **Dates and Waits.** Overdue tasks: Tomorrow, Next Week, No Date, Drop. Waits on something archived:
    Clear Wait, Drop. A focus gone quiet: Keep, Drop.
 5. **Your Thoughts.** Free text for the sitting's note, an optional learning (added to Learnings) and an
