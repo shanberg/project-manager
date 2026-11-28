@@ -42,6 +42,11 @@ final class CanvasColorWash: NSView {
         }
     }
 
+    /// Whether the texture is drawn at all — see `CanvasScrollView.tilesHideTexture`.
+    var textureShown = true {
+        didSet { if textureShown != oldValue { needsDisplay = true } }
+    }
+
     /// How far down this view the colour reaches. `height` on a board; the settings sheet's preview,
     /// a window in miniature, scales it to its own size so the two keep their proportions.
     var washHeight: CGFloat = CanvasColorWash.height {
@@ -135,7 +140,7 @@ final class CanvasColorWash: NSView {
     /// Its reach is a share of this view, so a resize redraws it — except mid-drag, where the last one
     /// is kept and redrawn once the drag ends. Only the reach lags; the pixels stay whole either way.
     private func drawTexture(rgb: (Double, Double, Double)?, dark: Bool, in dirty: NSRect, context: CGContext) {
-        guard let texture, !CanvasTexture.isSuppressed else { return }
+        guard let texture, textureShown, !CanvasTexture.isSuppressed else { return }
         let reach = CanvasTexture.reach(texture.style, in: bounds.size)
         guard dirty.intersects(CGRect(origin: .zero, size: reach)) || inLiveResize else { return }
         let ink = CanvasTexture.ink(for: rgb, dark: dark)

@@ -36,6 +36,9 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
     /// The window's titlebar band, where a press moves the window.
     static let titlebarBand: Double = 28
 
+    /// How far the sidebar's edge handle reaches into the leading tile (`layoutGutters`).
+    static let sidebarEdgeOverlap: CGFloat = 3
+
     /// The clearance the header wants when it's shown. In a space, as in Arc, the tiles run up to the
     /// top with the same small gap as everywhere else — unless the sidebar is folded away and the
     /// window's buttons are over the content, when they stay clear of the band.
@@ -133,7 +136,10 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
         // Beside the sidebar, the leading gutter is the sidebar's edge rather than more window to drag.
         if sidebarEdge.superview == nil { container.addSubview(sidebarEdge, positioned: .above, relativeTo: scroll) }
         sidebarEdge.autoresizingMask = masks[1]
-        sidebarEdge.frame = frames[1]
+        // Across the tiles' leading edge rather than only up to it (2026-11-27): that edge is where the
+        // sidebar is seen to end, so it's where the hand goes. A few points into the tile, which takes
+        // nothing there — the grip is at a tile's top middle, a page's controls are not at its very edge.
+        sidebarEdge.frame = NSRect(x: leading, y: 0, width: gap + Self.sidebarEdgeOverlap, height: bounds.height)
         sidebarEdge.width = { [weak self] in self?.sidebarWidth() ?? 0 }
         sidebarEdge.resize = { [weak self] in self?.setSidebarWidth($0) }
         sidebarEdge.isHidden = !(hidesHeader && sidebarShowing)
@@ -142,6 +148,7 @@ final class CanvasPaneController: NSViewController, NSMenuItemValidation {
 
     private func applyHeaderHidden() {
         guard pill != nil else { return }
+        scroll.tilesHideTexture = hidesHeader
         layoutGutters()
         for piece in [pill, tabBar, capsule] as [NSView] { piece.isHidden = hidesHeader }
         if hidesHeader && presentation == .list { presentation = .board }

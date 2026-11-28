@@ -33,7 +33,22 @@ final class CanvasScrollView: NSScrollView {
     /// How far into a tiling the board is, 0…1 — the soft edge stands down over a workspace. Set by
     /// the board on every step of its crossing.
     var edgeTiledness: Double = 0 {
-        didSet { if edgeTiledness != oldValue { tile() } }
+        didSet {
+            guard edgeTiledness != oldValue else { return }
+            tile()
+            showTexture()
+        }
+    }
+
+    /// Under the frame, a tiling leaves the project's texture off (2026-11-27). The tiles cover it
+    /// but for the gutters, and the one beside the sidebar was a strip of texture against a sidebar
+    /// that has none: a tone step where the two grounds should meet as one. The board keeps it.
+    var tilesHideTexture = false {
+        didSet { if tilesHideTexture != oldValue { showTexture() } }
+    }
+
+    private func showTexture() {
+        groundView.textureShown = !(tilesHideTexture && edgeTiledness > 0.5)
     }
 
     override func tile() {

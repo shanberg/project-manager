@@ -1363,13 +1363,34 @@ final class ProjectSplitViewController: NSSplitViewController {
 /// The project window's split view, which can draw its divider as nothing — a space's window, where
 /// the sidebar and the content are one ground (docs/spaces.md § The frame).
 final class ProjectSplitView: NSSplitView {
-    var hidesDivider = false { didSet { needsDisplay = true; adjustSubviews() } }
+    var hidesDivider = false { didSet { needsDisplay = true; adjustSubviews(); hideDividerViews() } }
     override var dividerColor: NSColor { hidesDivider ? .clear : super.dividerColor }
     /// No width at all when hidden: a 1pt divider that draws nothing shows the window's plain
     /// background between two washes, which reads as a line. Nothing to grab either — the tiles'
     /// leading gutter is the sidebar's edge (`SidebarEdgeHandle`), which is what makes a divider
     /// unnecessary.
     override var dividerThickness: CGFloat { hidesDivider ? 0 : super.dividerThickness }
+
+    /// **And no divider view.** At no thickness AppKit still keeps its `NSSplitDividerView`, 4pt wide
+    /// across the seam, and the window server draws a 1pt light line at its leading edge — 2pt into
+    /// the sidebar, plain beside a tile's 6pt gutter (2026-11-27). Nothing in the view tree paints it:
+    /// `cacheDisplay` and `layer.render` both show the seam clean, the screenshot shows the line at
+    /// the divider view's edge. So the view goes, and is kept gone through AppKit's own layouts.
+    override func layout() {
+        super.layout()
+        hideDividerViews()
+    }
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        hideDividerViews()
+    }
+
+    private func hideDividerViews() {
+        for view in subviews where "\(type(of: view))" == "NSSplitDividerView" {
+            if view.isHidden != hidesDivider { view.isHidden = hidesDivider }
+        }
+    }
 }
 
 /// The floating sidebar's frame: rounded, lifted off the content, and told when the pointer leaves it.
