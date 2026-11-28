@@ -32,7 +32,7 @@ func runDay(args: [String]) {
     }
     do {
         let range = try DoneRange.resolve(period: period, since: since, until: until)
-        let list = try sessionList(in: range, projects: projects.isEmpty ? nil : projects)
+        let list = try sessionList(in: range, projects: projects.isEmpty ? nil : projects, time: !markdown)
         print(markdown ? ViewMarkdown.day(list) : dayText(list, range: range), terminator: "")
     } catch {
         stderr(String(describing: error))
@@ -101,11 +101,17 @@ func dayText(_ list: SittingList, range: DoneRange, now: Date = Date(),
 
         for sitting in sittings {
             out.append("")
-            let time = sitting.startTime ?? "Earlier"
+            var time = sitting.startTime ?? "Earlier"
+            // Its end, when one is on record a minute or more after it began (docs/sessions-and-time.md C2).
+            if let start = sitting.startedAt.flatMap({ iso.date(from: $0) }),
+               let end = sitting.endedAt.flatMap({ iso.date(from: $0) }), end.timeIntervalSince(start) >= 60 {
+                time += " – " + clock.string(from: end)
+            }
             var title = sitting.projectName
             if !sitting.name.isEmpty { title += " · \(sitting.name)" }
             if sitting.isCurrent { title += "  (now)" }
-            out.append(time.padding(toLength: gutter.count, withPad: " ", startingAt: 0) + title)
+            out.append((time.count < gutter.count ? time.padding(toLength: gutter.count, withPad: " ", startingAt: 0)
+                                                  : time + "  ") + title)
             if !sitting.prose.isEmpty {
                 out += sitting.prose.components(separatedBy: "\n").map { $0.isEmpty ? "" : gutter + $0 }
             }

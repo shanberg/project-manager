@@ -372,4 +372,46 @@ final class SittingListTests: XCTestCase {
         call("project.create", ["title": "Redesign", "domain": "W"])
         XCTAssertEqual(call("session.list", ["period": "yesterday"])["summary"] as? String, "No sittings.")
     }
+
+    // MARK: - A sitting's end (docs/sessions-and-time.md C2)
+
+    /// Without the attention log, a sitting ends at the last thing that happened in it.
+    func testASittingEndsAtItsLastCompletion() throws {
+        let day = try list(twoSittings, events: [
+            event(.completed, "Email Dana", moment(18, 9, 40)),
+            event(.dropped, "Book the venue", moment(18, 10, 5)),
+            event(.completed, "Draft the nav spec", moment(18, 15)),
+        ], in: range(18))
+        XCTAssertEqual(day.sittings.first { $0.startTime == "9:10 AM" }?.endedAt,
+                       DoneLog.timestamp(moment(18, 10, 5)), "A drop is a sign of life too")
+        XCTAssertEqual(day.sittings.first { $0.startTime == "2:15 PM" }?.endedAt,
+                       DoneLog.timestamp(moment(18, 15)))
+    }
+
+    /// Nothing timed in it: no end, rather than an end at its start.
+    func testASittingWithNothingTimedHasNoEnd() throws {
+        let day = try list(twoSittings, in: range(18))
+        XCTAssertEqual(day.sittings.map(\.endedAt), [nil, nil])
+    }
+
+    /// Attention moves the end later, never earlier, and each span goes to the sitting it began in.
+    func testAttentionMovesASittingsEndLater() throws {
+        let day = try list(twoSittings, events: [
+            event(.completed, "Email Dana", moment(18, 9, 40)),
+            event(.completed, "Draft the nav spec", moment(18, 16)),
+        ], in: range(18))
+        func span(_ from: Date, _ to: Date) -> AttentionSpan {
+            AttentionSpan(project: "W-1 Redesign", key: "k", task: nil, start: from, end: to, basis: .measured)
+        }
+        let timed = withDurations(day, spans: [
+            span(moment(18, 9, 10), moment(18, 10, 45)),
+            span(moment(18, 14, 20), moment(18, 15, 30)),
+        ])
+        let morning = try XCTUnwrap(timed.sittings.first { $0.startTime == "9:10 AM" })
+        XCTAssertEqual(morning.endedAt, DoneLog.timestamp(moment(18, 10, 45)))
+        XCTAssertEqual(morning.seconds, 95 * 60)
+        let afternoon = try XCTUnwrap(timed.sittings.first { $0.startTime == "2:15 PM" })
+        XCTAssertEqual(afternoon.endedAt, DoneLog.timestamp(moment(18, 16)),
+                       "A tick after the last span is later still, and wins")
+    }
 }
