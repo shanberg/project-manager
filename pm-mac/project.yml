@@ -216,6 +216,7 @@ targets:
       - path: PM/Overview/OverviewModel.swift
       - path: PM/Overview/WindowSnapshot.swift
       - path: PM/Spaces/SpaceCardMarks.swift
+      - path: PM/Spaces/SidebarFilter.swift
       - path: PM/Spaces/SpaceArchive.swift
       - path: PM/Spaces/SpaceClosing.swift
       - path: PM/Spaces/SpaceSidebarGlyphs.swift

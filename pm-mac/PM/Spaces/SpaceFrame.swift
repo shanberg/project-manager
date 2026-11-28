@@ -160,6 +160,8 @@ final class SpaceFrame {
     // MARK: Reading the board
 
     func refresh() {
+        // What the filter keeps follows the rows: a card renamed, closed or added while it's up.
+        defer { if filterResult != nil { refilter() } }
         let document = store.document
         let board = self.board
         // A canvas posing in the tiles of the layout it takes over from (`poseAsTiling`) isn't tiled:
@@ -1413,6 +1415,58 @@ final class SpaceFrame {
         refresh()
     }
 
+    // MARK: Filtering
+
+    /// What's typed in the sidebar's filter field (docs/spaces.md § Filtering the sidebar). Empty is the
+    /// sidebar as it is.
+    var filterText = "" { didSet { if filterText != oldValue { refilter() } } }
+    /// What the filter keeps, or nil while nothing is typed.
+    private(set) var filterResult: SidebarFilter.Result?
+    /// The rows the filter kept, by id, as the sidebar would draw them.
+    private(set) var filterRows: [String: Row] = [:]
+    /// Bumped to give the filter field the keyboard (View ▸ Filter Sidebar, ⌥⌘F).
+    private(set) var filterRequests = 0
+    /// Asked before the field is wanted: the split unfolds a folded sidebar.
+    @ObservationIgnored var presentFilter: () -> Void = {}
+
+    /// ⌥⌘F: the filter field, with the sidebar out if it was folded away.
+    func askForFilter() {
+        presentFilter()
+        filterRequests += 1
+    }
+
+    /// Every card the sidebar lists — Pinned, Cards / Today, favourites, and the cards only a layout
+    /// shows — run through `SidebarFilter`, with what each card *says* (a document's text, a page's
+    /// remembered name) found the way the board's search finds it (`CanvasSearch`).
+    private func refilter() {
+        let query = filterText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            filterResult = nil
+            filterRows = [:]
+            return
+        }
+        var cards: [SidebarFilter.Card] = [], rows: [String: Row] = [:]
+        func add(_ row: Row, in folder: Folder? = nil) {
+            if rows[row.id] == nil { rows[row.id] = row }
+            cards.append(.init(id: row.id, title: row.title, host: row.host, address: row.address,
+                               folderID: folder?.id, folderLabel: folder?.label))
+        }
+        for group in [pinned, today] {
+            group.loose.forEach { add($0) }
+            for folder in group.folders { folder.rows.forEach { add($0, in: folder) } }
+        }
+        favorites.forEach { add($0) }
+        workspaces.flatMap(\.rows).forEach { add($0) }
+        let resolver = store.resolver
+        let says = Set(CanvasSearch.matches(query, in: store.document, fileText: { [weak self] path in
+            CanvasSearch.prose(at: path, resolver: resolver, owner: self) { [weak self] in self?.refilter() }
+        }))
+        filterRows = rows
+        filterResult = SidebarFilter.run(query, cards: cards,
+                                         layouts: workspaces.map { .init(name: $0.name, cards: $0.rows.map(\.id)) },
+                                         says: says)
+    }
+
     // MARK: New tab
 
     /// ⌘T: the address field, for a new card.
@@ -1679,6 +1733,9 @@ struct SpaceFrameSidebar: View {
     /// A card's icon is one thing whether it's on a row or a favourite: adding to (or taking off)
     /// Favourites moves it between the two (`matchedGeometryEffect`).
     @Namespace private var glyphs
+    @FocusState private var filterFocused: Bool
+    /// The filter's result ↑ and ↓ are on, and Return opens: an index into `filterTargets`.
+    @State private var filterHighlight = 0
 
     /// A layout's cards as it comes up: they drop 4 pt out from under its row as they fade in, which
     /// says they belong to it. Going, they're gone at once: the rows below close up in the same frame,
@@ -1747,7 +1804,10 @@ struct SpaceFrameSidebar: View {
                 ProjectFrameHeader(store: project, state: frame.windowState, requests: frame.projectsRequests)
             }
             addressField
-            if !frame.favorites.isEmpty { favorites } else if frame.dragging != nil { favoritesWell }
+            filterField
+            if frame.filterResult != nil {
+                // Favourites are listed among what the filter keeps, not as icons above it.
+            } else if !frame.favorites.isEmpty { favorites } else if frame.dragging != nil { favoritesWell }
             // The list fills the scroll area at least, so the empty sidebar under the last row is the
             // drag area behind the rows rather than the scroll view's own ground (which moves nothing).
             //
@@ -1762,11 +1822,18 @@ struct SpaceFrameSidebar: View {
                 ZStack(alignment: .topLeading) {
                 if !benchNoFill { Color.clear.containerRelativeFrame(.vertical) }
                 VStack(alignment: .leading, spacing: 2) {
+                    if let result = frame.filterResult {
+                        filterResults(result)
+                    } else {
                     if !frame.isSpace {
                         SpaceSidebarRow(title: "Notes", symbol: "doc.text", on: frame.notesShowing) { frame.showNotes() }
                     }
-                    SpaceSidebarRow(title: "Board", symbol: "rectangle.on.rectangle.angled",
-                                    trailing: "\(frame.cardCount)", on: frame.boardShowing, dim: true) { frame.showBoard() }
+                    // The board isn't a way in any more (Go ▸ Canvas, ⌥⌘C, is): its row is here only
+                    // while it's on screen, to say where you are.
+                    if frame.boardShowing {
+                        SpaceSidebarRow(title: "Board", symbol: "rectangle.on.rectangle.angled",
+                                        trailing: "\(frame.cardCount)", on: true, dim: true) { frame.showBoard() }
+                    }
                     ForEach(Array(frame.workspaces.enumerated()), id: \.element.id) { index, workspace in
                         // A layout and its cards, spaced as the list is, so the cards can unfold as one.
                         VStack(alignment: .leading, spacing: 2) {
@@ -1789,6 +1856,7 @@ struct SpaceFrameSidebar: View {
                         .onDrop(of: SpaceRowDropTarget.types, delegate: SpaceRowDropTarget(
                             frame: frame, owned: [todayStart]) { _ in todayStart })
                     group(frame.today, pinned: false)
+                    }
                 }
                 .padding(.bottom, 8)
                 // Its own height whatever the scroll area's, so a resize never re-lays the rows out.
@@ -1803,13 +1871,18 @@ struct SpaceFrameSidebar: View {
             .scrollIndicators(.never)
             // The card in front kept in sight: ⌃⇥, ⌘9 or a link opening a card can put it below the
             // fold, and a sidebar that doesn't follow loses your place. Its folder's row when folded.
+            .onChange(of: filterHighlight) { _, index in
+                guard filterTargets.indices.contains(index) else { return }
+                scroller.scrollTo(filterTargets[index].lineID)
+            }
             .onChange(of: frontRowID) { _, id in
-                guard let id else { return }
+                guard frame.filterResult == nil, let id else { return }
                 withAnimation(Motion.animation(.easeOut(duration: Motion.Tempo.quick))) { scroller.scrollTo(id) }
             }
             }
             .accessibilityElement(children: .contain)
-            .accessibilityLabel(frame.isSpace ? "Tabs" : "Cards")
+            .accessibilityLabel(frame.filterResult != nil ? "Filtered \(frame.isSpace ? "Tabs" : "Cards")"
+                                : frame.isSpace ? "Tabs" : "Cards")
             if !frame.picked.isEmpty { pickedBar }
             if let row = frame.player {
                 // It turns up because sound left the screen, which you didn't do on purpose: rises 8pt as it
@@ -1845,6 +1918,162 @@ struct SpaceFrameSidebar: View {
         // A peek built for ⌘T / ⌘L is made after the request was counted, so there is no change for
         // `onChange` to see: it asks for itself. One built because the pointer reached the edge does not.
         .onAppear { if focusesAddress { askForTheKeyboard() } }
+        .onChange(of: frame.filterRequests) {
+            // The docked sidebar's field, never the floating copy's: ⌥⌘F unfolds the sidebar first.
+            guard !inPeek else { return }
+            filterFocused = true
+        }
+        .onChange(of: frame.filterText) { filterHighlight = 0 }
+    }
+
+    // MARK: Filtering
+
+    /// The sidebar's filter (docs/spaces.md § Filtering the sidebar): type and the list narrows to the
+    /// layouts and cards that match. ↑ ↓ move through them, Return opens one and clears the field, Esc
+    /// clears it.
+    private var filterField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+            TextField(frame.isSpace ? "Filter Tabs" : "Filter Cards", text: $frame.filterText)
+                .textFieldStyle(.plain)
+                .focused($filterFocused)
+                .onSubmit { openHighlighted() }
+                .onKeyPress(.downArrow) { moveHighlight(by: 1) }
+                .onKeyPress(.upArrow) { moveHighlight(by: -1) }
+                .onExitCommand { clearFilter() }
+                .accessibilityLabel(frame.isSpace ? "Filter tabs" : "Filter cards")
+                .accessibilityHint("Narrows the sidebar to the layouts and cards that match")
+            if !frame.filterText.isEmpty {
+                Button { clearFilter() } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        .frame(width: 18, height: 18).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Clear the filter (Esc)")
+                .accessibilityLabel("Clear filter")
+            }
+        }
+        .font(.system(size: 12))
+        .padding(.leading, 10).padding(.trailing, 4)
+        .frame(height: 26)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.04)))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .strokeBorder(filterFocused ? Color.accentColor.opacity(0.6) : .clear, lineWidth: 2))
+    }
+
+    /// One line of the filter's list: a folder's label, a layout, or a card.
+    private enum FilterLine: Identifiable {
+        case folder(id: String, label: String)
+        case layout(SpaceFrame.Workspace, target: Int)
+        case card(SpaceFrame.Row, indent: Bool, target: Int)
+
+        var id: String {
+            switch self {
+            case .folder(let id, _): "filter-folder:" + id
+            case .layout(let workspace, _): "filter-layout:" + workspace.name
+            case .card(let row, _, _): "filter-card:" + row.id
+            }
+        }
+    }
+
+    /// What can be opened from the filter's list, in its order: the layouts, then the cards.
+    private struct FilterTarget {
+        var lineID: String
+        var open: () -> Void
+    }
+
+    private var filterLines: [FilterLine] {
+        guard let result = frame.filterResult else { return [] }
+        var lines: [FilterLine] = [], target = 0
+        for name in result.layouts {
+            guard let workspace = frame.workspaces.first(where: { $0.name == name }) else { continue }
+            lines.append(.layout(workspace, target: target))
+            target += 1
+        }
+        for section in result.sections {
+            if let folder = section.folderID { lines.append(.folder(id: folder, label: section.label ?? "Folder")) }
+            for id in section.cards {
+                guard let row = frame.filterRows[id] else { continue }
+                lines.append(.card(row, indent: section.folderID != nil, target: target))
+                target += 1
+            }
+        }
+        return lines
+    }
+
+    private var filterTargets: [FilterTarget] {
+        filterLines.compactMap { line in
+            switch line {
+            case .folder: nil
+            case .layout(let workspace, _):
+                FilterTarget(lineID: line.id) { frame.showWorkspace(workspace.name) }
+            case .card(let row, _, _):
+                FilterTarget(lineID: line.id) { frame.click(row.id) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func filterResults(_ result: SidebarFilter.Result) -> some View {
+        if result.isEmpty {
+            Text("No Matches")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .padding(.horizontal, 8).padding(.vertical, 6)
+        }
+        ForEach(filterLines) { line in
+            switch line {
+            case .folder(_, let label):
+                Label(label, systemImage: "folder")
+                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 2)
+                    .accessibilityAddTraits(.isHeader)
+                    .id(line.id)
+            case .layout(let workspace, let target):
+                SpaceSidebarRow(title: workspace.name, shape: workspace.shape, on: workspace.showing) {
+                    frame.showWorkspace(workspace.name)
+                }
+                .overlay(dropRing(isHighlighted(target)))
+                .id(line.id)
+            case .card(let row, let indent, let target):
+                SpaceSidebarRow(row: row, indent: indent, picked: frame.picked.contains(row.id), glyphs: nil,
+                                close: { frame.close(row.id) },
+                                pause: { row.muted ? frame.setMuted(row.id, false) : frame.pause(row.id) }) {
+                    frame.click(row.id)
+                }
+                .overlay(dropRing(isHighlighted(target)))
+                .contextMenu { menu(for: row) }
+                .id(line.id)
+            }
+        }
+    }
+
+    /// The highlight is the keyboard's, so it's drawn only while the field has it.
+    private func isHighlighted(_ target: Int) -> Bool { filterFocused && target == filterHighlight }
+
+    private func moveHighlight(by step: Int) -> KeyPress.Result {
+        let count = filterTargets.count
+        guard count > 0 else { return .ignored }
+        filterHighlight = min(max(filterHighlight + step, 0), count - 1)
+        return .handled
+    }
+
+    /// Return: the highlighted result, and the sidebar back as it was. A click on a result keeps the
+    /// filter, for looking through several.
+    private func openHighlighted() {
+        let targets = filterTargets
+        guard targets.indices.contains(filterHighlight) else { return }
+        let open = targets[filterHighlight].open
+        clearFilter()
+        open()
+    }
+
+    private func clearFilter() {
+        frame.filterText = ""
+        filterHighlight = 0
+        filterFocused = false
     }
 
     private func askForTheKeyboard() {

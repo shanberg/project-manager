@@ -175,6 +175,7 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
   - A text card from before doc cards stays in the canvas until it's written in. Stepping out after writing makes it a doc card; ⌘Z takes it back to text and leaves the file.
   - Deleting a doc card offers to move its file to the Trash when no other card on the board shows it.
   - Board search matches what doc cards say.
+  - The sidebar's filter (⌥⌘F) matches the same, and is the way to find a card: the board is no longer a sidebar row, only Go ▸ Canvas (2026-11-28; [spaces.md](spaces.md) § Filtering the sidebar).
   - Text cards remain for view cards (`pmView`) and when `docs/` can't be written.
 - Lenses: Board, List, Grid (⌥⌘1–3), remembered per canvas on this Mac. Sorted by reading order, file, name or kind.
 - View cards: a text card with `pmView` — `day`, `waiting`, `search`, `leftovers`, `coming-up`, `projects`, `time` — plus `pmProjects`, `pmPeriod`, `pmQuery`, `pmLayout`. What a view shows is never written to the file. ([views.md](views.md))

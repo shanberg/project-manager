@@ -544,7 +544,17 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// Ticked only on the canvas tab itself. From a workspace or a frame it goes to the canvas, which is
     /// the one way out of a workspace the menus offer.
     @objc func toggleCanvasRenderer(_ sender: Any?) {
+        // A window with the sidebar frame (a space's, or a project's) has no Board row to click any
+        // more, so this is the way to its board: what that row did. Again, on the board, a project
+        // goes back to its notes as it always has; a space has nowhere else to go.
+        if let frame = split.spaceFrame, !frame.boardShowing { return frame.showBoard() }
+        if split.spaceFrame != nil, store.projectName == nil { return }
         setRenderer(split.tabs.selected.view.isCanvas ? .tasks : .canvas)
+    }
+
+    /// View ▸ Filter Sidebar, ⌥⌘F: the sidebar's filter field (docs/spaces.md § Filtering the sidebar).
+    @objc func filterSidebar(_ sender: Any?) {
+        split.spaceFrame?.askForFilter()
     }
 
     /// The project's colour and texture into every board in the window — on the first read, which is
@@ -854,8 +864,14 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(newTask(_:)), #selector(newSession(_:)), #selector(startNewSession(_:)):
             return store.projectName != nil
         case #selector(toggleCanvasRenderer(_:)):
+            if let frame = split.spaceFrame {
+                item.state = frame.boardShowing ? .on : .off
+                return true
+            }
             item.state = split.tabs.selected.view.isCanvas ? .on : .off
             return store.projectName != nil
+        case #selector(filterSidebar(_:)):
+            return split.spaceFrame != nil
         case #selector(newProjectTab(_:)):
             // A space has no project, and New Tab is its address field (docs/spaces.md).
             return store.projectName != nil || split.spaceFrame != nil

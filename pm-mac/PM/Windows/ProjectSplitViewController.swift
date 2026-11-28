@@ -502,6 +502,10 @@ final class ProjectSplitViewController: NSSplitViewController {
             frame.addressInPeek = sidebarItem.isCollapsed
             if sidebarItem.isCollapsed { showPeek(forAddress: true) }
         }
+        frame.presentFilter = { [weak self] in
+            guard let self, sidebarItem.isCollapsed else { return }
+            sidebarItem.isCollapsed = false
+        }
         frame.addressDone = { [weak self] in
             guard let self, peekForAddress else { return }
             peekForAddress = false
