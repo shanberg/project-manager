@@ -111,7 +111,7 @@ Also called a *sitting* in the app. ([sessions.md](sessions.md), [tile-sessions.
 
 ([project-review.md](project-review.md), [ProjectReview.swift](../pm-swift/Sources/PmLib/ProjectReview.swift))
 
-- A sitting named `Review` (or beginning with it), with something in it. The newest is when the project was last reviewed; nothing else is stored.
+- A sitting named `Review` (or beginning with it), with something in it, or one whose note has the closing `Reviewed: …` line (so a rename keeps it a review). The newest is when the project was last reviewed; nothing else is stored.
 - Review Project… starts one and walks: Since Last Time, The Brief, Older Tasks (Catch Up), Dates and Waits, Your Thoughts, Wrap Up. Empty steps are left out.
 - The thoughts become the sitting's note, followed by `Reviewed: <what it did>.` A review that did nothing removes its empty heading.
 - `ProjectHealth` reads why a project is creaky: stale trees, overdue, waits released, focus gone quiet, no sitting for three weeks, and (not a creak on its own) an empty brief.

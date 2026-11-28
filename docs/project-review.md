@@ -21,7 +21,8 @@ starts one named for its meeting. So:
 - what you write at the end is its note, followed by a line saying what the review did
   ("Reviewed: kept 3 · dropped 2 · brief updated.");
 - **last reviewed is read, not stored**: it is the newest sitting whose name is Review, or begins with it
-  ("Review: Q4"), and that has something in it (`ProjectReview.lastReviewIndex`).
+  ("Review: Q4"), and that has something in it (`ProjectReview.lastReviewIndex`). The closing
+  "Reviewed: …" line marks it too (`wasReview`), so a review sitting renamed afterwards still counts.
 
 A review closed without anything done deletes its empty heading again, so opening one by accident isn't
 a review. Keep stays Keep: a "still meant" writes the pick log's `kept`, not a pick, so the Review

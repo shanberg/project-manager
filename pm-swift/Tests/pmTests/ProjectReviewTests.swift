@@ -63,6 +63,17 @@ final class ProjectReviewTests: XCTestCase {
         XCTAssertNil(ProjectReview.lastReviewed(notes([sitting("Fri, Nov 27, 2026")]), calendar: calendar))
     }
 
+    /// A finished review writes a line saying so, which keeps it a review once its sitting is renamed.
+    func testARenamedReviewStillCounts() {
+        let renamed = sitting("Tue, Nov 10, 2026", "9:00 AM · Planning Q1", body: "Thoughts.\n\nReviewed: kept 3 · dropped 1.")
+        XCTAssertFalse(ProjectReview.isReview(renamed))
+        XCTAssertTrue(ProjectReview.wasReview(renamed))
+        XCTAssertTrue(ProjectReview.wasReview(sitting("Tue, Nov 10, 2026", "9:00 AM", body: "Reviewed.")))
+        XCTAssertFalse(ProjectReview.wasReview(sitting("Tue, Nov 10, 2026", "9:00 AM", body: "Reviewed the deck with Dana.")))
+        let n = notes([sitting("Fri, Nov 27, 2026"), renamed])
+        XCTAssertEqual(ProjectReview.lastReviewIndex(in: n), 1)
+    }
+
     /// Opened and left without a word: not a review.
     func testAnEmptyReviewSittingDoesntCount() {
         let n = notes([

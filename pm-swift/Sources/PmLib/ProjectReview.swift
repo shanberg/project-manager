@@ -34,6 +34,16 @@ public enum ProjectReview {
         return rest.isEmpty || !(rest.first?.isLetter ?? false)
     }
 
+    /// Whether `session` was a review: named as one (`isReview`), or carrying the line a finished review
+    /// writes at the end of its note ("Reviewed: kept 3 · dropped 2."), which is what keeps a review a
+    /// review after its sitting is renamed.
+    public static func wasReview(_ session: Session) -> Bool {
+        isReview(session) || session.body.components(separatedBy: "\n").contains { line in
+            let t = line.trimmingCharacters(in: .whitespaces)
+            return t == "Reviewed." || t.hasPrefix("Reviewed: ")
+        }
+    }
+
     /// The local day a sitting's heading names, or nil for a heading PM can't date.
     public static func day(of session: Session, calendar: Calendar = .current) -> Date? {
         guard let iso = sessionISODate(heading: session.date) else { return nil }
@@ -46,7 +56,7 @@ public enum ProjectReview {
     public static func lastReviewIndex(in notes: ProjectNotes, after current: Int? = nil) -> Int? {
         let start = current.map { $0 + 1 } ?? 0
         guard start < notes.sessions.count else { return nil }
-        return notes.sessions[start...].firstIndex { isReview($0) && !isEmpty($0) }
+        return notes.sessions[start...].firstIndex { wasReview($0) && !isEmpty($0) }
     }
 
     /// A heading with nothing under it: a review that was opened and left without a word written, which
@@ -66,11 +76,11 @@ public enum ProjectReview {
     public static func sittingsSince(_ notes: ProjectNotes, current: Int? = nil, now: Date = Date(),
                                      calendar: Calendar = .current) -> [Int] {
         if let last = lastReviewIndex(in: notes, after: current) {
-            return Array(0..<last).filter { !isReview(notes.sessions[$0]) }
+            return Array(0..<last).filter { !wasReview(notes.sessions[$0]) }
         }
         let since = calendar.startOfDay(for: now.addingTimeInterval(-taskStaleAfter))
         return notes.sessions.indices.filter { i in
-            !isReview(notes.sessions[i]) && (day(of: notes.sessions[i], calendar: calendar).map { $0 >= since } ?? false)
+            !wasReview(notes.sessions[i]) && (day(of: notes.sessions[i], calendar: calendar).map { $0 >= since } ?? false)
         }
     }
 }
