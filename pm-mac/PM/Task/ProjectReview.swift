@@ -87,6 +87,7 @@ final class ProjectReviewModel {
     private(set) var redated = 0
     private(set) var waitsCleared = 0
     private(set) var dropped = 0
+    private(set) var completed = 0
     private(set) var focusKept = false
 
     // Your thoughts.
@@ -225,6 +226,12 @@ final class ProjectReviewModel {
         dropped += 1
     }
 
+    /// Done: the task and its open subtasks ticked, one ⌘Z step.
+    func complete(_ todo: Todo) {
+        store.toggleAll(TaskTree.members(of: todo, in: store.todos).filter { $0.state == .open })
+        completed += 1
+    }
+
     func keepFocus(_ todo: Todo) {
         store.keep([todo])
         focusKept = true
@@ -247,6 +254,7 @@ final class ProjectReviewModel {
         add(c?.count(.kept) ?? 0, "kept")
         add(c?.count(.picked) ?? 0, "picked up")
         add(c?.count(.next) ?? 0, "made next")
+        add((c?.count(.done) ?? 0) + completed, "done")
         add((c?.count(.dropped) ?? 0) + dropped, "dropped")
         add(redated, "redated")
         add(waitsCleared, "waits cleared")
@@ -440,6 +448,7 @@ struct ProjectReviewView: View {
                                 Button("Tomorrow") { model.redate(todo, inDays: 1) }
                                 Button("Next Week") { model.redate(todo, inDays: 7) }
                                 Button("No Date") { model.redate(todo, inDays: nil) }
+                                Button("Done") { model.complete(todo) }
                                 Button("Drop") { model.drop(todo) }
                             }
                         }
@@ -452,6 +461,7 @@ struct ProjectReviewView: View {
                         ForEach(waits, id: \.reviewID) { todo in
                             row(todo, detail: todo.waiting.map { "\(ProjectCodes.display($0)) has been archived" }) {
                                 Button("Clear Wait") { model.clearWait(todo) }
+                                Button("Done") { model.complete(todo) }
                                 Button("Drop") { model.drop(todo) }
                             }
                         }
@@ -462,6 +472,7 @@ struct ProjectReviewView: View {
                         BriefLabel("Still your focus?")
                         row(focus, detail: "Untouched for three weeks or more") {
                             Button("Keep") { model.keepFocus(focus) }
+                            Button("Done") { model.complete(focus) }
                             Button("Drop") { model.drop(focus) }
                         }
                     }
@@ -477,8 +488,17 @@ struct ProjectReviewView: View {
     private func row<Actions: View>(_ todo: Todo, detail: String?, @ViewBuilder actions: () -> Actions) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(todo.text).font(FolioType.body).textSelection(.enabled)
+            if let path = model.store.breadcrumb(for: todo) {
+                Text("Under " + path).font(FolioType.meta).foregroundStyle(.secondary).lineLimit(2)
+            }
             if let detail { Text(detail).font(FolioType.meta).foregroundStyle(.secondary) }
             HStack(spacing: 6) { actions() }.controlSize(.small)
+            DisclosureGroup("In its session") {
+                SessionContextView(store: model.store, todo: todo,
+                                   highlighting: Set(TaskTree.members(of: todo, in: model.store.todos).map(\.lineIndex)),
+                                   showsPath: false, maxHeight: 180)
+            }
+            .font(FolioType.meta)
         }
     }
 
@@ -563,7 +583,7 @@ final class ProjectReviewWindowController: NSObject, NSWindowDelegate {
         let model = ProjectReviewModel(store: held)
         self.model = model
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered, defer: false)
         window.title = "Review"

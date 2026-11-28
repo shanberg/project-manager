@@ -58,8 +58,12 @@ are the words a queue row shows ("2 overdue", "12 stale tasks", "no session for 
    Pick Up becomes **Next** (N), which keeps the tree and focuses it without picking it up
    (`PMStore.keepAsNext`, `task.focus` with `pick: false`). The pick comes in the session it's worked in,
    so the Review session's Picked up holds only what the review worked on.
-4. **Dates and Waits.** Overdue tasks: Tomorrow, Next Week, No Date, Drop. Waits on something archived:
-   Clear Wait, Drop. A focus gone quiet: Keep, Drop.
+   **Done** (X) ticks the tree's open lines, which picks it up as ticking an old task always does. Each
+   tree is shown in its session (`SessionContextView`): the heading, the prose and tasks around it in
+   written order, the tree's lines picked out and scrolled to, and what it sits under.
+4. **Dates and Waits.** Overdue tasks: Tomorrow, Next Week, No Date, Done, Drop. Waits on something
+   archived: Clear Wait, Done, Drop. A focus gone quiet: Keep, Done, Drop. Each row says what it sits
+   under, and opens onto its session ("In its session").
 5. **Your Thoughts.** Free text for the sitting's note, an optional learning (added to Learnings) and an
    optional next task (added to the sitting).
 6. **Wrap Up.** What the review did. Finish, or Finish and Archive (Put Down, for an area), which moves
