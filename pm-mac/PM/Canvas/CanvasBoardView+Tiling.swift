@@ -26,13 +26,6 @@ extension CanvasBoardView {
     /// the one state where they differ: the workspace is up and the board is showing.
     var showsTiles: Bool { isTiled && !isPicking }
 
-    /// Whether one tile fills the room — a lone card, or one maximized. There is no other tile for
-    /// it to be told from, so it wears the quiet edge (`CanvasNodeView.isKey`).
-    var showsOneTile: Bool {
-        guard let tiling else { return false }
-        return tiling.maximized != nil || (tiling.columns.count == 1 && tiling.columns[0].tiles.count == 1)
-    }
-
     // MARK: Entering and leaving
 
     /// New Workspace. Make a workspace out of the selection — or, inside one, go back to the canvas.

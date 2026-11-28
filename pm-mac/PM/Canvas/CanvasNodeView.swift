@@ -393,11 +393,7 @@ class CanvasNodeView: NSView {
 
     /// Whether this is the tile the arrows and Return are about. Only ever asked at the tile end —
     /// see `chromeBorder`, and `CanvasPalette.tileBorderKey` for why the edge is what answers there.
-    ///
-    /// **Never a tile on its own** (2026-11-27). The key edge tells one tile from the others; with
-    /// none to tell it from, it only drew a lighter line down the tile's side — beside the frame's
-    /// sidebar, a seam between two grounds that are meant to be one.
-    private var isKey: Bool { (isEngaged || board.selection.contains(node.id)) && !board.showsOneTile }
+    private var isKey: Bool { isEngaged || board.selection.contains(node.id) }
 
     /// How far *this card* is across, which is not the same as how far the board is.
     ///
