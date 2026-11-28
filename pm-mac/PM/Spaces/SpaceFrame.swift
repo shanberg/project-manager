@@ -1823,7 +1823,10 @@ struct SpaceFrameSidebar: View {
         }
         .animation(Motion.animation(.easeOut(duration: 0.22)), value: placement)
         .animation(Motion.animation(.easeOut(duration: Motion.Tempo.standard)), value: frame.player?.id)
-        .padding(.horizontal, 10)
+        // Docked, less on the trailing side (2026-11-27): the tiles' 6pt gutter is the rest of the gap,
+        // so the rows sit as far from the tiles as from the window's edge. The floating one is even.
+        .padding(.leading, 10)
+        .padding(.trailing, inPeek ? 10 : 4)
         .padding(.top, 42)
         .padding(.bottom, 10)
         .frame(maxHeight: .infinity, alignment: .top)
