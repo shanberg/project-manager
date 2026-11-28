@@ -21,7 +21,7 @@ public let reviewSessionName = "Review"
 
 /// How long a project can go between sittings before it counts as gone quiet, for a review: as long as a
 /// task takes to go stale, so the two kinds of neglect are measured in the same weeks.
-public let projectQuietAfter: TimeInterval = taskStaleAfter
+public let reviewQuietAfter: TimeInterval = taskStaleAfter
 
 public enum ProjectReview {
     /// Whether `session` is a review: its name is "Review", or begins with it ("Review · Q4"), in any case.
@@ -141,7 +141,7 @@ public struct ProjectHealth: Equatable, Sendable {
 
     /// Whether the project has gone quiet: no sitting for three weeks.
     public var hasGoneQuiet: Bool {
-        (daysSinceLastSitting ?? 0) >= Int(projectQuietAfter / 86_400)
+        (daysSinceLastSitting ?? 0) >= Int(reviewQuietAfter / 86_400)
     }
 
     /// Whether a review has anything to put right. An empty brief on its own doesn't count: plenty of

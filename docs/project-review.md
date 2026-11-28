@@ -38,7 +38,7 @@ carries:
 | Overdue | open tasks whose own `due:` has passed (an inherited date isn't counted again) |
 | Waits released | open tasks whose own `waiting:` names something archived |
 | Focus gone quiet | the focused task untouched for three weeks |
-| Gone quiet | no sitting for three weeks (`projectQuietAfter`) |
+| Gone quiet | no sitting for three weeks (`reviewQuietAfter`) |
 | Empty brief | Summary, Problem, Goals, Approach left blank (an area: Summary and Goals) |
 
 `isCreaky` is any of the first five. An empty brief is reported for the brief step but isn't a creak on
