@@ -207,6 +207,11 @@ struct CanvasProjectsCard: View {
             Button { StaleReviewWindowController.shared.show(projectFolder: project.folder) } label: {
                 Label("Catch Up on \(project.name)…", systemImage: "checklist")
             }
+            // The longer sitting: the brief, dates and waits, and what you think now
+            // (docs/project-review.md).
+            Button { ProjectReviewWindowController.shared.show(projectFolder: project.folder) } label: {
+                Label("Review \(project.name)…", systemImage: "checklist.checked")
+            }
             Button { TaskPasteboard.copy(markdown: "[[\(project.folder)]]") } label: {
                 Label("Copy Link", systemImage: "link")
             }

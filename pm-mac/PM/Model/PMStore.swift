@@ -1279,8 +1279,9 @@ final class PMStore {
     /// Persist an edit to the project's detail fields (summary, problem, goals, approach, learnings).
     /// The transform runs against freshly-parsed notes on the IO queue, so tasks/sessions are read
     /// from disk and preserved. Reloads afterward like every other mutation.
-    func saveDetails(_ transform: @escaping (ProjectNotes) -> ProjectNotes) {
-        mutate { try editDetails(project: $0, transform) }
+    func saveDetails(_ transform: @escaping (ProjectNotes) -> ProjectNotes,
+                     then: (@MainActor () -> Void)? = nil) {
+        mutate(then: then) { try editDetails(project: $0, transform) }
     }
 
     /// Add a task. `then` runs once the document has been re-read, so a caller that needs to find the

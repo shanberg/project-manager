@@ -103,13 +103,18 @@ final class StaleReviewModel {
 
 struct StaleReviewView: View {
     @State var model: StaleReviewModel
+    /// Shown as one step of a project review (`ProjectReviewView`): no header of its own, and the review
+    /// goes on when it's done rather than closing.
+    var embedded = false
     var onClose: () -> Void
     @State private var confirmsDropTheRest = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
+            if !embedded {
+                header
+                Divider()
+            }
             Group {
                 if let item = model.current {
                     question(item)
@@ -121,7 +126,7 @@ struct StaleReviewView: View {
             Divider()
             footer
         }
-        .frame(minWidth: 420, minHeight: 320)
+        .frame(minWidth: 420, minHeight: embedded ? 0 : 320)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -196,7 +201,7 @@ struct StaleReviewView: View {
         HStack(spacing: 8) {
             if model.isFinished {
                 Spacer()
-                Button("Done", action: onClose).keyboardShortcut(.defaultAction)
+                Button(embedded ? "Continue" : "Done", action: onClose).keyboardShortcut(.defaultAction)
             } else {
                 Button("Back") { model.back() }
                     .disabled(model.position == 0)

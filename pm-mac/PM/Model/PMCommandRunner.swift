@@ -75,6 +75,8 @@ enum PMCommandRunner {
         case .showEvents:
             guard let name = store.projectName else { return }
             ProjectEventsSheet.present(projectNamed: name)
+        case .reviewProject:
+            ProjectReviewWindowController.shared.show(for: store)
         case .archiveProject, .unarchiveProject:
             guard let name = store.projectName else { return }
             do {
