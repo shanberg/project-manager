@@ -68,6 +68,11 @@ public struct SittingEntry: Codable, Equatable {
     /// zero when there's nothing on record: a sitting PM wasn't watching has no duration, which is a
     /// different thing from one that took no time.
     public var seconds: Double? = nil
+    /// When it last showed signs of life, ISO 8601 in UTC: the latest of the end of the last attention
+    /// span it owns and the last task finished, dropped or picked up in it. Derived on every read and
+    /// never stored, like its duration (docs/sessions-and-time.md C2). Nil when nothing in it carries a
+    /// time; a view then draws the start alone.
+    public var endedAt: String? = nil
     /// True when it stands for an away that was counted as a sitting (docs/away-time.md): a standing
     /// `counted` answer for this project began in the minute its heading names. Nil otherwise, so a
     /// sitting written before this decodes as it always did.
@@ -199,6 +204,14 @@ func sittings(projectFolder: String, isArchived: Bool = false, notes: ProjectNot
             }
         }
 
+        let finished = closed(.completed)
+        let dropped = closed(.dropped)
+        // The last moment something happened in it, as far as the notes and their logs know. Spans,
+        // when a read asks for them, can only move this later (`withDurations`).
+        let ended = (finished + dropped + picked).compactMap { $0.at.flatMap(DoneLog.date) }
+            .filter { moment in sitting.start.map { moment >= $0 } ?? true }
+            .max()
+
         let isCurrent = sitting.index == 0
             && notesModified.map { now.timeIntervalSince($0) <= sessionIdleWindow } == true
         out.append(SittingEntry(
@@ -207,7 +220,8 @@ func sittings(projectFolder: String, isArchived: Bool = false, notes: ProjectNot
             startTime: session.startTime, startedAt: sitting.start.map(DoneLog.timestamp),
             name: session.name, prose: sittingProse(session.body),
             written: written, picked: picked,
-            finished: closed(.completed), dropped: closed(.dropped), isCurrent: isCurrent))
+            finished: finished, dropped: dropped, isCurrent: isCurrent))
+        out[out.count - 1].endedAt = ended.map(DoneLog.timestamp)
     }
     return SittingList(sittings: out, elsewhere: elsewhere)
 }

@@ -105,6 +105,11 @@ Where a card *sits*, how big it is and what is tiled stay the app's — they are
 - A `docs` that can't be written gets a text card, as before.
 - `journal.undo` restores the canvas and leaves the document.
 
+`session.list` (1.26.0) — a session's end, see [sessions-and-time.md](sessions-and-time.md):
+
+- Each sitting gains `endedAt`, ISO 8601 in UTC: its last sign of life. The latest task finished, dropped or picked up in it; with `time: true`, also the end of the last attention span it owns, whichever is later.
+- Absent when nothing in it carries a time. Derived on read; nothing new is stored.
+
 `task.keep` (1.25.0) — stale tasks, see [stale-tasks.md](stale-tasks.md):
 
 - Takes `task` or `tasks`. Records a `kept` of each task's tree in the pick log (`.pm-picked.ndjson`). The notes aren't written and no sitting is started.

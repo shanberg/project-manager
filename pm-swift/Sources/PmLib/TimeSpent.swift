@@ -344,12 +344,20 @@ public func withDurations(_ list: SittingList, spans: [AttentionSpan]) -> Sittin
     for key in starts.keys { starts[key]?.sort { $0.at > $1.at } }
 
     var seconds: [Int: Double] = [:]
+    var lastEnd: [Int: Date] = [:]
     for span in spans {
         guard let start = span.startDate,
               // Newest first, so the first that had begun by then is the latest that had.
               let home = starts[span.project]?.first(where: { $0.at <= start }) else { continue }
         seconds[home.index, default: 0] += span.seconds
+        if let end = span.endDate { lastEnd[home.index] = max(lastEnd[home.index] ?? end, end) }
     }
     for (index, total) in seconds { out.sittings[index].seconds = total }
+    // A sitting ends at its last sign of life: the later of its last span and the last thing that
+    // happened in it (docs/sessions-and-time.md C2).
+    for (index, end) in lastEnd {
+        let written = out.sittings[index].endedAt.flatMap(DoneLog.date)
+        out.sittings[index].endedAt = DoneLog.timestamp(max(written ?? end, end))
+    }
     return out
 }

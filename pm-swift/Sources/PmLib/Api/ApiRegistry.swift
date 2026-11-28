@@ -72,7 +72,7 @@ private let revision = ApiField("revision", .string,
 
 /// The contract version. Clients assert a minimum against this and say "update pm" in one place,
 /// rather than each discovering an older binary by having a call fail oddly.
-public let apiContractVersion = "1.25.0"
+public let apiContractVersion = "1.26.0"
 
 private let project = ApiField("project", .string, required: true,
                                "Project name or unambiguous prefix.")
@@ -346,14 +346,14 @@ public enum ApiRegistry {
                                ApiField("projects", .stringList,
                                         "Only aways that interrupted these projects, by name, prefix or [[link]]. A master brings its members. Default every project.")]),
         ApiActionSpec(name: "session.list", tier: .query,
-                      summary: "The sittings in a period, across projects, in the order the day went: each with its prose, the tasks written and picked up in it, and what was finished or dropped while it was going on. Completions that fell in no sitting are listed apart, as elsewhere.",
+                      summary: "The sittings in a period, across projects, in the order the day went: each with its prose, the tasks written and picked up in it, what was finished or dropped while it was going on, and when it ended (endedAt, its last sign of life). Completions that fell in no sitting are listed apart, as elsewhere.",
                       fields: [ApiField("period", .string, "Which span. Default today.",
                                         allowed: ["today", "yesterday", "week"]),
                                ApiField("since", .string, "First day to include, YYYY-MM-DD. Overrides the period's start."),
                                ApiField("until", .string, "Last day to include, YYYY-MM-DD. Overrides the period's end."),
                                ApiField("projects", .stringList,
                                         "Only these projects, by name, prefix or [[link]]. A master brings its members. Default every project."),
-                               ApiField("time", .boolean, "Also say how long each sitting ran, from the attention log. Default false.")]),
+                               ApiField("time", .boolean, "Also say how long each sitting ran, from the attention log, and let its attention move endedAt later. Default false.")]),
         ApiActionSpec(name: "task.due", tier: .query,
                       summary: "Open tasks due by a date, across projects, soonest first and overdue first of all. A line is listed when it says a date itself, not when it inherits one.",
                       fields: [ApiField("until", .string,
