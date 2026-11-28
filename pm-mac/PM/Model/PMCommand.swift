@@ -44,6 +44,8 @@ enum PMCommand: String, CaseIterable, Identifiable {
     case addLink
     case projectSettings
     case showEvents
+    /// A sitting to gather your thoughts and clean the project up. docs/project-review.md.
+    case reviewProject
     case archiveProject
     case unarchiveProject
     /// Leave no project focused: timing stops, and capture asks where a line goes. docs/spaces.md.
@@ -94,6 +96,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .addLink: return "Add Link…"
         case .projectSettings: return "Project Settings…"
         case .showEvents: return "Show Events From…"
+        case .reviewProject: return "Review Project…"
         case .archiveProject: return "Archive Project"
         case .unarchiveProject: return "Unarchive Project"
         case .unfocus: return "Unfocus Project"
@@ -143,6 +146,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .addLink: return "link"
         case .projectSettings: return "slider.horizontal.3"
         case .showEvents: return "calendar"
+        case .reviewProject: return "checklist.checked"
         case .archiveProject: return "archivebox"
         case .unarchiveProject: return "arrow.up.bin"
         case .unfocus: return "circle.slash"
@@ -170,7 +174,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
              .editTask, .setDue, .wrapTask:
             return .task
         case .openInFinder, .openInObsidian, .openInEditor,
-             .editDetails, .addLink, .projectSettings, .showEvents, .archiveProject, .unarchiveProject,
+             .editDetails, .addLink, .projectSettings, .showEvents, .reviewProject, .archiveProject, .unarchiveProject,
              .unfocus:
             return .project
         // Placed by hand or not in the bar: Open Project Window is Go's, the session is File ▸ New
@@ -221,7 +225,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .narrowFocus, .addAfter, .addBefore, .editTask, .setDue, .wrapTask:
             return .add
         case .openInFinder, .openInObsidian, .openInEditor, .openWindow, .projectSettings, .showEvents,
-             .sessionNote, .startSession, .addLink, .editDetails, .archiveProject, .unarchiveProject:
+             .sessionNote, .startSession, .addLink, .editDetails, .reviewProject, .archiveProject, .unarchiveProject:
             return .project
         // Complete, Undo Last and Dive In sit inline at the top of the dropdown rather than in a
         // submenu — they're the reason the menu gets opened. The menu builds those itself. Drop isn't
@@ -322,6 +326,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
         case .addLink: return ["url", "bookmark"]
         case .projectSettings: return ["rename", "title", "icon", "emoji", "symbol", "info"]
         case .showEvents: return ["calendar", "events", "meetings", "schedule"]
+        case .reviewProject: return ["review", "tidy", "clean up", "catch up", "weekly", "gather", "reflect"]
         case .archiveProject: return ["archive", "shelve", "done"]
         case .unarchiveProject: return ["unarchive", "restore", "reopen"]
         case .unfocus: return ["unfocus", "clear", "stop", "none", "nothing", "break", "off"]
@@ -463,7 +468,7 @@ enum PMCommand: String, CaseIterable, Identifiable {
             return context.hasPath
         case .openInEditor:
             return context.hasPath && context.isCodeProject && context.editorName != nil
-        case .archiveProject:
+        case .archiveProject, .reviewProject:
             return context.hasProject && !context.isArchived
         case .unarchiveProject:
             return context.hasProject && context.isArchived

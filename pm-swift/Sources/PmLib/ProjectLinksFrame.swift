@@ -322,8 +322,12 @@ public enum ProjectLinksFrame {
     }
 
     private static func setMirror(_ list: [LinkEntry], on home: String, in document: inout CanvasDocument) {
+        // Sorted keys: an encoder's key order isn't fixed between runs, and a mirror that spells the same
+        // list differently each time reads as a change, so a second sync wrote the canvas again.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
         guard let index = document.nodes.firstIndex(where: { $0.id == home }),
-              let data = try? JSONEncoder().encode(list),
+              let data = try? encoder.encode(list),
               let text = String(data: data, encoding: .utf8) else { return }
         if document.nodes[index].extra[mirrorKey]?.stringValue != text {
             document.nodes[index].extra[mirrorKey] = .string(text)

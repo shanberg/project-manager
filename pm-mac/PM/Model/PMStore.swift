@@ -869,6 +869,21 @@ final class PMStore {
         }
     }
 
+    /// Next, in a review: say the task's tree is still meant (Keep) and make it the focused task, without
+    /// picking it up. The pick comes later, in the session it's worked in, so the Review session's
+    /// Picked up holds only what the review itself worked on (docs/project-review.md). Two writes: the
+    /// keep is a ⌘Z step, the focus is navigation, as any focus without a pick is.
+    func keepAsNext(_ todo: Todo, then: (@MainActor () -> Void)? = nil) {
+        keep([todo]) { [weak self] in
+            guard let self, let live = todos.first(where: {
+                $0.sessionIndex == todo.sessionIndex && $0.lineIndex == todo.lineIndex && $0.digest == todo.digest
+            }) else { then?(); return }
+            mutating(recordsUndo: false, then: then) { project in
+                try PMContract.perform(.taskFocus, PMContract.input(project: project, task: live) { $0.pick = false }).sidecar ?? []
+            }
+        }
+    }
+
     /// Pick Up: take older tasks up into the current sitting without moving their lines. One step.
     func pickUp(_ todos: [Todo], then: (@MainActor () -> Void)? = nil) {
         guard !todos.isEmpty else { then?(); return }
@@ -1279,8 +1294,9 @@ final class PMStore {
     /// Persist an edit to the project's detail fields (summary, problem, goals, approach, learnings).
     /// The transform runs against freshly-parsed notes on the IO queue, so tasks/sessions are read
     /// from disk and preserved. Reloads afterward like every other mutation.
-    func saveDetails(_ transform: @escaping (ProjectNotes) -> ProjectNotes) {
-        mutate { try editDetails(project: $0, transform) }
+    func saveDetails(_ transform: @escaping (ProjectNotes) -> ProjectNotes,
+                     then: (@MainActor () -> Void)? = nil) {
+        mutate(then: then) { try editDetails(project: $0, transform) }
     }
 
     /// Add a task. `then` runs once the document has been re-read, so a caller that needs to find the

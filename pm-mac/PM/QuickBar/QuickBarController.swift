@@ -1021,7 +1021,7 @@ final class QuickBarController: NSObject, NSWindowDelegate {
     private func staysInPM(_ command: QuickBarCommand, argument: String) -> Bool {
         switch command {
         case .openWindow, .settings, .newProject, .newSpace, .showOverview, .projectSettings, .showEvents, .addLink, .editDetails,
-             .takeMeetingNotes: return true
+             .takeMeetingNotes, .reviewProject: return true
         // Given text it just writes the note; given none it opens the place that edits it.
         case .sessionNote: return argument.isEmpty
         default: return false
@@ -1220,6 +1220,9 @@ final class QuickBarController: NSObject, NSWindowDelegate {
             ProjectEventsSheet.present(projectNamed: name)
         case .takeMeetingNotes:
             MeetingNotes.takeCurrent()
+        case .reviewProject:
+            guard let store else { break }
+            ProjectReviewWindowController.shared.show(for: store)
         case .archiveProject, .unarchiveProject:
             // Synchronous, and it either threw or it didn't — so this is the one receipt that doesn't
             // wait on a store re-read to know whether it has something true to say.
